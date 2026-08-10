@@ -85,6 +85,13 @@ and the resulting `haproxy.cfg`, before anything is written.
   never swallowed by the host-only rule for the same name.
 - **Publishing the same URL again edits it** — repointing a service replaces its
   target rather than quietly adding a second server behind it.
+- **Editing changes a service, it never clones it.** Edit follows the service's
+  own objects, so changing its URL, health check, balancing or targets updates
+  the rule, pool, monitor and certificate it already has instead of leaving them
+  behind beside a new set. New objects appear only where there was none before,
+  and settings an edit does not mention are left alone. Objects shared with
+  something else — a monitor another pool uses, an already-issued certificate —
+  are never altered underneath it.
 - **Overview** is the landing page and lists every configured service alongside
   node health, certificates and the generated configuration. **Services** shows
   the same table on its own. Delete removes the objects that mapping alone was

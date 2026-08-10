@@ -3144,6 +3144,22 @@ def wizard_publish(cfg, pub, tgts, name=None, want_cert=True, account=None,
     def act(action, kind, nm):
         acts.append({"action": action, "type": kind, "name": nm})
 
+    # What this service already consists of, when one is being edited. Editing
+    # must change these objects, never leave them behind and build a second set.
+    existing_rule = existing_fe = None
+    if service_id:
+        if service_id.startswith("fe:"):
+            existing_fe = _by_id(hp["frontends"]).get(service_id[3:])
+        else:
+            existing_rule = _by_id(hp["rules"]).get(service_id)
+    existing_pool = _by_id(hp["backends"]).get(
+        (existing_rule or existing_fe or {}).get("backend")
+        or (existing_fe or {}).get("default_backend") or "")
+    existing_monitor = _by_id(hp["healthchecks"]).get((existing_pool or {}).get("healthcheck") or "")
+    old_hosts = [c.get("value") for c in
+                 (_by_id(hp["conditions"]).get(cid) for cid in (existing_rule or {}).get("conditions") or [])
+                 if c and c.get("type") == "host_matches" and c.get("value")]
+
     is_tcp = pub["scheme"] == "tcp"
     if name and name.strip():
         base = name.strip()
@@ -3189,8 +3205,15 @@ def wizard_publish(cfg, pub, tgts, name=None, want_cert=True, account=None,
 
     # -- Health Monitor ---------------------------------------------------
     monitor = None
-    htype = (health or {}).get("type") or "none"
-    if htype != "none":
+    if health is None and existing_monitor is not None:
+        # An edit that says nothing about health checking leaves it alone,
+        # rather than reading silence as "switch it off".
+        monitor = existing_monitor
+        htype = existing_monitor.get("type") or "none"
+        act("reused", "Health Monitor", monitor["name"])
+    else:
+        htype = (health or {}).get("type") or "none"
+    if monitor is None and htype != "none":
         want = {"type": htype,
                 "interval": (health.get("interval") or "2s"),
                 "http_method": "GET",
@@ -3198,11 +3221,24 @@ def wizard_publish(cfg, pub, tgts, name=None, want_cert=True, account=None,
                 "expect_status": str(health.get("status") or "") if htype == "http" else "",
                 "db_user": health.get("user") or ("postgres" if htype == "pgsql" else "haproxy"),
                 "mysql_post41": bool(health.get("post41", True))}
-        monitor = _find(hp["healthchecks"], lambda m: all(
-            str(m.get(k, "")) == str(v) for k, v in want.items() if k != "mysql_post41"))
-        if monitor:
+        # The monitor this service already has is the one to change -- unless
+        # another pool shares it, in which case editing here must not alter
+        # that one too.
+        shared = existing_monitor is not None and any(
+            b.get("healthcheck") == existing_monitor["id"] and b is not existing_pool
+            for b in hp["backends"])
+        monitor = None
+        if existing_monitor is not None and not shared:
+            changed = any(str(existing_monitor.get(k, "")) != str(v) for k, v in want.items())
+            existing_monitor.update(want)
+            monitor = existing_monitor
+            act("updated" if changed else "reused", "Health Monitor", monitor["name"])
+        if monitor is None:
+            monitor = _find(hp["healthchecks"], lambda m: all(
+                str(m.get(k, "")) == str(v) for k, v in want.items() if k != "mysql_post41"))
+        if monitor and monitor is not existing_monitor:
             act("reused", "Health Monitor", monitor["name"])
-        else:
+        if monitor is None:
             monitor = dict(want)
             monitor["id"] = str(uuid.uuid4())
             monitor["name"] = _uniq_name({m["name"] for m in hp["healthchecks"]}, base + "-check")
@@ -3213,8 +3249,23 @@ def wizard_publish(cfg, pub, tgts, name=None, want_cert=True, account=None,
                          "protocol. Point it at the database itself, not at a web server, or every "
                          "server will be marked down." % ("PostgreSQL" if htype == "pgsql" else "MySQL/MariaDB"))
 
+    # A monitor this service alone was using, now switched off
+    if htype == "none" and existing_monitor is not None:
+        if not any(b.get("healthcheck") == existing_monitor["id"] and b is not existing_pool
+                   for b in hp["backends"]):
+            hp["healthchecks"] = [m for m in hp["healthchecks"] if m["id"] != existing_monitor["id"]]
+            acts.append({"action": "removed", "type": "Health Monitor",
+                         "name": existing_monitor.get("name")})
+
     # -- Backend Pool -----------------------------------------------------
-    pool = _find(hp["backends"], lambda b: b.get("name") == _sec(base))
+    # The pool this service already uses, whatever it is called: matching by
+    # name alone would strand it as soon as the name changed.
+    pool = existing_pool or _find(hp["backends"], lambda b: b.get("name") == _sec(base))
+    if pool is not None and pool is existing_pool and pool.get("name") != _sec(base) and name:
+        renamed = _uniq_name({b["name"] for b in hp["backends"] if b is not pool}, base)
+        acts.append({"action": "renamed", "type": "Backend Pool",
+                     "name": "%s -> %s" % (pool["name"], renamed)})
+        pool["name"] = renamed
     if pool:
         previous = list(pool.get("servers") or [])
         pool["servers"] = srv_ids
@@ -3345,12 +3396,34 @@ def wizard_publish(cfg, pub, tgts, name=None, want_cert=True, account=None,
             accounts, challenges = ac["accounts"], ac["challenges"]
             acc_id = account or (accounts[0]["id"] if len(accounts) == 1 else "")
             ch_id = challenge or (challenges[0]["id"] if len(challenges) == 1 else "")
-            cert = {"id": str(uuid.uuid4()),
-                    "name": _uniq_name({c["name"] for c in ac["certificates"]}, base),
-                    "domains": pub["host"], "account": acc_id, "challenge": ch_id,
-                    "key_type": "ec-256", "auto_renew": True, "automations": []}
-            ac["certificates"].append(cert)
-            act("created", "Certificate", cert["name"])
+            stale = None
+            for old in old_hosts:
+                if old.lower() == pub["host"].lower():
+                    continue
+                candidate = _find(ac["certificates"], lambda c: parse_domains(c) == [old])
+                if candidate and cert_details(cert_path(candidate))["status"] in ("missing", "placeholder"):
+                    stale = candidate
+                    break
+            if stale is not None:
+                # never issued, and for a name this service has stopped using
+                stale["domains"] = pub["host"]
+                if acc_id:
+                    stale["account"] = stale.get("account") or acc_id
+                if ch_id:
+                    stale["challenge"] = stale.get("challenge") or ch_id
+                cert = stale
+                act("updated", "Certificate", "%s -> %s" % (cert["name"], pub["host"]))
+            else:
+                cert = {"id": str(uuid.uuid4()),
+                        "name": _uniq_name({c["name"] for c in ac["certificates"]}, base),
+                        "domains": pub["host"], "account": acc_id, "challenge": ch_id,
+                        "key_type": "ec-256", "auto_renew": True, "automations": []}
+                ac["certificates"].append(cert)
+                act("created", "Certificate", cert["name"])
+                if old_hosts and old_hosts[0].lower() != pub["host"].lower():
+                    warns.append("The certificate for %s was kept: it has been issued, so it is not "
+                                 "repointed automatically. Remove it under Certificates if it is no "
+                                 "longer wanted." % old_hosts[0])
             if not acc_id or not ch_id:
                 warns.append("The certificate has no %s yet, so it cannot be issued. Apply installs a "
                              "self-signed placeholder meanwhile; add one under ACME and press Issue."
