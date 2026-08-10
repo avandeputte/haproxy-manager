@@ -682,7 +682,12 @@ def collection(sec, col):
             abort(404)
         if request.method == "GET":
             return jsonify(cfg[sec]["settings"])
-        cfg[sec]["settings"].update(request.get_json(force=True) or {})
+        proposed = request.get_json(force=True) or {}
+        ok, message = check_rendered(draft_with(sec, proposed))
+        if not ok:
+            return jsonify({"error": "These settings were not saved -- they do not produce a "
+                                     "working configuration.\n\n" + message}), 400
+        cfg[sec]["settings"].update(proposed)
         save_config(cfg)
         return jsonify(cfg[sec]["settings"])
     if sec not in VALID_COLLECTIONS or col not in VALID_COLLECTIONS[sec]:
@@ -1225,6 +1230,72 @@ def api_keepalived_status():
         "validation": validation,
         "log": log,
     })
+
+
+def check_rendered(cfg):
+    """Run haproxy -c and keepalived -t over what this configuration renders to.
+
+    Returns (ok, message). Used before saving settings, so a directive that
+    cannot work is refused at the point it is typed rather than being stored
+    and then blocking every Apply.
+    """
+    problems = []
+    fd, staging = tempfile.mkstemp(suffix=".cfg")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(render_haproxy(cfg))
+        rc, out = run(["haproxy", "-c", "-f", staging], timeout=30)
+        if rc not in (0, 127):
+            problems.append("HAProxy rejected it:\n" + out.strip())
+    except Exception as e:
+        problems.append("could not render haproxy.cfg: %s" % e)
+    finally:
+        if os.path.exists(staging):
+            os.unlink(staging)
+
+    if keepalived_wanted(cfg):
+        fd, kstaging = tempfile.mkstemp(suffix=".conf")
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(render_keepalived(cfg))
+            rc, out = run(["keepalived", "-t", "-f", kstaging], timeout=30)
+            if rc not in (0, 127):
+                problems.append("Keepalived rejected it:\n" + out.strip())
+        except Exception as e:
+            problems.append("could not render keepalived.conf: %s" % e)
+        finally:
+            if os.path.exists(kstaging):
+                os.unlink(kstaging)
+
+    if problems:
+        return False, "\n\n".join(problems)
+    return True, "haproxy -c accepts it" + (" and keepalived -t accepts it" if keepalived_wanted(cfg) else "")
+
+
+def draft_with(section, settings, cluster=False):
+    """This configuration as it would be with those settings in place."""
+    draft = copy.deepcopy(load_config())
+    if cluster:
+        draft["cluster"].update({k: v for k, v in settings.items() if k in CLUSTER_KEYS})
+    else:
+        draft[section]["settings"].update(settings)
+    return draft
+
+
+@app.post("/api/validate")
+def api_validate():
+    """Check settings without saving them."""
+    body = request.get_json(force=True, silent=True) or {}
+    section = body.get("section") or "haproxy"
+    settings = body.get("settings") or {}
+    if section == "cluster":
+        draft = draft_with(None, settings, cluster=True)
+    elif section in ("haproxy", "acme"):
+        draft = draft_with(section, settings)
+    else:
+        return jsonify({"ok": False, "error": "unknown section"}), 400
+    ok, message = check_rendered(draft)
+    return jsonify({"ok": ok, "message": message})
 
 
 def do_apply(cfg=None, allow_push=True):
@@ -2026,6 +2097,10 @@ def api_cluster_settings():
     if request.method == "GET":
         return jsonify(cfg["cluster"])
     body = request.get_json(force=True) or {}
+    ok, message = check_rendered(draft_with(None, body, cluster=True))
+    if not ok:
+        return jsonify({"error": "These settings were not saved -- they do not produce a working "
+                                 "configuration.\n\n" + message}), 400
     cfg["cluster"].update({k: v for k, v in body.items() if k in CLUSTER_KEYS})
     save_config(cfg)
     return jsonify(cfg["cluster"])

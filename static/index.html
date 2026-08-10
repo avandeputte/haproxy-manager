@@ -651,10 +651,25 @@ async function renderSettings(key){
     try{
       await api(def.ep,"PUT",def.sub?{[def.sub]:data}:data);
       msg.textContent="Saved.";refreshStatus();
-    }catch(e){msg.textContent=e.message;}
+    }catch(e){
+      msg.innerHTML='<span class="pill down">not saved</span>';
+      showText("Not saved",e.message);
+    }
   });
   if(readOnly&&shared){save.disabled=true;msg.textContent="Read-only on a passive node.";}
   foot.appendChild(save);
+  if(shared){
+    foot.appendChild(document.createTextNode(" "));
+    foot.appendChild(btn("Validate","",async()=>{
+      msg.textContent="Checking...";
+      try{
+        const r=await api("validate","POST",{section:def.ep.split("/")[0],settings:readForm(def.fields)});
+        msg.innerHTML=r.ok?'<span class="pill up">valid</span> '+esc(r.message)
+                          :'<span class="pill down">not valid</span>';
+        if(!r.ok)showText("These settings would not work",r.message);
+      }catch(e){msg.textContent=e.message;}
+    }));
+  }
   foot.appendChild(msg);
   bd.appendChild(foot);card.appendChild(bd);c.appendChild(card);
   if(def.extra)c.appendChild(def.extra());
@@ -1120,6 +1135,16 @@ async function renderCluster(){
   });
   if(readOnly){saveShared.disabled=true;m1.textContent="Read-only on a passive node -- change these on the active node and push.";}
   ft1.appendChild(saveShared);
+  ft1.appendChild(document.createTextNode(" "));
+  ft1.appendChild(btn("Validate","",async()=>{
+    m1.textContent="Checking...";
+    try{
+      const r=await api("validate","POST",{section:"cluster",settings:readForm(CLUSTER_SHARED)});
+      m1.innerHTML=r.ok?'<span class="pill up">valid</span> '+esc(r.message)
+                       :'<span class="pill down">not valid</span>';
+      if(!r.ok)showText("These settings would not work",r.message);
+    }catch(e){m1.textContent=e.message;}
+  }));
   ft1.appendChild(m1);b1.appendChild(ft1);s1.appendChild(b1);c.appendChild(s1);
 
   /* --- what is particular to this node --- */
@@ -1982,16 +2007,6 @@ async function renderOverview(){
   }
   cc.appendChild(cb);c.appendChild(cc);
 
-  const pv=document.createElement("div");pv.className="card";
-  pv.innerHTML='<div class=hd><h2>Generated configuration</h2><div class=sp></div></div>';
-  const hd=pv.querySelector(".hd");
-  hd.appendChild(btn("Preview haproxy.cfg","sm",async()=>{const p=await api("preview");showText("haproxy.cfg (preview)",p.haproxy);}));
-  hd.appendChild(document.createTextNode(" "));
-  hd.appendChild(btn("Preview keepalived.conf","sm",async()=>{const p=await api("preview");showText("keepalived.conf (preview)",p.keepalived);}));
-  const pb=document.createElement("div");pb.className="bd";
-  pb.innerHTML='<p class=hint>Apply validates the rendered haproxy.cfg (haproxy -c) before writing anything, then reloads HAProxy'+
-    ' and Keepalived. The previous files are kept as .bak.</p>';
-  pv.appendChild(pb);c.appendChild(pv);
 }
 
 /* ============================ shell ============================ */

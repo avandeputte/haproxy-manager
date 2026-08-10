@@ -158,6 +158,12 @@ renewal happens on its own.)
 - **Apply** renders `haproxy.cfg`, validates it with `haproxy -c` *before* writing
   anything, then writes the file (keeping a `.bak`) and reloads HAProxy. If
   Keepalived is enabled it renders and reloads `keepalived.conf` too.
+- **Settings are checked before they are stored.** The settings pages have a
+  **Validate** button that renders the configuration those values would produce
+  and runs `haproxy -c` (and `keepalived -t` where it applies) without saving
+  anything, and Save refuses outright if the result would not work — so a
+  mistyped directive cannot be stored and then block every Apply until someone
+  finds it. The full checker output is shown either way.
 - **Only the node holding the virtual IP issues and renews.** HTTP-01 validation
   arrives at that address, so a passive node could not answer it, and with
   DNS-01 the nodes would race each other for the same certificate and burn the
