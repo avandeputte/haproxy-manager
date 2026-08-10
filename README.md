@@ -418,9 +418,14 @@ over Sync, or are re-issued.
 - The **API key** (High Availability → Sync → *This node*) is for machines, not
   people: the peer must present it before it may push configuration here, and
   scripts can send it as `X-API-Key` instead of signing in.
-- If no administrator exists yet, the UI asks you to create one on first visit —
-  and until you do, the API is unauthenticated. The installer sets one up, so
-  this only applies to a hand-rolled deployment.
+- If no administrator exists yet, the UI asks you to create one on first visit.
+  Until then only the calls that create it answer — everything else returns 401 —
+  so a node waiting to be set up does not hand its configuration to whoever
+  reaches it first.
+- **Every endpoint requires a session or the API key.** Of 51 routes the only
+  ones that answer without either are the sign-in page itself, `/api/whoami`
+  (which unauthenticated returns nothing but whether an administrator exists),
+  and `/api/setup`, which refuses once one does.
 - **Put the UI behind TLS** (or an SSH tunnel / reverse proxy). Over plain HTTP
   both the password and the session cookie cross the network in the clear.
 - The service runs as **root** because it writes `/etc/haproxy`, `/etc/keepalived`

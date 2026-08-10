@@ -1757,7 +1757,7 @@ function showLogin(setup){
   $("#lp").autocomplete=s?"new-password":"current-password";
   $("#lbtn").textContent=s?"Create and sign in":"Sign in";
   $("#lerr").textContent="";
-  if(!s)$("#lu").value=who.admin_username||"admin";
+  if(!s&&who.admin_username)$("#lu").value=who.admin_username;   // only once signed in before
   $("#login").classList.add("show");
   setTimeout(()=>{($("#lu").value?$("#lp"):$("#lu")).focus();},30);
 }

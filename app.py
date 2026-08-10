@@ -531,7 +531,14 @@ def _auth():
 
     cfg = load_config()
     if needs_setup(cfg) and not cfg["local"].get("api_key"):
-        return  # first run: no administrator yet, nothing to check against
+        # First run. Only the calls that create the administrator are open;
+        # everything else stays shut, so a node waiting to be set up does not
+        # hand its configuration to whoever reaches it first.
+        if request.path == "/api/setup/state":
+            return
+        return jsonify({"ok": False, "needs_setup": True, "error":
+                        "This node has no administrator yet. Open it in a browser and create "
+                        "one; until then only setup is available."}), 401
 
     authorised = bool(current_user(cfg))
     if not authorised:
@@ -540,7 +547,7 @@ def _auth():
         presented = request.headers.get("X-API-Key")
         # header_seen is always reported: a request that arrives with no key at
         # all is the signature of something stripping it in transit.
-        body = {"ok": False, "hostname": socket.gethostname(),
+        body = {"ok": False, "hostname": socket.gethostname(), "version": VERSION,
                 "header_seen": presented is not None,
                 "error": "not authorised: sign in, or present this node's API key as X-API-Key"}
         if presented is not None:          # a machine tried a key: help it compare
@@ -558,12 +565,18 @@ def _auth():
 @app.get("/api/whoami")
 def api_whoami():
     cfg = load_config()
+    user = current_user(cfg)
+    if not user:
+        # Unauthenticated: only what the sign-in screen has to know. The
+        # administrator's name, the hostname and the version are not for
+        # anyone who can merely reach the port.
+        return jsonify({"authenticated": False, "needs_setup": needs_setup(cfg)})
     return jsonify({
+        "authenticated": True,
+        "username": user,
         "version": VERSION,
         "hostname": socket.gethostname(),
-        "authenticated": bool(current_user(cfg)),
-        "username": current_user(cfg) or "",
-        "needs_setup": needs_setup(cfg),
+        "needs_setup": False,
         "admin_username": (cfg["local"].get("admin") or {}).get("username", "admin"),
     })
 
@@ -1723,15 +1736,16 @@ def _key_verdict(d, url):
     if not d.get("header_seen"):
         return ("%s never received the X-API-Key header -- something between the two nodes is "
                 "stripping it. Check any reverse proxy in front of %s." % (host, url))
+    ver = (" running %s" % d["version"]) if d.get("version") else ""
     sent, want = d.get("presented_fp"), d.get("expected_fp")
     if not want:
         return "%s has no API key set, so it refuses every sync." % host
     if sent == want:
         return ("%s says the key does not match, yet both fingerprints are %s. The key is being "
                 "altered in transit -- check any proxy between the two nodes." % (host, sent))
-    return ("%s expects a key fingerprinted %s, but this node sent %s. Open Cluster > This node on "
-            "%s, press Show, and paste that key into this peer's entry."
-            % (host, want, sent, host))
+    return ("%s%s expects a key fingerprinted %s, but this node sent %s. Open Cluster > This node "
+            "on %s, press Show, and paste that key into this peer's entry."
+            % (host, ver, want, sent, host))
 
 
 def push_to_peer(peer, payload):
@@ -2193,34 +2207,9 @@ def api_peer_test(pid):
                 return jsonify({"ok": False, "error": _key_verdict(d, url), "diagnosis": d})
         except Exception:
             pass
-        # Identify it anyway: /api/whoami needs no key, so we can at least name
-        # the version, and the trimming fix only helps once THAT node has it.
-        detail = ""
-        try:
-            w = _requests.get(url + "/api/whoami", timeout=10,
-                              verify=bool(peer.get("verify_tls"))).json()
-            remote_v = w.get("version", "")
-            if not remote_v:
-                detail = (" That node does not report its version, so it predates 1.15 -- and it is "
-                          "the RECEIVING node that checks the key, so updating only this one changes "
-                          "nothing. Update it, or re-save its key there with no stray whitespace.")
-                raise StopIteration
-            detail = " That node is %s running %s." % (w.get("hostname", "?"), remote_v)
-            if version_tuple(remote_v) < version_tuple("1.14"):
-                detail += (" Keys are only trimmed of stray whitespace from 1.14 onwards, and it is "
-                           "the receiving node that checks the key -- update it, or re-save its key "
-                           "there with no leading or trailing spaces.")
-        except StopIteration:
-            pass
-        except Exception:
-            pass
-        return jsonify({"ok": False, "key_fp": key_fingerprint(stored), "error":
-                        "%s rejected this key. This entry holds a key with fingerprint %s -- open "
-                        "Cluster > This node on %s and check the fingerprint shown beside its API "
-                        "key. If they differ, that is the whole problem: copy that node's key here. "
-                        "(This entry must hold THAT node's key, not this node's own.)%s"
-                        % (url, key_fingerprint(stored) or "(empty)",
-                           urlsplit(url).hostname or url, detail)})
+        return jsonify({"ok": False, "error":
+                        "%s rejected this key. This entry must hold the key shown under "
+                        "Cluster > This node ON THAT NODE -- not this node's own key." % url})
 
     if r.status_code != 200:
         return jsonify({"ok": False, "error": "%s answered HTTP %s" % (url, r.status_code)})
