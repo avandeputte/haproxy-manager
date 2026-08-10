@@ -1085,7 +1085,8 @@ async function renderCluster(){
 
   /* --- what is particular to this node --- */
   const s2=document.createElement("div");s2.className="card";
-  s2.innerHTML='<div class=hd><h2>This node</h2><div class=sp></div><span class=hint>never synced</span></div>';
+  s2.innerHTML='<div class=hd><h2>This node &mdash; <span class=mono>'+esc(kaDiag&&kaDiag.hostname||location.host)+
+    '</span></h2><div class=sp></div><span class=hint>never synced</span></div>';
   const b2=document.createElement("div");b2.className="bd";
   const f2=document.createElement("div");f2.className="frm";
   const localFields=CLUSTER_LOCAL.concat([
@@ -1145,8 +1146,10 @@ function peersCard(peers,loc){
     peers.forEach(p=>{
       const tr=document.createElement("tr");
       tr.innerHTML="<td>"+esc(p.name)+"</td><td class=mono>"+esc(p.url)+"</td>"+
-        "<td>"+(p.has_key?'<span class="pill up">set</span><div class=sub>fingerprint <span class=mono>'+
-            esc(p.key_fp)+"</span></div>":'<span class="pill down">missing</span>')+"</td>"+
+        "<td>"+(p.has_key?(p.is_own_key?'<span class="pill down">this node\'s own key</span>'
+                                       :'<span class="pill up">set</span>')+
+            '<div class=sub>fingerprint <span class=mono>'+esc(p.key_fp)+"</span></div>"
+                         :'<span class="pill down">missing</span>')+"</td>"+
         "<td>"+(p.enabled===false?'<span class="pill off">no</span>':"yes")+"</td>";
       const act=document.createElement("td");act.style.textAlign="right";act.style.whiteSpace="nowrap";
       const out=document.createElement("div");out.className="sub";

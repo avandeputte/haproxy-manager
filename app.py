@@ -369,7 +369,8 @@ def parse_domains(cert):
 # --------------------------------------------------------------------------
 
 PBKDF2_ITERATIONS = 240000
-SESSION_COOKIE = "ham_session"
+SESSION_COOKIE = "ham_session_" + hashlib.sha256(
+    ("%s:%s" % (socket.gethostname(), PORT)).encode()).hexdigest()[:8]
 _login_fails = {}       # remote address -> [failure count, locked-until timestamp]
 LOGIN_MAX_FAILS = 5
 LOGIN_LOCK_SECONDS = 60
@@ -1127,6 +1128,7 @@ def api_keepalived_status():
         state = m[-1]
 
     return jsonify({
+        "hostname": socket.gethostname(),
         "enabled": bool(k.get("enabled")),
         "service": service if k.get("enabled") else "disabled",
         "config_present": KEEPALIVED_CFG.exists(),
@@ -1826,9 +1828,12 @@ def api_peers():
     peers = cfg["local"]["sync"].setdefault("peers", [])
     if request.method == "GET":
         # Never hand the stored keys back to the browser.
+        own = key_fingerprint(cfg["local"].get("api_key"))
         return jsonify([{k: v for k, v in p.items() if k != "api_key"} |
                         {"has_key": bool((p.get("api_key") or "").strip()),
-                         "key_fp": key_fingerprint(p.get("api_key"))} for p in peers])
+                         "key_fp": key_fingerprint(p.get("api_key")),
+                         "is_own_key": bool(own) and key_fingerprint(p.get("api_key")) == own}
+                        for p in peers])
     body = request.get_json(force=True) or {}
     url = (body.get("url") or "").strip().rstrip("/")
     if not url:
@@ -1882,6 +1887,12 @@ def api_peer_test(pid):
         return jsonify({"ok": False, "error":
                         "no API key is stored here for %s. Copy the key from Cluster > This node "
                         "on that node and paste it into this peer's entry." % peer.get("name")})
+    if key_matches(cfg["local"].get("api_key"), stored):
+        return jsonify({"ok": False, "error":
+                        "this entry holds THIS node's own API key (fingerprint %s), not %s's. With "
+                        "a window open on each node it is easy to copy from the wrong one -- the "
+                        "page header names the node it belongs to."
+                        % (key_fingerprint(stored), peer.get("name"))})
     try:
         r = _requests.get(url + "/api/status", headers={"X-API-Key": stored.strip()},
                           timeout=10, verify=bool(peer.get("verify_tls")))
