@@ -156,6 +156,15 @@ modeled on:
 - **Apply** renders `haproxy.cfg`, validates it with `haproxy -c` *before* writing
   anything, then writes the file (keeping a `.bak`) and reloads HAProxy. If
   Keepalived is enabled it renders and reloads `keepalived.conf` too.
+- **Only the node holding the virtual IP issues and renews.** HTTP-01 validation
+  arrives at that address, so a passive node could not answer it, and with
+  DNS-01 the nodes would race each other for the same certificate and burn the
+  CA's rate limits. A passive node says so instead of trying, and refuses a
+  manual Issue or *Renew all now*.
+- **A new certificate is sent to the other nodes automatically.** After a
+  successful issue or renewal the deployed PEM is pushed to every node, so a
+  failover serves the current certificate rather than the one that node last
+  saw. A `sync_to_peer` Automation still works and is no longer needed.
 - **ACME** issuance/renewal shells out to [`acme.sh`](https://github.com/acmesh-official/acme.sh).
   Certificates are written as combined `fullchain + key` PEMs into the HAProxy
   certificate directory (what HAProxy's `crt` expects), then the certificate's

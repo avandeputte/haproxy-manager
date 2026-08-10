@@ -1377,6 +1377,8 @@ def api_status():
         "dirty": cfg["_meta"].get("applied_hash") != config_hash(cfg),
         "certs": certs,
         "acme_installed": Path(ACME_SH).exists(),
+        "renews_here": renewal_runs_here(cfg)[0],
+        "renewal_note": renewal_runs_here(cfg)[1],
         "peers": len(cfg["local"]["sync"].get("peers") or []),
         "api_key_fp": key_fingerprint(cfg["local"].get("api_key")),
         "sync_available": _requests is not None,
@@ -1440,6 +1442,26 @@ def record_issue(cert, res, started):
         save_config(cur)
 
 
+def propagate_certificate(cfg, cert):
+    """Send a freshly issued certificate to the other nodes.
+
+    The deployed PEMs travel with a configuration push, so the other nodes get
+    the file and reload. Without this a renewal only ever reached the node that
+    performed it, and a failover served the old certificate.
+    """
+    peers = enabled_peers(cfg)
+    if not peers:
+        return ""
+    autos = _by_id(cfg["acme"]["automations"])
+    if any((autos.get(a) or {}).get("type") == "sync_to_peer"
+           for a in cert.get("automations") or []):
+        return ""            # the certificate already carries a sync automation
+    r = sync_push(load_config())
+    if r.get("ok"):
+        return "sent to %d other node(s)" % len(peers)
+    return "could not send it to the other nodes: %s" % r.get("error")
+
+
 def acme_issue(cfg, cert, force=False):
     started = time.time()
     res = _acme_issue(cfg, cert, force=force)
@@ -1447,6 +1469,10 @@ def acme_issue(cfg, cert, force=False):
         record_issue(cert, res, started)
     except OSError:
         pass  # never fail an issuance because the log could not be written
+    if res.get("ok"):
+        note = propagate_certificate(cfg, cert)
+        if note:
+            res["propagated"] = note
     return res
 
 
@@ -1561,12 +1587,28 @@ def api_acme_log(cid):
 @app.post("/api/acme/renew")
 def api_acme_renew():
     cfg = load_config()
+    ok, why = renewal_runs_here(cfg)
+    if not ok:
+        return jsonify({"ok": False, "error": why}), 409
     results = {}
     for cert in cfg["acme"]["certificates"]:
         if cert.get("auto_renew", True):
             results[cert["name"]] = acme_issue(cfg, cert)
     return jsonify({"ok": all(r.get("ok") for r in results.values()) if results else True,
                     "results": results})
+
+
+def renewal_runs_here(cfg):
+    """Only the node serving traffic renews.
+
+    Every node used to run this loop. HTTP-01 validation arrives at the virtual
+    IP, so a passive node cannot answer it; with DNS-01 the nodes would instead
+    race each other for the same certificate and burn the CA's rate limits.
+    """
+    role, _ = node_role(cfg)
+    if role == "passive":
+        return False, "this node is passive; the node holding the virtual IP renews"
+    return True, ""
 
 
 def _renew_loop():
@@ -1577,6 +1619,15 @@ def _renew_loop():
             cfg = load_config()
             st = cfg["acme"]["settings"]
             if not (st.get("enabled") and st.get("auto_renew")):
+                continue
+            ok, why = renewal_runs_here(cfg)
+            if not ok:
+                with _lock:
+                    cur = load_config()
+                    cur["_meta"]["renewal"] = {
+                        "checked": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                        "ran": False, "reason": why}
+                    save_config(cur)
                 continue
             interval = max(1, int(st.get("renew_hours") or 24)) * 3600
             if time.time() - _last_renew >= interval:

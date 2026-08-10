@@ -1955,6 +1955,10 @@ async function renderOverview(){
 
   const cc=document.createElement("div");cc.className="card";
   cc.innerHTML='<div class=hd><h2>Certificates</h2><div class=sp></div></div>';
+  if(st.renewal_note){
+    const n=document.createElement("span");n.className="hint";n.style.marginRight="10px";
+    n.textContent=st.renewal_note;cc.querySelector(".hd").appendChild(n);
+  }
   cc.querySelector(".hd").appendChild(btn("Renew all now","sm",async()=>{
     const pre=document.createElement("pre");
     pre.textContent="Running acme.sh for every auto-renew certificate -- this can take a few minutes.";
