@@ -664,8 +664,10 @@ async function renderSettings(key){
 
 /* ============================ services (the simple view) ============================ */
 const WIZ_FIELDS=[
- {k:"url",l:"Public URL",t:"text",
-  h:"https://ps2.iothing.net (a path like /api is allowed), or tcp://0.0.0.0:3306 to forward a raw TCP port"},
+ {k:"url",l:"Public URLs",t:"textarea",
+  h:"One per line. Several names are alternatives that all reach the same servers, e.g. "+
+    "https://app.example.com and https://www.example.com. A path like /api is allowed on a single "+
+    "URL, and tcp://0.0.0.0:3306 forwards a raw TCP port."},
  {k:"target",l:"Forward to",t:"text",
   h:"e.g. http://192.168.1.100:1781. Several (comma separated) are load balanced, and each may be named: galera1=192.168.1.81:3306"},
  {k:"name",l:"Name",t:"text",h:"Optional -- derived from the host name or port when left empty"},
@@ -840,7 +842,7 @@ async function servicesCard(){
       const cs=s.certificate_status;
       const cls=CERT_STATUS[cs]?CERT_STATUS[cs][0]:"off";
       const lbl=CERT_STATUS[cs]?CERT_STATUS[cs][1]:(s.scheme==="https"?"none":"not needed");
-      tr.innerHTML="<td><span class=mono>"+esc(s.url)+"</span>"+
+      tr.innerHTML="<td>"+(s.urls||[s.url]).map(u=>"<span class=mono>"+esc(u)+"</span>").join("<br>")+
           (s.managed==="web-ui"?'<div class=sub>this node\'s own web UI &mdash; managed under '+
              'System &rsaquo; Web UI access, and never synced to the other nodes</div>':"")+
           (s.enabled?"":"<div class=sub>disabled</div>")+"</td>"+
@@ -854,7 +856,7 @@ async function servicesCard(){
       if(!readOnly&&s.managed!=="web-ui"){
       act.appendChild(btn("Edit","sm",()=>openWizard({
         service_id:s.id,
-        url:s.url,
+        url:(s.urls||[s.url]).join("\n"),
         target:s.targets.map(t=>s.scheme==="tcp"?t.replace(/^tcp:\/\//,""):t).join(", "),
         name:s.pool||"",
         balance:s.balance,persistence:s.persistence,stick_type:s.stick_type,

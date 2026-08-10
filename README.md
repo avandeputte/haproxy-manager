@@ -43,6 +43,13 @@ and the resulting `haproxy.cfg`, before anything is written.
   `*.iothing.net` correctly does **not** cover `iothing.net` or
   `a.b.iothing.net`. Set Certificate to *always request a new certificate* to
   override, or *no certificate* to terminate TLS elsewhere.
+- **Several public URLs** on one service: put one per line and every name reaches
+  the same servers, as a single rule (`use_backend be_app if acl_host-app or
+  acl_host-www`). One certificate covers them all, and adding a name later
+  extends it rather than requesting another. Names must agree on scheme and
+  port, since they share a listener, and a URL with a path cannot be combined
+  with others — a host and a path must both match, while several host names are
+  alternatives.
 - **Several targets**, comma separated, are load balanced across. Each may be
   named: `galera1=192.168.1.81:3306`.
 - **Raw TCP** works too — give it `tcp://0.0.0.0:3306` as the public URL and the

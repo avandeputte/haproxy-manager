@@ -3127,7 +3127,7 @@ def _place_rule(hp, rule_ids, rule):
     return ids + [rule["id"]]
 
 
-def wizard_publish(cfg, pub, tgts, name=None, want_cert=True, account=None,
+def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
                    challenge=None, http_redirect=True, health=None,
                    certificate_id=None, new_certificate=False,
                    balance=None, persistence=None, stick_size=None, stick_expire=None,
@@ -3140,6 +3140,11 @@ def wizard_publish(cfg, pub, tgts, name=None, want_cert=True, account=None,
     """
     hp, ac = cfg["haproxy"], cfg["acme"]
     acts, warns = [], []
+    # One service can answer for several host names. They share a listener, so
+    # they must agree on scheme and port; the first one names things.
+    pubs = pubs if isinstance(pubs, list) else [pubs]
+    pub = pubs[0]
+    hosts = [p["host"] for p in pubs]
 
     def act(action, kind, nm):
         acts.append({"action": action, "type": kind, "name": nm})
@@ -3319,18 +3324,20 @@ def wizard_publish(cfg, pub, tgts, name=None, want_cert=True, account=None,
 
     # -- Conditions: host, and a path prefix when the URL has one ---------
     cond_ids = []
-    host_cond = _find(hp["conditions"], lambda c: c.get("type") == "host_matches"
-                      and (c.get("value") or "").lower() == pub["host"].lower())
-    if host_cond:
-        act("reused", "Condition", host_cond["name"])
-    else:
-        host_cond = {"id": str(uuid.uuid4()),
-                     "name": _uniq_name({c["name"] for c in hp["conditions"]}, "host-" + base),
-                     "type": "host_matches", "value": pub["host"],
-                     "description": "created by the publish wizard"}
-        hp["conditions"].append(host_cond)
-        act("created", "Condition", host_cond["name"])
-    cond_ids.append(host_cond["id"])
+    for h in hosts:
+        host_cond = _find(hp["conditions"], lambda c: c.get("type") == "host_matches"
+                          and (c.get("value") or "").lower() == h.lower())
+        if host_cond:
+            act("reused", "Condition", host_cond["name"])
+        else:
+            suffix = base if len(hosts) == 1 else _sec(h.split(".")[0])
+            host_cond = {"id": str(uuid.uuid4()),
+                         "name": _uniq_name({c["name"] for c in hp["conditions"]}, "host-" + suffix),
+                         "type": "host_matches", "value": h,
+                         "description": "created by the publish wizard"}
+            hp["conditions"].append(host_cond)
+            act("created", "Condition", host_cond["name"])
+        cond_ids.append(host_cond["id"])
 
     if pub["path"]:
         pc = _find(hp["conditions"], lambda c: c.get("type") == "path_starts_with"
@@ -3359,6 +3366,7 @@ def wizard_publish(cfg, pub, tgts, name=None, want_cert=True, account=None,
     if rule:
         previous_conds = list(rule.get("conditions") or [])
         rule["conditions"] = cond_ids
+        rule["operator"] = "or" if len(hosts) > 1 else "and"
         rule["backend"] = pool["id"]
         act("updated", "Rule", rule["name"])
         # conditions the old URL needed and nothing else uses
@@ -3373,7 +3381,9 @@ def wizard_publish(cfg, pub, tgts, name=None, want_cert=True, account=None,
     else:
         rule = {"id": str(uuid.uuid4()),
                 "name": _uniq_name({r["name"] for r in hp["rules"]}, "to-" + base),
-                "type": "use_backend", "test": "if", "operator": "and",
+                "type": "use_backend", "test": "if",
+                # several host names are alternatives; a host and a path are not
+                "operator": "or" if len(hosts) > 1 else "and",
                 "conditions": cond_ids, "backend": pool["id"]}
         hp["rules"].append(rule)
         act("created", "Rule", rule["name"])
@@ -3386,7 +3396,14 @@ def wizard_publish(cfg, pub, tgts, name=None, want_cert=True, account=None,
             cert = _by_id(ac["certificates"]).get(certificate_id)
             how = "chosen" if cert else None
         if not cert and not new_certificate:
+            # a single certificate has to cover every name, or it is no use here
             cert, how = cert_for_host(ac["certificates"], pub["host"])
+            if cert and not all(cert_for_host([cert], h)[0] for h in hosts):
+                missing = [h for h in hosts if not cert_for_host([cert], h)[0]]
+                extra = " ".join(parse_domains(cert) + missing)
+                cert["domains"] = extra
+                act("updated", "Certificate", "%s covers %s" % (cert["name"], ", ".join(missing)))
+                how = "extended"
         if cert:
             act("reused", "Certificate", cert["name"] +
                 (" (wildcard %s covers %s)" % (next((d for d in parse_domains(cert)
@@ -3406,7 +3423,7 @@ def wizard_publish(cfg, pub, tgts, name=None, want_cert=True, account=None,
                     break
             if stale is not None:
                 # never issued, and for a name this service has stopped using
-                stale["domains"] = pub["host"]
+                stale["domains"] = " ".join(hosts)
                 if acc_id:
                     stale["account"] = stale.get("account") or acc_id
                 if ch_id:
@@ -3416,7 +3433,7 @@ def wizard_publish(cfg, pub, tgts, name=None, want_cert=True, account=None,
             else:
                 cert = {"id": str(uuid.uuid4()),
                         "name": _uniq_name({c["name"] for c in ac["certificates"]}, base),
-                        "domains": pub["host"], "account": acc_id, "challenge": ch_id,
+                        "domains": " ".join(hosts), "account": acc_id, "challenge": ch_id,
                         "key_type": "ec-256", "auto_renew": True, "automations": []}
                 ac["certificates"].append(cert)
                 act("created", "Certificate", cert["name"])
@@ -3747,17 +3764,18 @@ def api_services():
             rule = rules.get(rid)
             if not rule or rule.get("type") != "use_backend":
                 continue
-            host, path = None, ""
+            all_hosts, path = [], ""
             for cid in rule.get("conditions") or []:
                 c = conds.get(cid)
                 if not c:
                     continue
-                if c.get("type") == "host_matches":
-                    host = c.get("value")
+                if c.get("type") == "host_matches" and c.get("value"):
+                    all_hosts.append(c["value"])
                 elif c.get("type") == "path_starts_with":
                     path = c.get("value") or ""
-            if not host:
+            if not all_hosts:
                 continue
+            host = all_hosts[0]
 
             pool = backends.get(rule.get("backend"))
             targets = pool_targets(pool)
@@ -3766,12 +3784,16 @@ def api_services():
 
             attached = [certs[cid] for cid in (fe.get("certificates") or []) if cid in certs]
             cert, match = cert_for_host(attached, host)
+            uncovered = [h for h in all_hosts if not cert_for_host(attached, h)[0]]
             info = cert_details(cert_path(cert)) if cert else None
 
             out.append(dict(pool_settings(pool), **{
                 "id": rule["id"],
                 "managed": "web-ui" if rule.get(LOCAL_ONLY) else "",
                 "url": "%s://%s%s%s" % (scheme, host, shown_port, path),
+                "urls": ["%s://%s%s%s" % (scheme, h, shown_port, path) for h in all_hosts],
+                "hosts": all_hosts,
+                "certificate_uncovered": uncovered,
                 "host": host, "path": path, "scheme": scheme,
                 "port": ports[0] if ports else None,
                 "targets": targets,
@@ -3871,9 +3893,36 @@ def api_service_delete(rid):
 @app.post("/api/wizard/publish")
 def api_wizard_publish():
     body = request.get_json(force=True, silent=True) or {}
-    pub, err = _split_url(body.get("url"), "The public URL", default_scheme="https")
-    if err:
-        return jsonify({"ok": False, "error": err}), 400
+    raw_urls = [u for u in re.split(r"[\s,]+", body.get("url") or "") if u]
+    if not raw_urls:
+        return jsonify({"ok": False, "error": "The public URL is required"}), 400
+    pubs = []
+    for raw in raw_urls:
+        p, err = _split_url(raw, "The public URL \"%s\"" % raw, default_scheme="https")
+        if err:
+            return jsonify({"ok": False, "error": err}), 400
+        pubs.append(p)
+    pub = pubs[0]
+    if len(pubs) > 1:
+        if any(p["scheme"] != pub["scheme"] for p in pubs):
+            return jsonify({"ok": False, "error":
+                            "every URL on one service must use the same scheme"}), 400
+        if any(p["port"] != pub["port"] for p in pubs):
+            return jsonify({"ok": False, "error":
+                            "every URL on one service must use the same port"}), 400
+        if pub["scheme"] == "tcp":
+            return jsonify({"ok": False, "error":
+                            "a tcp:// service is one listening port, so it takes one URL"}), 400
+        if any(p["path"] for p in pubs):
+            return jsonify({"ok": False, "error":
+                            "URLs with a path cannot be combined on one service: a host and a path "
+                            "must both match, while several host names are alternatives. Publish "
+                            "the path as its own service."}), 400
+        seen = set()
+        for p in pubs:
+            if p["host"].lower() in seen:
+                return jsonify({"ok": False, "error": "%s is listed twice" % p["host"]}), 400
+            seen.add(p["host"].lower())
 
     raw_targets = [t for t in re.split(r"[\s,]+", body.get("target") or "") if t]
     if not raw_targets:
@@ -3893,7 +3942,7 @@ def api_wizard_publish():
         draft = copy.deepcopy(cfg)
         try:
             acts, warns = wizard_publish(
-                draft, pub, tgts,
+                draft, pubs, tgts,
                 name=body.get("name"),
                 want_cert=body.get("certificate", True),
                 account=body.get("account") or None,
