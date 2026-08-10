@@ -339,12 +339,18 @@ const E={
 
  "acme/challenges":{title:"Challenge Types",add:"Add challenge type",
   intro:"How domain ownership is proven. HTTP-01 uses a local listener that HAProxy routes /.well-known/acme-challenge/ to; DNS-01 uses an acme.sh DNS hook.",
-  cols:[["name","Name"],["method","Method"],["prov","DNS provider",r=>r.method==="dns01"?"<span class=mono>"+esc(r.dns_provider||"")+"</span>":"—"]],
+  cols:[["name","Name"],["method","Method"],
+        ["prov","DNS provider",r=>r.method==="dns01"?"<span class=mono>"+esc(r.dns_provider||"")+"</span>"+
+           (dnsApiByHook[r.dns_provider]?"<div class=sub>"+esc(dnsApiByHook[r.dns_provider].title)+"</div>":""):"—"]],
+  pre:loadDnsApis,
+  editorExtra:dnsCredentialHelp,
   fields:[
    {k:"name",l:"Name",t:"text"},
    {k:"method",l:"Method",t:"select",o:["http01","dns01"],d:"http01"},
-   {k:"dns_provider",l:"DNS API hook",t:"text",h:"acme.sh hook name, e.g. dns_cf, dns_ovh, dns_route53"},
-   {k:"dns_credentials",l:"DNS API credentials",t:"textarea",h:"One KEY=value per line, e.g. CF_Token=..."}]},
+   {k:"dns_provider",l:"DNS API hook",t:"combo",o:()=>dnsApiOptions,
+    h:"Pick the provider acme.sh should talk to. The list comes from the acme.sh installed on this node."},
+   {k:"dns_credentials",l:"DNS API credentials",t:"textarea",
+    h:"One KEY=value per line. Choosing a hook above fills in the names it needs."}]},
 
  "acme/certificates":{title:"Certificates",add:"Add certificate",
   intro:"Certificates are issued with acme.sh, written as combined PEMs to the HAProxy certificate directory, then their Automations run. "+
@@ -460,6 +466,18 @@ function fieldRow(f,val){
       l.appendChild(c);l.appendChild(document.createTextNode(it.name));inp.appendChild(l);
     });
     cell.appendChild(inp);
+  }else if(f.t==="combo"){
+    /* a list to pick from that still accepts anything typed */
+    inp=document.createElement("input");inp.type="text";inp.id="f_"+f.k;inp.value=val??"";
+    inp.autocomplete="off";inp.setAttribute("list","dl_"+f.k);
+    const dl=document.createElement("datalist");dl.id="dl_"+f.k;
+    (typeof f.o==="function"?f.o():(f.o||[])).forEach(o=>{
+      const op=document.createElement("option");
+      op.value=(o&&o.value!==undefined)?o.value:o;
+      if(o&&o.label)op.label=o.label;
+      dl.appendChild(op);
+    });
+    cell.appendChild(inp);cell.appendChild(dl);
   }else if(f.t==="textarea"){
     inp=document.createElement("textarea");inp.id="f_"+f.k;inp.value=val??"";cell.appendChild(inp);
   }else{
@@ -493,7 +511,13 @@ async function renderEntity(key){
   const card=document.createElement("div");card.className="card";
   const hd=document.createElement("div");hd.className="hd";
   hd.innerHTML="<h2>"+esc(def.title)+"</h2><div class=sp></div>";
-  hd.appendChild(btn(def.add,"pri sm",()=>openEditor(key)));
+  if(key==="acme/certificates"){
+    hd.appendChild(btn("Request a certificate","pri sm",()=>openCertWizard()));
+    hd.appendChild(document.createTextNode(" "));
+    hd.appendChild(btn(def.add,"sm",()=>openEditor(key)));
+  }else{
+    hd.appendChild(btn(def.add,"pri sm",()=>openEditor(key)));
+  }
   card.appendChild(hd);
   const bd=document.createElement("div");
   if(!items.length){
@@ -534,6 +558,7 @@ function openEditor(key,item){
   const def=E[key];
   const frm=document.createElement("div");frm.className="frm";
   def.fields.forEach(f=>fieldRow(f,item?item[f.k]:undefined).forEach(el=>frm.appendChild(el)));
+  if(def.editorExtra)def.editorExtra(frm,item);
   const err=document.createElement("div");err.className="err";
   openDlg((item?"Edit ":"New ")+def.title.replace(/s$/,""),frm,[err,
     btn("Cancel","",closeDlg),
@@ -834,6 +859,157 @@ async function servicesCard(){
   }
   card.appendChild(bd);
   return card;
+}
+
+/* ============================ acme.sh DNS hooks ============================ */
+let dnsApis=[],dnsApiByHook={},dnsApiOptions=[],dnsApiNote="";
+async function loadDnsApis(){
+  if(dnsApis.length)return dnsApis;
+  try{
+    const r=await api("acme/dnsapi");
+    dnsApis=r.hooks||[];dnsApiNote=r.note||"";
+    dnsApiByHook={};dnsApis.forEach(h=>{dnsApiByHook[h.hook]=h;});
+    dnsApiOptions=dnsApis.map(h=>({value:h.hook,label:h.title+" ("+h.hook+")"}));
+  }catch(e){dnsApis=[];dnsApiNote=e.message;}
+  return dnsApis;
+}
+function varList(list){
+  return list.map(o=>'<span class=mono>'+esc(o.name)+"</span>"+
+    (o.optional?" <span class=sub>(optional)</span>":"")+
+    (o.desc?" &mdash; "+esc(o.desc):"")).join("<br>");
+}
+/* Show what the chosen hook needs, and offer to seed the credentials box. */
+function dnsCredentialHelp(frm){
+  const sel=frm.querySelector("#f_dns_provider"),creds=frm.querySelector("#f_dns_credentials");
+  if(!sel||!creds)return;
+  const note=document.createElement("div");note.className="hint";note.style.marginTop="6px";
+  creds.parentNode.appendChild(note);
+  const render=()=>{
+    const h=dnsApiByHook[sel.value.trim()];
+    if(!sel.value.trim()){note.innerHTML=dnsApiNote?esc(dnsApiNote):"";return;}
+    if(!h){note.innerHTML='<span class=sub>Unknown hook &mdash; it will be passed to acme.sh as typed.</span>';return;}
+    let html="<b>"+esc(h.title)+"</b> needs:<br>"+(h.options.length?varList(h.options):"<span class=sub>no credentials</span>");
+    if(h.options_alt.length)html+="<br><i>or instead:</i><br>"+varList(h.options_alt);
+    if(h.docs)html+='<br><a href="'+esc(h.docs.startsWith("http")?h.docs:"https://"+h.docs)+'" target="_blank" rel="noopener">documentation</a>';
+    note.innerHTML=html;
+    const need=(h.options.length?h.options:h.options_alt).filter(o=>!o.optional);
+    if(need.length){
+      const b=btn("Fill in the variable names","sm",()=>{
+        const have=creds.value.split("\n").map(l=>l.split("=")[0].trim()).filter(Boolean);
+        const add=need.filter(o=>!have.includes(o.name)).map(o=>o.name+"=");
+        if(add.length)creds.value=(creds.value.trim()?creds.value.replace(/\s*$/,"")+"\n":"")+add.join("\n")+"\n";
+      });
+      b.style.marginTop="8px";note.appendChild(document.createElement("br"));note.appendChild(b);
+    }
+  };
+  sel.addEventListener("change",render);sel.addEventListener("blur",render);render();
+}
+
+/* ============================ certificate wizard ============================ */
+const NEWOPT="__new__";
+const CERT_WIZ=[
+ {k:"domains",l:"Domain names",t:"textarea",h:"One per line. The first is the certificate's primary name. A wildcard such as *.iothing.net needs DNS-01."},
+ {k:"name",l:"Certificate name",t:"text",h:"Optional -- taken from the first domain when left empty"},
+ {k:"account_id",l:"ACME account",t:"select",o:[]},
+ {k:"acc_name",l:"New account name",t:"text"},
+ {k:"acc_email",l:"E-mail address",t:"text",h:"Where the CA sends expiry warnings"},
+ {k:"acc_ca",l:"Certificate authority",t:"select",o:["letsencrypt","letsencrypt_test","zerossl","buypass","google"],d:"letsencrypt",
+  h:"letsencrypt_test issues untrusted certificates but has no rate limits -- ideal while setting things up"},
+ {k:"acc_eab_kid",l:"EAB key ID",t:"text",h:"Only for ZeroSSL and Google"},
+ {k:"acc_eab_hmac",l:"EAB HMAC key",t:"password"},
+ {k:"challenge_id",l:"Challenge type",t:"select",o:[]},
+ {k:"ch_name",l:"New challenge name",t:"text"},
+ {k:"ch_method",l:"Validation method",t:"select",o:["http01","dns01"],d:"http01",
+  h:"HTTP-01 needs port 80 reachable from the internet. DNS-01 works behind a firewall and is the only way to get a wildcard."},
+ {k:"dns_provider",l:"DNS API hook",t:"combo",o:()=>dnsApiOptions,h:"The provider acme.sh should talk to"},
+ {k:"dns_credentials",l:"DNS API credentials",t:"textarea",h:"One KEY=value per line"},
+ {k:"key_type",l:"Key type",t:"select",o:["ec-256","ec-384","rsa-2048","rsa-4096"],d:"ec-256"},
+ {k:"auto_renew",l:"Renew automatically",t:"bool",d:true},
+ {k:"issue",l:"Request it now",t:"bool",d:true,h:"Runs acme.sh straight away; leave off to just create the objects"},
+];
+async function openCertWizard(){
+  await Promise.all([list("acme/accounts",true),list("acme/challenges",true),loadDnsApis()]);
+  const accounts=lists["acme/accounts"]||[],challenges=lists["acme/challenges"]||[];
+  const fields=CERT_WIZ.map(f=>{
+    if(f.k==="account_id")return Object.assign({},f,{o:accounts.map(a=>({value:a.id,label:a.name+" ("+(a.ca||"letsencrypt")+")"})).concat([{value:NEWOPT,label:"Create a new account..."}])});
+    if(f.k==="challenge_id")return Object.assign({},f,{o:challenges.map(c=>({value:c.id,label:c.name+" ("+(c.method||"http01")+")"})).concat([{value:NEWOPT,label:"Create a new challenge type..."}])});
+    return f;
+  });
+  const wrap=document.createElement("div");
+  const frm=document.createElement("div");frm.className="frm";
+  const rows={};
+  fields.forEach(f=>{const cells=fieldRow(f,f.k==="account_id"&&!accounts.length?NEWOPT
+                                          :f.k==="challenge_id"&&!challenges.length?NEWOPT:undefined);
+    rows[f.k]=cells;cells.forEach(el=>frm.appendChild(el));});
+  wrap.appendChild(frm);
+  const out=document.createElement("div");out.style.marginTop="16px";wrap.appendChild(out);
+  const err=document.createElement("div");err.className="err";
+
+  const setRow=(k,on)=>{(rows[k]||[]).forEach(el=>{el.style.display=on?"":"none";});};
+  const sync=()=>{
+    const newAcc=frm.querySelector("#f_account_id").value===NEWOPT;
+    ["acc_name","acc_email","acc_ca","acc_eab_kid","acc_eab_hmac"].forEach(k=>setRow(k,newAcc));
+    const newCh=frm.querySelector("#f_challenge_id").value===NEWOPT;
+    const method=frm.querySelector("#f_ch_method").value;
+    ["ch_name","ch_method"].forEach(k=>setRow(k,newCh));
+    ["dns_provider","dns_credentials"].forEach(k=>setRow(k,newCh&&method==="dns01"));
+  };
+  ["f_account_id","f_challenge_id","f_ch_method"].forEach(id=>{
+    const el=frm.querySelector("#"+id);if(el)el.addEventListener("change",sync);});
+  dnsCredentialHelp(frm);
+  sync();
+
+  const read=()=>{
+    const d=readForm(fields);
+    const body={domains:d.domains,name:d.name,key_type:d.key_type,
+                auto_renew:d.auto_renew,issue:d.issue};
+    body.account=d.account_id===NEWOPT
+      ? {name:d.acc_name||("account-"+(d.acc_ca||"letsencrypt")),email:d.acc_email,ca:d.acc_ca,
+         eab_kid:d.acc_eab_kid,eab_hmac:d.acc_eab_hmac}
+      : {id:d.account_id};
+    body.challenge=d.challenge_id===NEWOPT
+      ? {name:d.ch_name||(d.ch_method==="dns01"?("dns-"+(d.dns_provider||"01")):"http-01"),
+         method:d.ch_method,dns_provider:d.dns_provider,dns_credentials:d.dns_credentials}
+      : {id:d.challenge_id};
+    return body;
+  };
+  const show=(r,saved)=>{
+    out.innerHTML="";
+    const box=document.createElement("div");box.className="card";box.style.margin="0";
+    box.innerHTML='<div class=hd><h2>'+(saved?"Done":"What this will create")+'</h2></div>'+
+      '<div class=bd><div class=mono style="margin-bottom:10px">'+esc((r.domains||[]).join(", "))+"</div>"+
+      "<table><tbody>"+(r.actions||[]).map(a=>"<tr><td style='width:90px'><span class='pill "+
+        (a.action==="created"?"up":a.action==="updated"?"warn":"off")+"'>"+esc(a.action)+"</span></td><td>"+
+        esc(a.type)+"</td><td class=mono>"+esc(a.name)+"</td></tr>").join("")+"</tbody></table>"+
+      (r.warnings||[]).map(w=>'<div class=hint style="margin-top:10px">! '+esc(w)+"</div>").join("")+
+      (r.issued?('<div style="margin-top:12px">'+(r.issued.ok
+          ?'<span class="pill up">issued</span> The certificate is deployed.'
+          :'<span class="pill down">failed</span> '+esc(r.issued.error||""))+"</div>"):"")+"</div>";
+    if(r.issued&&r.issued.log){
+      const b=btn("Show the acme.sh log","sm",()=>showText("acme.sh",r.issued.log));
+      b.style.margin="0 16px 16px";box.appendChild(b);
+    }
+    out.appendChild(box);
+  };
+
+  const prev=btn("Preview","",async()=>{
+    err.textContent="";
+    try{show(await api("wizard/certificate","POST",Object.assign(read(),{dry_run:true,issue:false})),false);}
+    catch(e){err.textContent=e.message;}
+  });
+  const go=btn("Create","pri",async()=>{
+    err.textContent="";go.disabled=true;prev.disabled=true;
+    const body=read();
+    if(body.issue)show({domains:(body.domains||"").split(/[\s,]+/).filter(Boolean),actions:[],
+                        warnings:["Running acme.sh -- this can take a minute."]},false);
+    try{
+      const r=await api("wizard/certificate","POST",body);
+      show(r,true);
+      lists["acme/accounts"]=null;lists["acme/challenges"]=null;
+      await route();refreshStatus();
+    }catch(e){err.textContent=e.message;go.disabled=false;prev.disabled=false;}
+  });
+  openDlg("Request a certificate",wrap,[err,btn("Close","",closeDlg),prev,go]);
 }
 
 /* ============================ live statistics ============================ */

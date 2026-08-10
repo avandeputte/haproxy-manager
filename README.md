@@ -143,6 +143,43 @@ navigation there mirrors the two OPNsense plugins this UI was modeled on:
 | ACME accounts, challenges, certificates, automations | Administrator login |
 | Deployed certificate PEM files | |
 
+## Requesting a certificate
+
+**Certificates → Request a certificate** asks for the domains and then, for the
+two things a certificate needs, lets you either reuse what is already there or
+create it in the same step:
+
+- **ACME account** — an existing one, or a new one with its e-mail and CA
+  (`letsencrypt_test` issues untrusted certificates with no rate limits, which
+  is what you want while setting things up).
+- **Challenge type** — an existing one, or a new HTTP-01 or DNS-01.
+
+**Preview** shows exactly which objects will be created or reused before
+anything is saved, and *Request it now* runs `acme.sh` immediately and shows its
+log. It warns about the mistakes that are otherwise only visible in a failed
+issuance: a wildcard with an HTTP-01 challenge (only DNS-01 can validate one), a
+DNS-01 challenge with no API hook, and an account with no e-mail address.
+
+### DNS API hooks
+
+The **DNS API hook** field lists every hook the `acme.sh` on this node actually
+provides — 191 of them, by provider name — and picking one shows the credentials
+it needs, with a button that fills the variable names into the credentials box:
+
+```
+CloudFlare needs:
+  CF_Key    — API Key
+  CF_Email  — Your account email
+or instead:
+  CF_Token  — API Token
+  CF_Account_ID — Account ID
+  CF_Zone_ID — Zone ID. Optional.
+```
+
+That list is parsed from acme.sh itself rather than hard-coded, so it stays
+correct as acme.sh adds providers. The field still accepts anything typed, so an
+unknown or newer hook name is passed through unchanged.
+
 ## Statistics
 
 **Statistics** reads HAProxy's admin socket (`show stat`) and refreshes every

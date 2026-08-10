@@ -1654,6 +1654,214 @@ def cert_for_host(certificates, host):
     return (wildcard, "wildcard") if wildcard else (None, None)
 
 
+# --------------------------------------------------------------------------
+# acme.sh DNS hooks: what exists, and what each one needs
+# --------------------------------------------------------------------------
+
+_dnsapi_cache = {"stamp": None, "hooks": []}
+
+
+def _parse_dnsapi(path):
+    """Read one acme.sh dnsapi script's self-description.
+
+    acme.sh 3.x embeds a machine-readable block in every hook:
+
+        dns_cf_info='CloudFlare
+        Site: CloudFlare.com
+        Docs: github.com/acmesh-official/acme.sh/wiki/dnsapi#dns_cf
+        Options:
+         CF_Key API Key
+         CF_Email Your account email
+        OptionsAlt:
+         CF_Token API Token
+        '
+    """
+    hook = path.stem
+    info = {"hook": hook, "title": hook, "site": "", "docs": "",
+            "options": [], "options_alt": []}
+    try:
+        text = path.read_text(errors="replace")
+    except OSError:
+        return info
+
+    m = re.search(r"^dns_[A-Za-z0-9_]+_info='(.*?)'\s*$", text, re.S | re.M)
+    if not m:
+        # No description block: fall back to the variables the script reads.
+        seen = []
+        for v in re.findall(r'_readaccountconf_mutable\s+"?([A-Za-z][A-Za-z0-9_]*)"?', text):
+            if v not in seen:
+                seen.append(v)
+        info["options"] = [{"name": v, "desc": "", "optional": False} for v in seen]
+        return info
+
+    block = m.group(1)
+
+    # A few hooks declare their options as JSON instead of prose (dns_czechia).
+    if block.lstrip().startswith("["):
+        try:
+            for entry in json.loads(block):
+                info["options"].append({
+                    "name": entry.get("name", ""),
+                    "desc": entry.get("usage", ""),
+                    "optional": str(entry.get("required", "1")) not in ("1", "true", "True"),
+                })
+            return info
+        except (ValueError, AttributeError, TypeError):
+            pass
+
+    lines = block.splitlines()
+    if lines:
+        info["title"] = lines[0].strip() or hook
+
+    # Section driven, not indentation driven, and tolerant of the three header
+    # dialects in the wild: options flush left (dns_poweradmin), an "Optional:"
+    # sub-heading (dns_hetznercloud), and a header with trailing prose
+    # ("Options: For old API version v1", dns_selectel).
+    meta_keys = ("site", "docs", "issues", "author", "domains")
+    bucket, optional_here = None, False
+    for line in lines[1:]:
+        text_ = line.strip()
+        if not text_:
+            continue
+        head = text_.split(":", 1)[0].strip().lower() if ":" in text_ else ""
+        if head in ("options", "optionsalt"):
+            bucket, optional_here = head, False
+            continue
+        if head == "optional":                 # sub-heading inside the options
+            optional_here = True
+            continue
+        if head in meta_keys or text_.endswith(":"):   # metadata, or any other section
+            if head in ("site", "docs"):
+                info[head] = text_.split(": ", 1)[1].strip()
+            bucket = None                      # stop collecting: Notes, Issues, ...
+            continue
+        if bucket:
+            parts = text_.split(None, 1)
+            desc = parts[1].strip() if len(parts) > 1 else ""
+            entry = {"name": parts[0], "desc": desc,
+                     "optional": optional_here or "optional" in desc.lower()}
+            (info["options_alt"] if bucket == "optionsalt" else info["options"]).append(entry)
+    return info
+
+
+def dnsapi_hooks():
+    """Every DNS hook the installed acme.sh provides, parsed and cached."""
+    d = ACME_HOME / "dnsapi"
+    try:
+        stamp = d.stat().st_mtime
+    except OSError:
+        return []
+    if _dnsapi_cache["stamp"] == stamp:
+        return _dnsapi_cache["hooks"]
+    hooks = [_parse_dnsapi(p) for p in sorted(d.glob("dns_*.sh"))]
+    hooks.sort(key=lambda h: h["title"].lower())
+    _dnsapi_cache.update(stamp=stamp, hooks=hooks)
+    return hooks
+
+
+@app.get("/api/acme/dnsapi")
+def api_acme_dnsapi():
+    hooks = dnsapi_hooks()
+    return jsonify({"ok": True, "count": len(hooks), "hooks": hooks,
+                    "acme_home": str(ACME_HOME),
+                    "note": "" if hooks else
+                            "acme.sh was not found at %s, so its DNS hooks could not be listed. "
+                            "Type the hook name by hand." % ACME_HOME})
+
+
+@app.post("/api/wizard/certificate")
+def api_wizard_certificate():
+    """Request a certificate, creating the account and challenge type it needs.
+
+    account/challenge are either {"id": "<existing>"} or a full object to
+    create, so the whole thing is one round trip from the UI.
+    """
+    body = request.get_json(force=True, silent=True) or {}
+    domains = [d for d in re.split(r"[\s,]+", body.get("domains") or "") if d]
+    if not domains:
+        return jsonify({"ok": False, "error": "at least one domain name is required"}), 400
+    bad = [d for d in domains if not re.match(r"^\*?[A-Za-z0-9_.-]+$", d)]
+    if bad:
+        return jsonify({"ok": False, "error": "not a domain name: %s" % ", ".join(bad[:3])}), 400
+
+    acts, warns = [], []
+    dry_run = bool(body.get("dry_run"))
+
+    with _lock:
+        cfg = load_config()
+        draft = copy.deepcopy(cfg)
+        ac = draft["acme"]
+
+        def pick(kind, spec, defaults, label_field="name"):
+            """Reuse the referenced object, or create one from the given fields."""
+            spec = spec or {}
+            if spec.get("id"):
+                found = _by_id(ac[kind]).get(spec["id"])
+                if not found:
+                    raise ValueError("the selected %s no longer exists" % kind[:-1])
+                acts.append({"action": "reused", "type": label_field and kind[:-1].title(),
+                             "name": found.get("name", "")})
+                return found
+            obj = dict(defaults)
+            obj.update({k: v for k, v in spec.items() if k != "id"})
+            if not obj.get("name"):
+                raise ValueError("a name is required for the new %s" % kind[:-1])
+            obj["id"] = str(uuid.uuid4())
+            obj["name"] = _uniq_name({x["name"] for x in ac[kind]}, obj["name"])
+            ac[kind].append(obj)
+            acts.append({"action": "created", "type": kind[:-1].title(), "name": obj["name"]})
+            return obj
+
+        try:
+            account = pick("accounts", body.get("account"),
+                           {"name": "", "email": "", "ca": "letsencrypt", "eab_kid": "", "eab_hmac": ""})
+            challenge = pick("challenges", body.get("challenge"),
+                             {"name": "", "method": "http01", "dns_provider": "", "dns_credentials": ""})
+        except ValueError as e:
+            return jsonify({"ok": False, "error": str(e)}), 400
+
+        if not account.get("email"):
+            warns.append("The ACME account has no e-mail address. Let's Encrypt accepts that, "
+                         "but you will get no expiry warnings from them.")
+        wildcards = [d for d in domains if d.startswith("*.")]
+        if wildcards and challenge.get("method") != "dns01":
+            warns.append("%s is a wildcard, and wildcards can only be validated with DNS-01. "
+                         "Pick or create a DNS-01 challenge type." % wildcards[0])
+        if challenge.get("method") == "dns01" and not challenge.get("dns_provider"):
+            warns.append("The DNS-01 challenge type has no DNS API hook set, so acme.sh cannot "
+                         "create the validation record.")
+
+        name = (body.get("name") or "").strip() or domains[0].replace("*.", "wildcard-")
+        existing = _find(ac["certificates"], lambda c: set(parse_domains(c)) == set(domains))
+        if existing:
+            existing.update({"account": account["id"], "challenge": challenge["id"],
+                             "key_type": body.get("key_type") or existing.get("key_type", "ec-256"),
+                             "auto_renew": bool(body.get("auto_renew", True))})
+            cert = existing
+            acts.append({"action": "updated", "type": "Certificate", "name": cert["name"]})
+        else:
+            cert = {"id": str(uuid.uuid4()),
+                    "name": _uniq_name({c["name"] for c in ac["certificates"]}, name),
+                    "domains": " ".join(domains),
+                    "account": account["id"], "challenge": challenge["id"],
+                    "key_type": body.get("key_type") or "ec-256",
+                    "auto_renew": bool(body.get("auto_renew", True)),
+                    "automations": body.get("automations") or []}
+            ac["certificates"].append(cert)
+            acts.append({"action": "created", "type": "Certificate", "name": cert["name"]})
+
+        summary = {"ok": True, "actions": acts, "warnings": warns, "dry_run": dry_run,
+                   "domains": domains, "certificate": cert["name"], "certificate_id": cert["id"]}
+        if dry_run:
+            return jsonify(summary)
+        save_config(draft)
+        cfg = draft
+
+    if body.get("issue"):
+        summary["issued"] = acme_issue(cfg, cert, force=bool(body.get("force")))
+    return jsonify(summary)
+
+
 @app.get("/api/acme/cover")
 def api_acme_cover():
     """Which configured certificate, if any, already covers this host name."""
