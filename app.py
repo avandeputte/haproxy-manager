@@ -396,6 +396,22 @@ def set_admin(cfg, username, password):
     return cfg
 
 
+def key_matches(stored, presented):
+    """Compare API keys, ignoring whitespace a copy-and-paste picked up.
+
+    A key pasted with a trailing newline looks identical on screen but fails a
+    byte comparison, which surfaces only as an unexplained 401.
+    """
+    stored = (stored or "").strip()
+    presented = (presented or "").strip()
+    if not stored or not presented:
+        return False
+    try:
+        return hmac.compare_digest(stored.encode(), presented.encode())
+    except (UnicodeEncodeError, TypeError):
+        return False
+
+
 def needs_setup(cfg):
     """True while no administrator exists -- the UI then offers to create one."""
     return not (cfg["local"].get("admin") or {}).get("hash")
@@ -491,10 +507,10 @@ def _auth():
 
     authorised = bool(current_user(cfg))
     if not authorised:
-        key = cfg["local"].get("api_key", "")
-        authorised = bool(key) and hmac.compare_digest(key, request.headers.get("X-API-Key", ""))
+        authorised = key_matches(cfg["local"].get("api_key"), request.headers.get("X-API-Key"))
     if not authorised:
-        abort(401)
+        return jsonify({"ok": False, "error":
+                        "not authorised: sign in, or present this node's API key as X-API-Key"}), 401
 
     if request.method in ("POST", "PUT", "DELETE", "PATCH") and \
             not request.path.startswith(LOCAL_WRITE_PREFIXES):
@@ -658,7 +674,7 @@ def local_settings():
             cfg["local"][key].update(body[key])
     for key in ("api_key", "node_url", "allow_edit_when_passive"):
         if key in body:
-            cfg["local"][key] = body[key]
+            cfg["local"][key] = body[key].strip() if isinstance(body[key], str) else body[key]
     save_config(cfg)
     return jsonify(cfg["local"])
 
@@ -1775,7 +1791,7 @@ def api_peers():
         url = "http://" + url
     peer = {"id": str(uuid.uuid4()),
             "name": (body.get("name") or "").strip() or (urlsplit(url).hostname or "peer"),
-            "url": url, "api_key": body.get("api_key", ""),
+            "url": url, "api_key": (body.get("api_key") or "").strip(),
             "verify_tls": bool(body.get("verify_tls")), "enabled": bool(body.get("enabled", True))}
     peers.append(peer)
     save_config(cfg)
@@ -1797,12 +1813,48 @@ def api_peer_item(pid):
         for key in ("name", "url", "verify_tls", "enabled"):
             if key in body:
                 p[key] = body[key]
-        if body.get("api_key"):          # blank means "leave the stored key alone"
-            p["api_key"] = body["api_key"]
+        if (body.get("api_key") or "").strip():   # blank means "keep the stored key"
+            p["api_key"] = body["api_key"].strip()
         p["url"] = (p.get("url") or "").rstrip("/")
         save_config(cfg)
         return jsonify({k: v for k, v in p.items() if k != "api_key"})
     abort(404)
+
+
+@app.post("/api/peers/<pid>/test")
+def api_peer_test(pid):
+    """Say exactly why a peer does or does not work, rather than leaving a 401."""
+    cfg = load_config()
+    peer = next((p for p in (cfg["local"]["sync"].get("peers") or []) if p.get("id") == pid), None)
+    if not peer:
+        abort(404)
+    if _requests is None:
+        return jsonify({"ok": False, "error": "python3-requests is not installed on this node"})
+    url = (peer.get("url") or "").rstrip("/")
+    stored = (peer.get("api_key") or "")
+    if not stored.strip():
+        return jsonify({"ok": False, "error":
+                        "no API key is stored here for %s. Copy the key from Cluster > This node "
+                        "on that node and paste it into this peer's entry." % peer.get("name")})
+    try:
+        r = _requests.get(url + "/api/status", headers={"X-API-Key": stored.strip()},
+                          timeout=10, verify=bool(peer.get("verify_tls")))
+    except Exception as e:
+        return jsonify({"ok": False, "error": "cannot reach %s: %s" % (url, e)})
+
+    if r.status_code == 401:
+        return jsonify({"ok": False, "error":
+                        "%s rejected this key. Open Cluster > This node on that node, press Show "
+                        "next to its API key, and paste it here -- they must match exactly." % url})
+    if r.status_code != 200:
+        return jsonify({"ok": False, "error": "%s answered HTTP %s" % (url, r.status_code)})
+    st = r.json()
+    note = ""
+    if stored != stored.strip():
+        note = "The stored key had surrounding whitespace; it was ignored for this test and is " \
+               "trimmed when saved."
+    return jsonify({"ok": True, "hostname": st.get("hostname"), "version": st.get("version"),
+                    "role": st.get("role"), "peers": st.get("peers"), "note": note})
 
 
 def _query_peer(peer, timeout=6):
@@ -1901,9 +1953,14 @@ def api_sync_receive():
     cfg = load_config()
     key = cfg["local"].get("api_key", "")
     if not key:
-        return jsonify({"error": "this node has no API key set -- refusing sync"}), 403
-    if not hmac.compare_digest(key, request.headers.get("X-API-Key", "")):
-        abort(401)
+        return jsonify({"ok": False, "error":
+                        "%s has no API key set, so it refuses every sync. Set one under "
+                        "Cluster > This node there." % socket.gethostname()}), 403
+    if not key_matches(key, request.headers.get("X-API-Key")):
+        return jsonify({"ok": False, "error":
+                        "%s rejected the API key. The sending node must hold the key configured "
+                        "under Cluster > This node on %s."
+                        % (socket.gethostname(), socket.gethostname())}), 401
     data = request.get_json(force=True) or {}
     conf = data.get("config") or {}
     if "haproxy" in conf:

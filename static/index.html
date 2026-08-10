@@ -1139,8 +1139,19 @@ function peersCard(peers,loc){
         "<td>"+(p.has_key?'<span class="pill up">set</span>':'<span class="pill down">missing</span>')+"</td>"+
         "<td>"+(p.enabled===false?'<span class="pill off">no</span>':"yes")+"</td>";
       const act=document.createElement("td");act.style.textAlign="right";act.style.whiteSpace="nowrap";
-      const out=document.createElement("span");out.className="sub";out.style.marginRight="8px";
+      const out=document.createElement("div");out.className="sub";
+      out.style.cssText="margin-bottom:6px;text-align:right;max-width:420px;margin-left:auto";
       act.appendChild(out);
+      act.appendChild(btn("Test","sm",async()=>{
+        out.textContent="testing...";
+        try{
+          const r=await api("peers/"+p.id+"/test","POST",{});
+          out.innerHTML=r.ok?('<span class="pill up">ok</span> '+esc(r.hostname||"")+" v"+esc(r.version||"?")+
+                              ", "+esc(r.role||"")+(r.note?" — "+esc(r.note):""))
+                            :('<span class="pill down">failed</span> '+esc(r.error||""));
+        }catch(e){out.textContent=e.message;}
+      }));
+      act.appendChild(document.createTextNode(" "));
       act.appendChild(btn("Sync","sm",async()=>{
         out.textContent="pushing...";
         try{const r=await api("sync/push","POST",{peer:p.id,include_peers:true});
