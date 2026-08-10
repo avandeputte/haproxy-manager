@@ -3090,7 +3090,8 @@ def wizard_publish(cfg, pub, tgts, name=None, want_cert=True, account=None,
                    challenge=None, http_redirect=True, health=None,
                    certificate_id=None, new_certificate=False,
                    balance=None, persistence=None, stick_size=None, stick_expire=None,
-                   stick_type=None, log_health_checks=False, check_port=None):
+                   stick_type=None, log_health_checks=False, check_port=None,
+                   service_id=None):
     """Create (or update) everything needed to serve `pub` from `tgts`.
 
     Re-running for the same public host updates that mapping instead of adding
@@ -3195,7 +3196,15 @@ def wizard_publish(cfg, pub, tgts, name=None, want_cert=True, account=None,
     # TCP carries no host name, so a port serves exactly one pool: no
     # conditions, no rules, just bind + default_backend.
     if is_tcp:
-        fe = _find(hp["frontends"], lambda f: pub["port"] in _bind_ports(f))
+        fe = None
+        if service_id and service_id.startswith("fe:"):
+            fe = _by_id(hp["frontends"]).get(service_id[3:])
+            if fe:                       # the port may be what changed
+                fe["binds"] = "%s:%d" % (pub["host"] or "0.0.0.0", pub["port"])
+                clash = _find(hp["frontends"], lambda f: f is not fe and pub["port"] in _bind_ports(f))
+                if clash:
+                    raise ValueError("port %d is already used by \"%s\"" % (pub["port"], clash["name"]))
+        fe = fe or _find(hp["frontends"], lambda f: pub["port"] in _bind_ports(f))
         if fe:
             if fe.get("mode") != "tcp":
                 raise ValueError("port %d is already used by the HTTP service \"%s\"" % (pub["port"], fe["name"]))
@@ -3246,11 +3255,29 @@ def wizard_publish(cfg, pub, tgts, name=None, want_cert=True, account=None,
         cond_ids.append(pc["id"])
 
     # -- Rule -------------------------------------------------------------
-    rule = _find(hp["rules"], lambda r: r.get("type") == "use_backend"
-                 and set(r.get("conditions") or []) == set(cond_ids))
+    # When a service is being edited, follow its id: the conditions are derived
+    # from the URL, so a changed URL no longer matches and would otherwise leave
+    # the old mapping in place beside the new one.
+    rule = None
+    if service_id and not service_id.startswith("fe:"):
+        rule = _by_id(hp["rules"]).get(service_id)
+    if rule is None:
+        rule = _find(hp["rules"], lambda r: r.get("type") == "use_backend"
+                     and set(r.get("conditions") or []) == set(cond_ids))
     if rule:
+        previous_conds = list(rule.get("conditions") or [])
+        rule["conditions"] = cond_ids
         rule["backend"] = pool["id"]
         act("updated", "Rule", rule["name"])
+        # conditions the old URL needed and nothing else uses
+        still_used = {c for r in hp["rules"] for c in (r.get("conditions") or [])}
+        for cid in previous_conds:
+            if cid in still_used:
+                continue
+            gone = _by_id(hp["conditions"]).get(cid)
+            if gone:
+                hp["conditions"] = [c for c in hp["conditions"] if c.get("id") != cid]
+                acts.append({"action": "removed", "type": "Condition", "name": gone.get("name")})
     else:
         rule = {"id": str(uuid.uuid4()),
                 "name": _uniq_name({r["name"] for r in hp["rules"]}, "to-" + base),
@@ -3761,6 +3788,7 @@ def api_wizard_publish():
                 health=body.get("health") or None,
                 certificate_id=body.get("certificate_id") or None,
                 new_certificate=bool(body.get("new_certificate")),
+                service_id=(body.get("service_id") or "").strip() or None,
                 balance=body.get("balance") or None,
                 persistence=body.get("persistence") or None,
                 stick_size=body.get("stick_size") or None,

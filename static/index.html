@@ -775,6 +775,7 @@ function openWizard(prefill){
     d.certificate=d.cert_mode!=="none";        // "none" attaches nothing
     d.new_certificate=d.cert_mode==="new";     // otherwise reuse whatever covers the host
     if(prefill&&prefill.certificate_id&&d.cert_mode==="auto")d.certificate_id=prefill.certificate_id;
+    if(prefill&&prefill.service_id)d.service_id=prefill.service_id;   // edit, not publish anew
     d.health={type:d.health,interval:d.health_interval,uri:d.health_uri,
               status:d.health_status,user:d.health_user};
     ["cert_mode","health_interval","health_uri","health_status","health_user"].forEach(k=>delete d[k]);
@@ -852,6 +853,7 @@ async function servicesCard(){
       const act=document.createElement("td");act.style.textAlign="right";act.style.whiteSpace="nowrap";
       if(!readOnly&&s.managed!=="web-ui"){
       act.appendChild(btn("Edit","sm",()=>openWizard({
+        service_id:s.id,
         url:s.url,
         target:s.targets.map(t=>s.scheme==="tcp"?t.replace(/^tcp:\/\//,""):t).join(", "),
         name:s.pool||"",
