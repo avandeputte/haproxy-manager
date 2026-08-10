@@ -374,7 +374,7 @@ const E={
         ["status","Status",r=>certStatusCell(r)],
         ["expires","Expires",r=>certExpiryCell(r)],
         ["last","Last issue",r=>certLastCell(r)]],
-  refs:["acme/accounts","acme/challenges","acme/automations"],
+  refs:["acme/accounts","acme/challenges"],
   pre:loadCertStatus,
   rowActions:[
    {label:"Issue",fn:r=>issueCert(r,false),title:"Request the certificate from the CA now"},
@@ -387,15 +387,8 @@ const E={
    {k:"challenge",l:"Challenge Type",t:"ref",ref:"acme/challenges"},
    {k:"key_type",l:"Key type",t:"select",o:["ec-256","ec-384","rsa-2048","rsa-4096"],d:"ec-256"},
    {k:"auto_renew",l:"Auto-renew",t:"bool",d:true},
-   {k:"automations",l:"Automations",t:"refmulti",ref:"acme/automations",h:"Run after each successful issue/renew, e.g. reload HAProxy and sync to the peer"}]},
+   ]},
 
- "acme/automations":{title:"Automations",add:"Add automation",
-  intro:"Actions that run after a certificate is issued or renewed.",
-  cols:[["name","Name"],["type","Type"],["command","Command",r=>r.type==="custom"?"<span class=mono>"+esc(r.command||"")+"</span>":"—"]],
-  fields:[
-   {k:"name",l:"Name",t:"text"},
-   {k:"type",l:"Type",t:"select",o:["reload_haproxy","restart_haproxy","sync_to_peer","custom"],d:"reload_haproxy"},
-   {k:"command",l:"Command",t:"text",h:"Only for type custom; runs via /bin/sh"}]},
 };
 
 /* settings pages: bound to a GET/PUT endpoint (or a sub-key of /api/local) */
@@ -2025,7 +2018,6 @@ const NAV=[
  ["haproxy/healthchecks","Health Monitors"],
  ["s:haproxy-settings","Settings"],
  ["grp","ADVANCED · ACME","collapse"],
- ["acme/automations","Automations"],
  ["s:acme-settings","Settings"],
 ];
 /* pages with a hand-written renderer (neither CRUD nor a settings form) */

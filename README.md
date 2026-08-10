@@ -147,8 +147,10 @@ modeled on:
 | Accounts | Accounts |
 | Challenge Types | Challenge Types (HTTP-01 / DNS-01) |
 | Certificates | Certificates |
-| Automations | Automations (run after issue/renew) |
 | Settings | Settings |
+
+(OPNsense's Automations have no equivalent here: what has to happen after a
+renewal happens on its own.)
 
 ## How it works
 
@@ -161,10 +163,13 @@ modeled on:
   DNS-01 the nodes would race each other for the same certificate and burn the
   CA's rate limits. A passive node says so instead of trying, and refuses a
   manual Issue or *Renew all now*.
-- **A new certificate is sent to the other nodes automatically.** After a
-  successful issue or renewal the deployed PEM is pushed to every node, so a
-  failover serves the current certificate rather than the one that node last
-  saw. A `sync_to_peer` Automation still works and is no longer needed.
+- **Everything a renewal needs happens by itself.** Once a certificate is
+  written, HAProxy is reloaded so it actually serves it — it keeps certificates
+  in memory, so a new file changes nothing until it reloads — and the PEM is
+  pushed to every other node, so a failover serves the current certificate
+  rather than the one that node last saw. There is nothing to configure: the
+  Automations page is gone, and any automations in an existing configuration are
+  ignored.
 - **ACME** issuance/renewal shells out to [`acme.sh`](https://github.com/acmesh-official/acme.sh).
   Certificates are written as combined `fullchain + key` PEMs into the HAProxy
   certificate directory (what HAProxy's `crt` expects), then the certificate's

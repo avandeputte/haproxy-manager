@@ -133,7 +133,6 @@ DEFAULT_CONFIG = {
         "accounts": [],
         "challenges": [],   # Challenge Types
         "certificates": [],
-        "automations": [],
     },
     # Cluster-wide VRRP settings: identical on every node, so they sync.
     "cluster": {
@@ -185,7 +184,7 @@ DEFAULT_CONFIG = {
 
 VALID_COLLECTIONS = {
     "haproxy": {"servers", "backends", "frontends", "healthchecks", "conditions", "rules"},
-    "acme": {"accounts", "challenges", "certificates", "automations"},
+    "acme": {"accounts", "challenges", "certificates"},
 }
 
 
@@ -1452,10 +1451,6 @@ def propagate_certificate(cfg, cert):
     peers = enabled_peers(cfg)
     if not peers:
         return ""
-    autos = _by_id(cfg["acme"]["automations"])
-    if any((autos.get(a) or {}).get("type") == "sync_to_peer"
-           for a in cert.get("automations") or []):
-        return ""            # the certificate already carries a sync automation
     r = sync_push(load_config())
     if r.get("ok"):
         return "sent to %d other node(s)" % len(peers)
@@ -1538,31 +1533,20 @@ def deploy_cert(cfg, cert):
         p = cert_path(cert)
         p.write_text(fc.read_text() + key.read_text())
         os.chmod(p, 0o600)
-    auto = run_automations(cfg, cert)
+    auto = after_certificate_deployed(cfg, cert)
     return {"ok": True, "log": (out + ("\n" + auto if auto else "")).strip()}
 
 
-def run_automations(cfg, cert):
-    autos = _by_id(cfg["acme"]["automations"])
-    msgs = []
-    for aid in cert.get("automations") or []:
-        a = autos.get(aid)
-        if not a:
-            continue
-        t = a.get("type")
-        if t == "reload_haproxy":
-            rc, out = run(["systemctl", "reload-or-restart", "haproxy"])
-            msgs.append("reload haproxy: " + ("ok" if rc == 0 else out))
-        elif t == "restart_haproxy":
-            rc, out = run(["systemctl", "restart", "haproxy"])
-            msgs.append("restart haproxy: " + ("ok" if rc == 0 else out))
-        elif t == "sync_to_peer":
-            r = sync_push(cfg)
-            msgs.append("sync to peer: " + ("ok" if r.get("ok") else str(r.get("error"))))
-        elif t == "custom" and a.get("command"):
-            rc, out = run(["/bin/sh", "-c", a["command"]])
-            msgs.append("%s: %s" % (a.get("name", "command"), "ok" if rc == 0 else out[-300:]))
-    return "; ".join(msgs)
+def after_certificate_deployed(cfg, cert):
+    """What always has to happen once a certificate lands on disk.
+
+    HAProxy holds certificates in memory, so a new file changes nothing until
+    it reloads -- this used to be an optional Automation, which meant a renewed
+    certificate could sit on disk unserved. Sending it to the other nodes is
+    handled by the caller.
+    """
+    rc, out = run(["systemctl", "reload-or-restart", "haproxy"])
+    return "reloaded HAProxy" if rc == 0 else "HAProxy did not reload: %s" % out.strip()[:200]
 
 
 @app.post("/api/acme/issue/<cid>")
@@ -3132,7 +3116,7 @@ def api_wizard_certificate():
                     "account": account["id"], "challenge": challenge["id"],
                     "key_type": body.get("key_type") or "ec-256",
                     "auto_renew": bool(body.get("auto_renew", True)),
-                    "automations": body.get("automations") or []}
+                    }
             ac["certificates"].append(cert)
             acts.append({"action": "created", "type": "Certificate", "name": cert["name"]})
 
@@ -3509,7 +3493,7 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
                 cert = {"id": str(uuid.uuid4()),
                         "name": _uniq_name({c["name"] for c in ac["certificates"]}, base),
                         "domains": " ".join(hosts), "account": acc_id, "challenge": ch_id,
-                        "key_type": "ec-256", "auto_renew": True, "automations": []}
+                        "key_type": "ec-256", "auto_renew": True}
                 ac["certificates"].append(cert)
                 act("created", "Certificate", cert["name"])
                 if old_hosts and old_hosts[0].lower() != pub["host"].lower():
