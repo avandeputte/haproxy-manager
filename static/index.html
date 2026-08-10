@@ -2116,7 +2116,9 @@ async function renderNotify(){
    {k:"repeat_hours",l:"Repeat an unresolved problem after (hours)",t:"text",
     h:"a problem is announced when it starts, then repeated this often until it clears"},
   ];
-  WHEN.forEach(f=>wb.appendChild(fieldRow(f,st[f.k])));
+  const wfrm=document.createElement("div");wfrm.className="frm";
+  WHEN.forEach(f=>fieldRow(f,st[f.k]).forEach(el=>wfrm.appendChild(el)));
+  wb.appendChild(wfrm);
   const ev=st.events||{};
   const EVENTS=[["certificates","Certificates issued, renewed or failed"],
                 ["watchdog","Services restarted, or beyond repair"],
@@ -2201,14 +2203,20 @@ async function renderNotify(){
     const body=document.createElement("div");
     const common=[{k:"name",l:"Name",t:"text",h:"how it appears in this list"},
                   {k:"enabled",l:"Enabled",t:"bool",d:true}];
-    const typeRow=fieldRow({k:"type",l:"Type",t:"select",d:d.type,
-      o:Object.keys(NOTIFY_TYPES).map(k=>({value:k,label:NOTIFY_TYPES[k].label}))},d.type);
-    common.forEach(f=>body.appendChild(fieldRow(f,d[f.k])));
-    body.appendChild(typeRow);
-    const holder=document.createElement("div");body.appendChild(holder);
+    body.className="frm";
+    common.forEach(f=>fieldRow(f,d[f.k]).forEach(el=>body.appendChild(el)));
+    fieldRow({k:"type",l:"Type",t:"select",d:d.type,
+              o:Object.keys(NOTIFY_TYPES).map(k=>({value:k,label:NOTIFY_TYPES[k].label}))},
+             d.type).forEach(el=>body.appendChild(el));
+    // The type-specific fields are replaced when the type changes, so they get
+    // their own grid rather than being spliced into this one.
+    const holder=document.createElement("div");holder.className="frm";
+    holder.style.gridColumn="1 / -1";
+    body.appendChild(holder);
     const paint=(type)=>{
       holder.innerHTML="";
-      (NOTIFY_TYPES[type]||{fields:[]}).fields.forEach(f=>holder.appendChild(fieldRow(f,d[f.k])));
+      (NOTIFY_TYPES[type]||{fields:[]}).fields
+        .forEach(f=>fieldRow(f,d[f.k]).forEach(el=>holder.appendChild(el)));
     };
     paint(d.type);
     fieldEl("type").onchange=e=>paint(e.target.value);
@@ -2302,7 +2310,9 @@ async function renderWatchdog(){
     h:"after this many it stops trying, so a broken service stays visible instead of flapping"},
    {k:"window",l:"Window (seconds)",t:"text",h:"e.g. 900 for fifteen minutes"},
   ];
-  FIELDS.forEach(f=>sb.appendChild(fieldRow(f,wd.settings[f.k])));
+  const sfrm=document.createElement("div");sfrm.className="frm";
+  FIELDS.forEach(f=>fieldRow(f,wd.settings[f.k]).forEach(el=>sfrm.appendChild(el)));
+  sb.appendChild(sfrm);
   sc.appendChild(sb);
   const foot=document.createElement("div");foot.className="bd";
   foot.style.cssText="display:flex;gap:8px;align-items:center;border-top:1px solid var(--hair)";
