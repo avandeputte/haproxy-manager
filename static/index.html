@@ -1099,6 +1099,15 @@ async function renderCluster(){
   });
   b2.appendChild(f2);
   keepalivedFormExtra(f2);
+  const fp=document.createElement("div");fp.className="hint";fp.style.marginTop="8px";
+  try{
+    const st=await api("status");
+    fp.innerHTML=st.api_key_fp
+      ? 'This node\'s API key fingerprint: <span class=mono><b>'+esc(st.api_key_fp)+"</b></span>. "+
+        "The other nodes must hold a key with this fingerprint for this node."
+      : "No API key is set on this node, so no other node can sync to it.";
+  }catch(e){}
+  b2.appendChild(fp);
   const m2=document.createElement("span");m2.className="hint";m2.style.marginLeft="10px";
   const ft2=document.createElement("div");ft2.style.marginTop="16px";
   ft2.appendChild(btn("Save","pri",async()=>{
@@ -1136,7 +1145,8 @@ function peersCard(peers,loc){
     peers.forEach(p=>{
       const tr=document.createElement("tr");
       tr.innerHTML="<td>"+esc(p.name)+"</td><td class=mono>"+esc(p.url)+"</td>"+
-        "<td>"+(p.has_key?'<span class="pill up">set</span>':'<span class="pill down">missing</span>')+"</td>"+
+        "<td>"+(p.has_key?'<span class="pill up">set</span><div class=sub>fingerprint <span class=mono>'+
+            esc(p.key_fp)+"</span></div>":'<span class="pill down">missing</span>')+"</td>"+
         "<td>"+(p.enabled===false?'<span class="pill off">no</span>':"yes")+"</td>";
       const act=document.createElement("td");act.style.textAlign="right";act.style.whiteSpace="nowrap";
       const out=document.createElement("div");out.className="sub";

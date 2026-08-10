@@ -396,6 +396,12 @@ def set_admin(cfg, username, password):
     return cfg
 
 
+def key_fingerprint(key):
+    """A short, stable tag for a key, so two nodes can be compared by eye."""
+    key = (key or "").strip()
+    return hashlib.sha256(key.encode()).hexdigest()[:8] if key else ""
+
+
 def key_matches(stored, presented):
     """Compare API keys, ignoring whitespace a copy-and-paste picked up.
 
@@ -1269,6 +1275,7 @@ def api_status():
         "certs": certs,
         "acme_installed": Path(ACME_SH).exists(),
         "peers": len(cfg["local"]["sync"].get("peers") or []),
+        "api_key_fp": key_fingerprint(cfg["local"].get("api_key")),
         "sync_available": _requests is not None,
     })
 
@@ -1532,6 +1539,7 @@ def mesh_for(cfg, target):
         out.append({"id": "self-" + hashlib.sha256(me.encode()).hexdigest()[:12],
                     "name": socket.gethostname(), "url": me,
                     "api_key": cfg["local"].get("api_key", ""),
+                    "self": True,          # authoritative: it is this node's own key
                     "verify_tls": False, "enabled": True})
     return out
 
@@ -1784,7 +1792,8 @@ def api_peers():
     if request.method == "GET":
         # Never hand the stored keys back to the browser.
         return jsonify([{k: v for k, v in p.items() if k != "api_key"} |
-                        {"has_key": bool(p.get("api_key"))} for p in peers])
+                        {"has_key": bool((p.get("api_key") or "").strip()),
+                         "key_fp": key_fingerprint(p.get("api_key"))} for p in peers])
     body = request.get_json(force=True) or {}
     url = (body.get("url") or "").strip().rstrip("/")
     if not url:
@@ -1866,10 +1875,13 @@ def api_peer_test(pid):
             pass
         except Exception:
             pass
-        return jsonify({"ok": False, "error":
-                        "%s rejected this key. This entry must hold the key shown under "
-                        "Cluster > This node ON THAT NODE -- not this node's own key.%s"
-                        % (url, detail)})
+        return jsonify({"ok": False, "key_fp": key_fingerprint(stored), "error":
+                        "%s rejected this key. This entry holds a key with fingerprint %s -- open "
+                        "Cluster > This node on %s and check the fingerprint shown beside its API "
+                        "key. If they differ, that is the whole problem: copy that node's key here. "
+                        "(This entry must hold THAT node's key, not this node's own.)%s"
+                        % (url, key_fingerprint(stored) or "(empty)",
+                           urlsplit(url).hostname or url, detail)})
 
     if r.status_code != 200:
         return jsonify({"ok": False, "error": "%s answered HTTP %s" % (url, r.status_code)})
@@ -2007,6 +2019,7 @@ def api_sync_receive():
     if isinstance(mesh, list) and mesh:
         mine = (cfg["local"].get("node_url") or "").rstrip("/").lower()
         my_key = cfg["local"].get("api_key", "")
+        existing = list(cfg["local"]["sync"].get("peers") or [])
         kept = []
         for p in mesh:
             if not isinstance(p, dict) or not p.get("url"):
@@ -2016,9 +2029,17 @@ def api_sync_receive():
                 continue
             if my_key and p.get("api_key") == my_key:
                 continue
-            kept.append({"id": p.get("id") or str(uuid.uuid4()),
+            # A key corrected here must survive the next inbound list. The
+            # sender speaks for itself, so its own entry wins; for every other
+            # node the incoming key only fills a gap.
+            url_l = p["url"].rstrip("/").lower()
+            local = next((q for q in existing if (q.get("url") or "").rstrip("/").lower() == url_l), None)
+            key = (p.get("api_key") or "").strip()
+            if local and not p.get("self"):
+                key = (local.get("api_key") or "").strip() or key
+            kept.append({"id": (local or {}).get("id") or p.get("id") or str(uuid.uuid4()),
                          "name": p.get("name") or urlsplit(p["url"]).hostname or "peer",
-                         "url": p["url"].rstrip("/"), "api_key": p.get("api_key", ""),
+                         "url": p["url"].rstrip("/"), "api_key": key,
                          "verify_tls": bool(p.get("verify_tls")),
                          "enabled": bool(p.get("enabled", True))})
         if kept:
