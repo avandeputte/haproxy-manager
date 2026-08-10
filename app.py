@@ -515,8 +515,16 @@ def _auth():
     if not authorised:
         authorised = key_matches(cfg["local"].get("api_key"), request.headers.get("X-API-Key"))
     if not authorised:
-        return jsonify({"ok": False, "error":
-                        "not authorised: sign in, or present this node's API key as X-API-Key"}), 401
+        presented = request.headers.get("X-API-Key")
+        # header_seen is always reported: a request that arrives with no key at
+        # all is the signature of something stripping it in transit.
+        body = {"ok": False, "hostname": socket.gethostname(),
+                "header_seen": presented is not None,
+                "error": "not authorised: sign in, or present this node's API key as X-API-Key"}
+        if presented is not None:          # a machine tried a key: help it compare
+            body.update({"presented_fp": key_fingerprint(presented),
+                         "expected_fp": key_fingerprint(cfg["local"].get("api_key"))})
+        return jsonify(body), 401
 
     if request.method in ("POST", "PUT", "DELETE", "PATCH") and \
             not request.path.startswith(LOCAL_WRITE_PREFIXES):
@@ -1506,6 +1514,23 @@ def enabled_peers(cfg):
     return [p for p in (cfg["local"]["sync"].get("peers") or []) if p.get("enabled", True) and p.get("url")]
 
 
+def _key_verdict(d, url):
+    """Turn a rejection into the one sentence that identifies the cause."""
+    host = d.get("hostname") or url
+    if not d.get("header_seen"):
+        return ("%s never received the X-API-Key header -- something between the two nodes is "
+                "stripping it. Check any reverse proxy in front of %s." % (host, url))
+    sent, want = d.get("presented_fp"), d.get("expected_fp")
+    if not want:
+        return "%s has no API key set, so it refuses every sync." % host
+    if sent == want:
+        return ("%s says the key does not match, yet both fingerprints are %s. The key is being "
+                "altered in transit -- check any proxy between the two nodes." % (host, sent))
+    return ("%s expects a key fingerprinted %s, but this node sent %s. Open Cluster > This node on "
+            "%s, press Show, and paste that key into this peer's entry."
+            % (host, want, sent, host))
+
+
 def push_to_peer(peer, payload):
     """Send the shared configuration to one node."""
     url = (peer.get("url") or "").rstrip("/")
@@ -1514,8 +1539,18 @@ def push_to_peer(peer, payload):
                            headers={"X-API-Key": peer.get("api_key", "")},
                            timeout=90, verify=bool(peer.get("verify_tls")))
         if r.status_code != 200:
-            return {"ok": False, "name": peer.get("name") or url,
-                    "error": "HTTP %s: %s" % (r.status_code, r.text[:200])}
+            out = {"ok": False, "name": peer.get("name") or url,
+                   "error": "HTTP %s: %s" % (r.status_code, r.text[:200])}
+            try:
+                d = r.json()
+                if d.get("expected_fp") or d.get("presented_fp"):
+                    out["error"] = _key_verdict(d, url)
+                    out["diagnosis"] = d
+                elif d.get("error"):
+                    out["error"] = d["error"]
+            except Exception:
+                pass
+            return out
         return {"ok": True, "name": peer.get("name") or url, "peer": r.json()}
     except Exception as e:
         return {"ok": False, "name": peer.get("name") or url, "error": str(e)}
@@ -1854,6 +1889,12 @@ def api_peer_test(pid):
         return jsonify({"ok": False, "error": "cannot reach %s: %s" % (url, e)})
 
     if r.status_code == 401:
+        try:
+            d = r.json()
+            if d.get("expected_fp") or d.get("header_seen") is not None:
+                return jsonify({"ok": False, "error": _key_verdict(d, url), "diagnosis": d})
+        except Exception:
+            pass
         # Identify it anyway: /api/whoami needs no key, so we can at least name
         # the version, and the trimming fix only helps once THAT node has it.
         detail = ""
@@ -1998,11 +2039,14 @@ def api_sync_receive():
         return jsonify({"ok": False, "error":
                         "%s has no API key set, so it refuses every sync. Set one under "
                         "Cluster > This node there." % socket.gethostname()}), 403
-    if not key_matches(key, request.headers.get("X-API-Key")):
+    presented = request.headers.get("X-API-Key")
+    if not key_matches(key, presented):
         return jsonify({"ok": False, "error":
-                        "%s rejected the API key. The sending node must hold the key configured "
-                        "under Cluster > This node on %s."
-                        % (socket.gethostname(), socket.gethostname())}), 401
+                        "%s rejected the API key." % socket.gethostname(),
+                        "hostname": socket.gethostname(),
+                        "header_seen": presented is not None,
+                        "presented_fp": key_fingerprint(presented),
+                        "expected_fp": key_fingerprint(key)}), 401
     data = request.get_json(force=True) or {}
     conf = data.get("config") or {}
     if "haproxy" in conf:
