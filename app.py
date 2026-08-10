@@ -741,9 +741,19 @@ def render_haproxy(cfg):
                 A("    option mysql-check user %s%s" % (_sec(hc.get("db_user") or "haproxy"),
                                                         " post-41" if hc.get("mysql_post41", True) else ""))
             # "tcp" needs nothing here: `check` on the server line is a connect test
+        if be.get("log_health_checks"):
+            A("    option log-health-checks")
         use_cookie = be.get("persistence") == "cookie" and mode == "http"
         if use_cookie:
             A("    cookie %s insert indirect nocache" % (be.get("cookie_name") or "SRVID"))
+        elif be.get("persistence") == "source":
+            # Pin a client to one server by source address -- the usual choice
+            # for TCP services, where there is no cookie to work with.
+            # HAProxy spells the IPv4 type "ip"; "ipv4" is rejected outright.
+            stype = be.get("stick_type") if be.get("stick_type") in ("ip", "ipv6") else "ip"
+            A("    stick-table type %s size %s expire %s" % (
+                stype, _sec(be.get("stick_size") or "50k"), _sec(be.get("stick_expire") or "30m")))
+            A("    stick on src")
         for sid in be.get("servers") or []:
             sv = servers.get(sid)
             if not sv or not sv.get("enabled", True):
@@ -751,6 +761,8 @@ def render_haproxy(cfg):
             parts = ["server %s %s:%s" % (_sec(sv["name"]), sv.get("address", ""), sv.get("port", ""))]
             if be.get("healthcheck_enabled"):
                 parts.append("check inter %s" % inter)
+                if sv.get("check_port"):
+                    parts.append("port %s" % _sec(str(sv["check_port"])))
             if sv.get("weight"):
                 parts.append("weight %s" % sv["weight"])
             if sv.get("ssl"):
@@ -1287,26 +1299,38 @@ def api_sync_receive():
 # publish wizard: one URL + one target -> every object needed to serve it
 # --------------------------------------------------------------------------
 
-def _split_url(raw, what):
-    """Parse a user-typed URL into (scheme, host, port, path)."""
+def _split_url(raw, what, default_scheme="http", allow=("http", "https", "tcp")):
+    """Parse a user-typed URL into scheme/host/port/path (and an optional name).
+
+    Targets may carry an explicit server name: galera1=192.168.1.81:3306.
+    """
     raw = (raw or "").strip()
     if not raw:
         return None, "%s is required" % what
+    label = ""
+    if "=" in raw.split("://")[-1] and "://" not in raw.split("=")[0]:
+        label, raw = raw.split("=", 1)
+        label, raw = label.strip(), raw.strip()
     if "://" not in raw:
-        raw = "http://" + raw          # be forgiving: 192.168.1.100:1781
+        raw = default_scheme + "://" + raw   # be forgiving: 192.168.1.100:1781
     parts = urlsplit(raw)
-    if parts.scheme not in ("http", "https"):
-        return None, "%s must be an http:// or https:// URL" % what
+    if parts.scheme not in allow:
+        return None, "%s must be one of %s" % (what, ", ".join(s + "://" for s in allow))
     if not parts.hostname:
         return None, "%s has no host name" % what
     try:
-        port = parts.port or (443 if parts.scheme == "https" else 80)
+        port = parts.port
     except ValueError:
         return None, "%s has an invalid port" % what
+    if not port:
+        if parts.scheme == "tcp":
+            return None, "%s needs an explicit port, e.g. tcp://0.0.0.0:3306" % what
+        port = 443 if parts.scheme == "https" else 80
     path = parts.path or ""
     if path in ("/", ""):
         path = ""
-    return {"scheme": parts.scheme, "host": parts.hostname, "port": port, "path": path}, None
+    return {"scheme": parts.scheme, "host": parts.hostname, "port": port,
+            "path": path, "label": label}, None
 
 
 def _uniq_name(existing, base):
@@ -1432,7 +1456,9 @@ def _place_rule(hp, rule_ids, rule):
 
 def wizard_publish(cfg, pub, tgts, name=None, want_cert=True, account=None,
                    challenge=None, http_redirect=True, health=None,
-                   certificate_id=None, new_certificate=False):
+                   certificate_id=None, new_certificate=False,
+                   balance=None, persistence=None, stick_size=None, stick_expire=None,
+                   stick_type=None, log_health_checks=False, check_port=None):
     """Create (or update) everything needed to serve `pub` from `tgts`.
 
     Re-running for the same public host updates that mapping instead of adding
@@ -1444,8 +1470,14 @@ def wizard_publish(cfg, pub, tgts, name=None, want_cert=True, account=None,
     def act(action, kind, nm):
         acts.append({"action": action, "type": kind, "name": nm})
 
-    base = name.strip() if name else (pub["host"].split(".")[0] +
-                                      ("-" + _sec(pub["path"].strip("/")).replace("/", "-") if pub["path"] else ""))
+    is_tcp = pub["scheme"] == "tcp"
+    if name and name.strip():
+        base = name.strip()
+    elif is_tcp:
+        base = "tcp-%d" % pub["port"]
+    else:
+        base = pub["host"].split(".")[0] + \
+            ("-" + _sec(pub["path"].strip("/")).replace("/", "-") if pub["path"] else "")
 
     # -- Real Servers -----------------------------------------------------
     # The targets given here ARE the pool's servers: publishing the same URL
@@ -1458,15 +1490,28 @@ def wizard_publish(cfg, pub, tgts, name=None, want_cert=True, account=None,
         if srv:
             act("reused", "Real Server", srv["name"])
         else:
+            default_name = base + "-srv" if len(tgts) == 1 else "%s-%s" % (base, t["host"])
             srv = {"id": str(uuid.uuid4()),
                    "name": _uniq_name({s["name"] for s in hp["servers"]},
-                                      base + "-srv" if len(tgts) == 1 else "%s-%s" % (base, t["host"])),
+                                      t.get("label") or default_name),
                    "address": t["host"], "port": t["port"], "enabled": True,
                    "ssl": t["scheme"] == "https", "ssl_verify": False,
                    "description": WIZARD_MARK}
             hp["servers"].append(srv)
             act("created", "Real Server", srv["name"])
+        if check_port:
+            srv["check_port"] = check_port
         srv_ids.append(srv["id"])
+
+    pool_opts = {
+        "mode": "tcp" if is_tcp else "http",
+        "balance": balance or ("source" if is_tcp else "roundrobin"),
+        "persistence": persistence or "none",
+        "stick_size": stick_size or "50k",
+        "stick_expire": stick_expire or "30m",
+        "stick_type": stick_type if stick_type in ("ip", "ipv6") else "ip",
+        "log_health_checks": bool(log_health_checks),
+    }
 
     # -- Health Monitor ---------------------------------------------------
     monitor = None
@@ -1501,17 +1546,43 @@ def wizard_publish(cfg, pub, tgts, name=None, want_cert=True, account=None,
         pool["servers"] = srv_ids
         pool["healthcheck_enabled"] = bool(monitor)
         pool["healthcheck"] = monitor["id"] if monitor else ""
+        pool.update(pool_opts)
         act("updated" if previous != srv_ids else "reused", "Backend Pool", pool["name"])
         _drop_orphan_wizard_servers(hp, previous, acts)
     else:
         pool = {"id": str(uuid.uuid4()),
                 "name": _uniq_name({b["name"] for b in hp["backends"]}, base),
-                "mode": "http", "balance": "roundrobin", "enabled": True,
-                "servers": srv_ids,
+                "enabled": True, "servers": srv_ids,
                 "healthcheck_enabled": bool(monitor),
                 "healthcheck": monitor["id"] if monitor else ""}
+        pool.update(pool_opts)
         hp["backends"].append(pool)
         act("created", "Backend Pool", pool["name"])
+
+    # -- TCP: a listening port sent straight to the pool ------------------
+    # TCP carries no host name, so a port serves exactly one pool: no
+    # conditions, no rules, just bind + default_backend.
+    if is_tcp:
+        fe = _find(hp["frontends"], lambda f: pub["port"] in _bind_ports(f))
+        if fe:
+            if fe.get("mode") != "tcp":
+                raise ValueError("port %d is already used by the HTTP service \"%s\"" % (pub["port"], fe["name"]))
+            if fe.get("default_backend") and fe["default_backend"] != pool["id"]:
+                other = _by_id(hp["backends"]).get(fe["default_backend"])
+                raise ValueError("port %d already forwards to the pool \"%s\"; delete that service first"
+                                 % (pub["port"], other["name"] if other else "?"))
+            fe["default_backend"] = pool["id"]
+            act("updated", "Public Service", fe["name"])
+        else:
+            fe = {"id": str(uuid.uuid4()),
+                  "name": _uniq_name({f["name"] for f in hp["frontends"]}, base + "-listener"),
+                  "enabled": True, "mode": "tcp",
+                  "binds": "%s:%d" % (pub["host"] or "0.0.0.0", pub["port"]),
+                  "ssl_enabled": False, "certificates": [], "rules": [],
+                  "default_backend": pool["id"], "custom": ""}
+            hp["frontends"].append(fe)
+            act("created", "Public Service", fe["name"])
+        return acts, warns
 
     # -- Conditions: host, and a path prefix when the URL has one ---------
     cond_ids = []
@@ -1643,10 +1714,62 @@ def api_services():
     servers, rules = _by_id(hp["servers"]), _by_id(hp["rules"])
     certs = _by_id(cfg["acme"]["certificates"])
 
+    monitors = _by_id(hp["healthchecks"])
+
+    def pool_settings(pool):
+        """Everything the wizard would need to re-create this mapping unchanged."""
+        if not pool:
+            return {}
+        first = next((servers[s] for s in (pool.get("servers") or []) if s in servers), {})
+        m = monitors.get(pool.get("healthcheck")) if pool.get("healthcheck_enabled") else None
+        return {
+            "balance": pool.get("balance") or "roundrobin",
+            "persistence": pool.get("persistence") or "none",
+            "stick_type": pool.get("stick_type") or "ip",
+            "stick_size": pool.get("stick_size") or "50k",
+            "stick_expire": pool.get("stick_expire") or "30m",
+            "log_health_checks": bool(pool.get("log_health_checks")),
+            "check_port": first.get("check_port") or "",
+            "health": {"type": m.get("type") if m else "none",
+                       "interval": (m or {}).get("interval") or "2s",
+                       "uri": (m or {}).get("http_uri") or "/",
+                       "status": (m or {}).get("expect_status") or "",
+                       "user": (m or {}).get("db_user") or ""},
+        }
+
+    def pool_targets(pool):
+        out = []
+        for sid in (pool.get("servers") if pool else []) or []:
+            s = servers.get(sid)
+            if s:
+                out.append("%s://%s:%s" % ("https" if s.get("ssl") else "http",
+                                           s.get("address"), s.get("port")))
+        return out
+
     out = []
     for fe in hp["frontends"]:
         ports = sorted(_bind_ports(fe))
         scheme = "https" if fe.get("ssl_enabled") else "http"
+
+        # A TCP listener carries no host name: the port itself is the service.
+        if fe.get("mode") == "tcp":
+            pool = backends.get(fe.get("default_backend"))
+            if not pool:
+                continue
+            bind = (fe.get("binds") or "").splitlines()[0].strip() if fe.get("binds") else ""
+            out.append(dict(pool_settings(pool), **{
+                "id": "fe:" + fe["id"],
+                "url": "tcp://%s" % (bind or (":%d" % ports[0] if ports else "?")),
+                "host": bind.rsplit(":", 1)[0] if ":" in bind else "", "path": "", "scheme": "tcp",
+                "port": ports[0] if ports else None,
+                "targets": [t.replace("http://", "tcp://") for t in pool_targets(pool)],
+                "pool": pool["name"], "frontend": fe["name"], "frontend_id": fe["id"],
+                "enabled": fe.get("enabled", True) and pool.get("enabled", True),
+                "certificate": None, "certificate_id": None, "certificate_match": None,
+                "certificate_status": None, "expires_iso": None, "days_left": None,
+            }))
+            continue
+
         for rid in fe.get("rules") or []:
             rule = rules.get(rid)
             if not rule or rule.get("type") != "use_backend":
@@ -1664,12 +1787,7 @@ def api_services():
                 continue
 
             pool = backends.get(rule.get("backend"))
-            targets = []
-            for sid in (pool.get("servers") if pool else []) or []:
-                s = servers.get(sid)
-                if s:
-                    targets.append("%s://%s:%s" % ("https" if s.get("ssl") else "http",
-                                                   s.get("address"), s.get("port")))
+            targets = pool_targets(pool)
             default_port = 443 if scheme == "https" else 80
             shown_port = "" if (not ports or ports[0] == default_port) else ":%d" % ports[0]
 
@@ -1677,7 +1795,7 @@ def api_services():
             cert, match = cert_for_host(attached, host)
             info = cert_details(cert_path(cert)) if cert else None
 
-            out.append({
+            out.append(dict(pool_settings(pool), **{
                 "id": rule["id"],
                 "url": "%s://%s%s%s" % (scheme, host, shown_port, path),
                 "host": host, "path": path, "scheme": scheme,
@@ -1692,7 +1810,7 @@ def api_services():
                 "certificate_status": info["status"] if info else None,
                 "expires_iso": info["expires_iso"] if info else None,
                 "days_left": info["days_left"] if info else None,
-            })
+            }))
     return jsonify(out)
 
 
@@ -1702,6 +1820,28 @@ def api_service_delete(rid):
     with _lock:
         cfg = load_config()
         hp = cfg["haproxy"]
+
+        # "fe:<id>" is a TCP listener: the frontend itself is the service.
+        if rid.startswith("fe:"):
+            fe = _by_id(hp["frontends"]).get(rid[3:])
+            if not fe:
+                abort(404)
+            pool_id = fe.get("default_backend")
+            hp["frontends"] = [f for f in hp["frontends"] if f.get("id") != fe["id"]]
+            removed = [{"type": "Public Service", "name": fe.get("name")}]
+            pool = _by_id(hp["backends"]).get(pool_id)
+            still_used = any(r.get("backend") == pool_id for r in hp["rules"]) or \
+                any(f.get("default_backend") == pool_id for f in hp["frontends"])
+            if pool and not still_used:
+                server_ids = list(pool.get("servers") or [])
+                hp["backends"] = [b for b in hp["backends"] if b.get("id") != pool_id]
+                removed.append({"type": "Backend Pool", "name": pool.get("name")})
+                dropped = []
+                _drop_orphan_wizard_servers(hp, server_ids, dropped)
+                removed.extend({"type": d["type"], "name": d["name"]} for d in dropped)
+            save_config(cfg)
+            return jsonify({"ok": True, "removed": removed, "note": "Press Apply."})
+
         rule = _by_id(hp["rules"]).get(rid)
         if not rule:
             abort(404)
@@ -1747,7 +1887,7 @@ def api_service_delete(rid):
 @app.post("/api/wizard/publish")
 def api_wizard_publish():
     body = request.get_json(force=True, silent=True) or {}
-    pub, err = _split_url(body.get("url"), "The public URL")
+    pub, err = _split_url(body.get("url"), "The public URL", default_scheme="https")
     if err:
         return jsonify({"ok": False, "error": err}), 400
 
@@ -1756,7 +1896,9 @@ def api_wizard_publish():
         return jsonify({"ok": False, "error": "The target address is required"}), 400
     tgts = []
     for raw in raw_targets:
-        t, err = _split_url(raw, "The target address \"%s\"" % raw)
+        # A tcp:// service forwards raw TCP, so its targets default to tcp too.
+        t, err = _split_url(raw, "The target address \"%s\"" % raw,
+                            default_scheme="tcp" if pub["scheme"] == "tcp" else "http")
         if err:
             return jsonify({"ok": False, "error": err}), 400
         tgts.append(t)
@@ -1776,7 +1918,16 @@ def api_wizard_publish():
                 health=body.get("health") or None,
                 certificate_id=body.get("certificate_id") or None,
                 new_certificate=bool(body.get("new_certificate")),
+                balance=body.get("balance") or None,
+                persistence=body.get("persistence") or None,
+                stick_size=body.get("stick_size") or None,
+                stick_expire=body.get("stick_expire") or None,
+                stick_type=body.get("stick_type") or None,
+                log_health_checks=bool(body.get("log_health_checks")),
+                check_port=body.get("check_port") or None,
             )
+        except ValueError as e:                     # a rejected request, not a crash
+            return jsonify({"ok": False, "error": str(e)}), 400
         except Exception as e:                      # a malformed draft must not corrupt the store
             return jsonify({"ok": False, "error": "could not build the configuration: %s" % e}), 400
 

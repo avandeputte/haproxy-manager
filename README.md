@@ -27,7 +27,30 @@ and the resulting `haproxy.cfg`, before anything is written.
   `*.iothing.net` correctly does **not** cover `iothing.net` or
   `a.b.iothing.net`. Set Certificate to *always request a new certificate* to
   override, or *no certificate* to terminate TLS elsewhere.
-- **Several targets**, comma separated, are load balanced across.
+- **Several targets**, comma separated, are load balanced across. Each may be
+  named: `galera1=192.168.1.81:3306`.
+- **Raw TCP** works too — give it `tcp://0.0.0.0:3306` as the public URL and the
+  wizard builds a TCP listener, a TCP-mode pool and the servers. TCP carries no
+  host name, so one port serves exactly one pool; publishing a port that is
+  already taken is refused rather than silently merged. Load balancing,
+  source-IP stickiness (a stick table), health check logging and a separate
+  check port are all part of the same form, so this comes out of it:
+
+  ```
+  backend be_mariadb_galera_pool
+      mode tcp
+      balance source
+      option mysql-check user haproxy post-41
+      option log-health-checks
+      stick-table type ip size 50k expire 30m
+      stick on src
+      server galera1 192.168.1.81:3306 check inter 3s port 3306
+      server galera2 192.168.1.82:3306 check inter 3s port 3306
+      server galera3 192.168.1.83:3306 check inter 3s port 3306
+  ```
+
+  Note `type ip`: that is how HAProxy spells an IPv4 stick table. `type ipv4`
+  is rejected outright (`unknown type 'ipv4'`).
 - **A health check** can be set up in the same step, and servers that fail it are
   taken out of rotation:
 
