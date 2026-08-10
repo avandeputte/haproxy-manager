@@ -8,8 +8,9 @@
 #
 #   sudo ./install.sh
 #
-# Run it on BOTH nodes. Re-running upgrades an existing install in place;
-# config.json, issued certificates and node-local settings are preserved.
+# Run it on BOTH nodes. When haproxy-manager is already installed it offers to
+# update or remove it; --update / --uninstall pick one without asking. An update
+# preserves config.json, issued certificates and node-local settings.
 #
 # Options (flags, or the equivalent environment variables):
 #   --repo   <owner/name>  HAM_REPO      GitHub repository        (avandeputte/haproxy-manager)
@@ -45,6 +46,13 @@ UNIT=/etc/systemd/system/haproxy-manager.service
 SRC=""        # populated by fetch_source
 TMPDIR_=""    # cleaned up on exit
 ACME_OK=1
+MODE=""            # install | update | uninstall (empty => decide at runtime)
+MODE_FROM_FLAG=0   # the mode was chosen on the command line, not by prompting
+PURGE=0            # with uninstall: also delete configuration and certificates
+ASSUME_YES=0
+PORT_SET=0; LISTEN_SET=0
+[ "${HAM_PORT+set}" = "set" ]   && PORT_SET=1
+[ "${HAM_LISTEN+set}" = "set" ] && LISTEN_SET=1
 
 # --------------------------------------------------------------------------
 # output helpers
@@ -80,6 +88,13 @@ Options (or the equivalent environment variable):
   --skip-acme              HAM_SKIP_ACME  do not install acme.sh
   --tarball <url|path>     HAM_TARBALL    install from this tarball instead of GitHub
                            GITHUB_TOKEN   token for a private repository
+
+When haproxy-manager is already installed you are asked what to do. To decide up
+front:
+  --update                 reinstall the app over the existing install
+  --uninstall              remove the service and the app, keep config + certs
+  --purge                  uninstall and also delete config.json and certificates
+  -y, --yes                do not ask for confirmation
 EOF
 }
 
@@ -92,8 +107,12 @@ parse_args() {
         case "$1" in
             --repo)       REPO="${2:?--repo needs a value}"; shift 2 ;;
             --ref)        REF="${2:?--ref needs a value}"; shift 2 ;;
-            --port)       PORT="${2:?--port needs a value}"; shift 2 ;;
-            --listen)     LISTEN="${2:?--listen needs a value}"; shift 2 ;;
+            --port)       PORT="${2:?--port needs a value}"; PORT_SET=1; shift 2 ;;
+            --listen)     LISTEN="${2:?--listen needs a value}"; LISTEN_SET=1; shift 2 ;;
+            --update|--upgrade) MODE=update; MODE_FROM_FLAG=1; shift ;;
+            --uninstall|--remove) MODE=uninstall; MODE_FROM_FLAG=1; shift ;;
+            --purge)      MODE=uninstall; PURGE=1; MODE_FROM_FLAG=1; shift ;;
+            -y|--yes)     ASSUME_YES=1; shift ;;
             --dest)       DEST="${2:?--dest needs a value}"; shift 2 ;;
             --tarball)    TARBALL="${2:?--tarball needs a value}"; shift 2 ;;
             --api-key)    HAM_API_KEY="${2:?--api-key needs a value}"; shift 2 ;;
@@ -119,6 +138,147 @@ preflight() {
         DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl
     }
     case "$PORT" in ''|*[!0-9]*) die "invalid port: $PORT" ;; esac
+}
+
+# --------------------------------------------------------------------------
+# existing installation: update or remove
+# --------------------------------------------------------------------------
+
+detect_install() {
+    INSTALLED=0
+    if [ -f "$UNIT" ] || [ -f "$DEST/app.py" ]; then
+        INSTALLED=1
+    fi
+    [ "$INSTALLED" = "1" ] || return 0
+
+    # Keep the port/address the node already runs on unless asked otherwise.
+    # (if/then, not `a && b`: a function ending on a false && list would abort
+    # the script under `set -e`.)
+    local cur
+    cur="$(sed -n 's/^Environment=HAM_PORT=//p' "$UNIT" 2>/dev/null | tail -1)"
+    if [ -n "$cur" ] && [ "$PORT_SET" = "0" ]; then PORT="$cur"; fi
+    cur="$(sed -n 's/^Environment=HAM_LISTEN=//p' "$UNIT" 2>/dev/null | tail -1)"
+    if [ -n "$cur" ] && [ "$LISTEN_SET" = "0" ]; then LISTEN="$cur"; fi
+    return 0
+}
+
+describe_install() {
+    local state
+    state="$(systemctl is-active haproxy-manager 2>/dev/null || true)"
+    printf '%s>>%s haproxy-manager is already installed\n' "$C_B" "$C_0"
+    echo "     location: $DEST"
+    echo "     service:  haproxy-manager.service (${state:-unknown})"
+    echo "     address:  http://$(hostname -I 2>/dev/null | awk '{print $1}'):$PORT"
+    echo "     data:     $DATA$([ -e "$DATA/config.json" ] && echo " (config.json present)")"
+}
+
+have_tty() {
+    # A terminal to ask on. Not `[ -r /dev/tty ]`: the device node is readable
+    # by permission even where opening it fails (ENXIO), e.g. under `docker exec`
+    # or in a cron job -- only an actual open tells the truth.
+    ( exec 3</dev/tty ) 2>/dev/null
+}
+
+confirm() {
+    # $1 = question. Reads the terminal, not stdin: stdin is the script itself
+    # when this is piped from curl.
+    [ "$ASSUME_YES" = "1" ] && return 0
+    if ! have_tty; then
+        # An explicit --uninstall/--purge on the command line is the consent;
+        # there is no way to ask, so proceed rather than silently doing nothing.
+        if [ "$MODE_FROM_FLAG" = "1" ]; then
+            warn "No terminal to confirm on -- proceeding as requested on the command line."
+            return 0
+        fi
+        return 1
+    fi
+    local a
+    printf '%s?? %s [y/N] %s' "$C_Y" "$1" "$C_0"
+    read -r a < /dev/tty || return 1
+    case "$a" in [yY]|[yY][eE][sS]) return 0 ;; *) return 1 ;; esac
+}
+
+choose_mode() {
+    [ -n "$MODE" ] && return 0
+    if [ "$INSTALLED" = "0" ]; then MODE=install; return 0; fi
+
+    echo
+    describe_install
+    if ! have_tty; then
+        MODE=update
+        echo
+        warn "No terminal to ask on -- updating in place."
+        warn "   Re-run with --uninstall (or --purge) to remove it instead."
+        return 0
+    fi
+    cat <<EOF
+
+   [U] Update    reinstall the app, keep configuration and certificates
+   [R] Remove    stop and delete the service and the app, keep $DATA
+   [P] Purge     remove everything, including config.json and certificates
+   [C] Cancel
+
+EOF
+    local a
+    printf '%s?? %s' "$C_Y" "What would you like to do? [U/r/p/c] $C_0"
+    read -r a < /dev/tty || a=""
+    case "$a" in
+        ""|[uU]*) MODE=update ;;
+        [rR]*)    MODE=uninstall ;;
+        [pP]*)    MODE=uninstall; PURGE=1 ;;
+        *)        log "Cancelled -- nothing was changed."; exit 0 ;;
+    esac
+}
+
+do_uninstall() {
+    if [ "$INSTALLED" = "0" ]; then
+        log "haproxy-manager is not installed -- nothing to remove."
+        exit 0
+    fi
+
+    echo
+    echo "   The following will be removed:"
+    echo "     - haproxy-manager.service (stopped and disabled)"
+    echo "     - $DEST"
+    echo "     - /etc/sysctl.d/60-haproxy-manager.conf"
+    if [ "$PURGE" = "1" ]; then
+        echo "     - $DATA  (config.json, API key -- ALL settings)"
+        echo "     - $CERTS (deployed certificate PEMs)"
+    else
+        echo "   Kept: $DATA and $CERTS (use --purge to delete those too)."
+    fi
+    echo "   Kept: the haproxy and keepalived packages, their generated configs,"
+    echo "         and acme.sh in $ACME_HOME."
+    echo
+    if ! confirm "Remove haproxy-manager?"; then
+        log "Cancelled -- nothing was changed."
+        exit 0
+    fi
+
+    log "Stopping and disabling the service"
+    systemctl disable --now haproxy-manager >/dev/null 2>&1 || true
+    rm -f "$UNIT"
+    systemctl daemon-reload
+    systemctl reset-failed haproxy-manager >/dev/null 2>&1 || true
+
+    log "Removing $DEST"
+    rm -rf "$DEST"
+    rm -f /etc/sysctl.d/60-haproxy-manager.conf
+    sysctl -q --system >/dev/null 2>&1 || true
+
+    if [ "$PURGE" = "1" ]; then
+        log "Purging $DATA and $CERTS"
+        rm -rf "$DATA" "$CERTS"
+    fi
+
+    echo
+    printf '%s>> haproxy-manager removed.%s\n' "$C_B" "$C_0"
+    if [ "$PURGE" = "0" ]; then
+        echo "   Your settings are still in $DATA -- reinstalling picks them up again."
+    fi
+    echo "   HAProxy and Keepalived were left running with their current configuration."
+    echo "   To remove them too: apt-get purge haproxy keepalived"
+    exit 0
 }
 
 # --------------------------------------------------------------------------
@@ -348,6 +508,10 @@ EOF
 main() {
     parse_args "$@"
     preflight
+    detect_install
+    choose_mode
+    [ "$MODE" = "uninstall" ] && do_uninstall
+    [ "$MODE" = "update" ] && log "Updating the existing installation"
     install_packages
     fetch_source
     install_acme

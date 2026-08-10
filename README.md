@@ -43,6 +43,10 @@ UI is modeled on:
   so you can keep port 80 fronted by HAProxy and still validate.
 - Before a real certificate exists, Apply drops in a short-lived **self-signed
   placeholder** so HAProxy can start; the first successful issue replaces it.
+- **Certificate status** is shown on Overview and under ACME → Certificates:
+  whether the PEM on disk is a real certificate or still the placeholder, its
+  issuer, its expiry date with the days remaining, and the outcome, timestamp
+  and full `acme.sh` log of the last issue/renew attempt (the **Log** button).
 
 ## High availability (active-passive)
 
@@ -88,8 +92,15 @@ curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/in
 
 or, from a checkout, `sudo ./install.sh` — the installer uses the local files
 when it finds them next to itself, and downloads the release from GitHub
-otherwise. Re-running it upgrades in place: `config.json`, issued certificates
-and node-local settings are left alone.
+otherwise.
+
+If haproxy-manager is already installed, the same command detects it, prints
+where it lives and whether it is running, and offers to **update**, **remove**
+(keeping `config.json` and certificates), **purge** (removing those too), or
+cancel. Piped from `curl` with no terminal to ask on, it updates in place and
+says so. Pass `--update`, `--uninstall` or `--purge` to skip the question, and
+`-y` to skip the confirmation. An update keeps the port the node already runs
+on and leaves `config.json`, issued certificates and node-local settings alone.
 
 What it does:
 
@@ -119,6 +130,8 @@ Options — flags, or the equivalent environment variables:
 | `--api-key` / `--no-api-key` | `HAM_API_KEY` | random |
 | `--skip-acme` | `HAM_SKIP_ACME` | off |
 | `--tarball` | `HAM_TARBALL` | — |
+| `--update` / `--uninstall` / `--purge` | — | ask |
+| `-y`, `--yes` | — | ask |
 | — | `GITHUB_TOKEN` | for a private repository |
 
 ```bash

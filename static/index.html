@@ -76,6 +76,7 @@ td .sub{color:var(--mist);font-size:12px}
 .pill.up{background:#e4f1e9;color:var(--up)}
 .pill.down{background:#f7e6e2;color:var(--down)}
 .pill.off{background:#eceff0;color:var(--mist)}
+.pill.warn{background:#f6ecdd;color:var(--drift)}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px}
 .stat{border:1px solid var(--hair);border-radius:6px;padding:12px 14px;background:var(--card)}
 .stat .k{font:600 10px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--mist)}
@@ -294,13 +295,18 @@ const E={
    {k:"dns_credentials",l:"DNS API credentials",t:"textarea",h:"One KEY=value per line, e.g. CF_Token=..."}]},
 
  "acme/certificates":{title:"Certificates",add:"Add certificate",
-  intro:"Certificates are issued with acme.sh, written as combined PEMs to the HAProxy certificate directory, then their Automations run.",
-  cols:[["name","Name"],["domains","Domains",r=>"<span class=mono>"+esc((r.domains||"").split(/\s+/).filter(Boolean).join(", "))+"</span>"],
-        ["ar","Auto-renew",r=>r.auto_renew!==false?"yes":"no"]],
+  intro:"Certificates are issued with acme.sh, written as combined PEMs to the HAProxy certificate directory, then their Automations run. "+
+        "Until a certificate is issued, Apply installs a short-lived self-signed placeholder so HAProxy can still start.",
+  cols:[["name","Name",r=>esc(r.name)+"<div class=sub>"+esc((r.domains||"").split(/\s+/).filter(Boolean).join(", "))+"</div>"],
+        ["status","Status",r=>certStatusCell(r)],
+        ["expires","Expires",r=>certExpiryCell(r)],
+        ["last","Last issue",r=>certLastCell(r)]],
   refs:["acme/accounts","acme/challenges","acme/automations"],
+  pre:loadCertStatus,
   rowActions:[
-   {label:"Issue",fn:r=>issueCert(r,false)},
-   {label:"Force",fn:r=>issueCert(r,true),cls:"dngr",title:"Reissue even if not due for renewal"}],
+   {label:"Issue",fn:r=>issueCert(r,false),title:"Request the certificate from the CA now"},
+   {label:"Force",fn:r=>issueCert(r,true),cls:"dngr",title:"Reissue even if not due for renewal"},
+   {label:"Log",fn:r=>showCertLog(r),title:"acme.sh output of the last attempt"}],
   fields:[
    {k:"name",l:"Name",t:"text",h:"Also used as the PEM file name"},
    {k:"domains",l:"Domain names",t:"textarea",h:"One per line; the first is the certificate's primary name"},
@@ -429,6 +435,7 @@ function readForm(fields){
 async function renderEntity(key){
   const def=E[key];
   await Promise.all([list(key,true),...(def.refs||[]).map(r=>list(r,true))]);
+  if(def.pre)await def.pre();
   const items=lists[key];
   const c=$("#content");c.innerHTML="";
   const card=document.createElement("div");card.className="card";
@@ -556,6 +563,80 @@ function apiKeyCard(){
   return card;
 }
 
+/* ============================ certificate status ============================ */
+/* Per-certificate state comes from /api/status, keyed by certificate id. */
+let certStat={};
+async function loadCertStatus(){
+  try{const st=await api("status");certStat={};(st.certs||[]).forEach(c=>{certStat[c.id]=c;});}
+  catch(e){certStat={};}
+}
+const CERT_STATUS={
+  valid:      ["up",  "valid"],
+  expiring:   ["warn","expires soon"],
+  expired:    ["down","expired"],
+  placeholder:["warn","placeholder"],
+  missing:    ["off", "not issued"],
+  unreadable: ["down","unreadable"],
+  unknown:    ["off", "unknown"],
+};
+function certStatusCell(r){
+  const s=certStat[r.id];
+  if(!s)return '<span class="pill off">unknown</span>';
+  const [cls,label]=CERT_STATUS[s.status]||["off",s.status];
+  let h='<span class="pill '+cls+'">'+esc(label)+"</span>";
+  if(s.status==="placeholder")h+='<div class=sub>self-signed stand-in — press Issue</div>';
+  else if(s.status==="missing")h+='<div class=sub>no PEM on disk yet</div>';
+  if(s.auto_renew===false)h+='<div class=sub>auto-renew off</div>';
+  return h;
+}
+function fmtTime(t){return esc(String(t||"").replace("T"," ").replace("+00:00"," UTC"));}
+function certExpiryCell(r){
+  const s=certStat[r.id];
+  if(!s||!(s.expires_iso||s.expires))return '<span class=sub>—</span>';
+  const d=s.days_left;
+  let h='<span class=mono>'+(s.expires_iso?fmtTime(s.expires_iso):esc(s.expires))+"</span>";
+  if(d!==null&&d!==undefined){
+    const n=Math.abs(d),unit=" day"+(n===1?"":"s");
+    h+='<div class=sub>'+(d<0?("expired "+n+unit+" ago"):("in "+d+unit))+"</div>";
+  }
+  return h;
+}
+function certLastCell(r){
+  const li=(certStat[r.id]||{}).last_issue;
+  if(!li)return '<span class=sub>never attempted</span>';
+  let h='<span class="pill '+(li.ok?"up":"down")+'">'+(li.ok?"succeeded":"failed")+"</span>"+
+        "<div class=sub>"+fmtTime(li.time)+" · "+esc(li.seconds)+"s</div>";
+  if(!li.ok&&li.error)h+="<div class=sub>"+esc(li.error)+"</div>";
+  return h;
+}
+async function issueCert(row,force){
+  const pre=document.createElement("pre");
+  pre.textContent="Requesting a certificate for \""+row.name+"\" ...\n\n"+
+    "acme.sh usually needs 10-60 seconds for HTTP-01; DNS-01 can take several minutes\n"+
+    "while the TXT record propagates. The result and the full log appear here.";
+  openDlg((force?"Force issue: ":"Issue: ")+row.name,pre,[btn("Close","",closeDlg)]);
+  try{
+    const r=await api("acme/issue/"+row.id,"POST",{force:!!force});
+    pre.textContent=(r.ok
+        ? "SUCCESS -- certificate issued and written to the HAProxy certificate directory.\nIts Automations have run."
+        : "FAILED -- "+(r.error||"unknown error"))+
+      "\n\n--- acme.sh log ---\n"+(r.log||"(no output)");
+  }catch(e){pre.textContent="FAILED -- "+e.message;}
+  if(E[location.hash.replace(/^#\//,"")])await renderEntity("acme/certificates");
+  refreshStatus();
+}
+async function showCertLog(row){
+  try{
+    const r=await api("acme/log/"+row.id);
+    if(!r.ok){showText("Last issuance: "+row.name,r.error);return;}
+    const e=r.entry;
+    showText("Last issuance: "+row.name,
+      (e.ok?"Result: succeeded":"Result: FAILED"+(e.error?" -- "+e.error:""))+
+      "\nWhen:   "+String(e.time).replace("T"," ").replace("+00:00"," UTC")+
+      "\nTook:   "+e.seconds+"s\n\n--- acme.sh log ---\n"+(e.log||"(no output)"));
+  }catch(e){showText("Last issuance: "+row.name,e.message);}
+}
+
 /* ============================ overview ============================ */
 async function renderOverview(){
   const c=$("#content");
@@ -578,18 +659,32 @@ async function renderOverview(){
   const cc=document.createElement("div");cc.className="card";
   cc.innerHTML='<div class=hd><h2>Certificates</h2><div class=sp></div></div>';
   cc.querySelector(".hd").appendChild(btn("Renew all now","sm",async()=>{
-    showText("Renewing...","Running acme.sh for all auto-renew certificates -- this can take a minute.");
-    try{const r=await api("acme/renew","POST",{});
-      showText("Renewal result",JSON.stringify(r,null,2));refreshStatus();}
-    catch(e){showText("Renewal failed",e.message);}
+    const pre=document.createElement("pre");
+    pre.textContent="Running acme.sh for every auto-renew certificate -- this can take a few minutes.";
+    openDlg("Renewing certificates",pre,[btn("Close","",closeDlg)]);
+    try{
+      const r=await api("acme/renew","POST",{});
+      const res=r.results||{};
+      const names=Object.keys(res);
+      pre.textContent=(names.length?names.map(n=>
+          (res[n].ok?"OK      ":"FAILED  ")+n+(res[n].ok?"":" -- "+(res[n].error||"unknown error"))).join("\n")
+        :"No certificates have auto-renew enabled.")+
+        "\n\nOpen a certificate's Log button for the full acme.sh output.";
+      refreshStatus();renderOverview();
+    }catch(e){pre.textContent="FAILED -- "+e.message;}
   }));
   const cb=document.createElement("div");
   if(!st.certs.length)cb.innerHTML='<div class=empty>No certificates defined. Create them under ACME &gt; Certificates.</div>';
   else{
-    cb.innerHTML="<table><thead><tr><th>Name</th><th>Deployed</th><th>Issuer</th><th>Expires</th></tr></thead><tbody>"+
-      st.certs.map(x=>"<tr><td>"+esc(x.name)+"</td><td>"+(x.deployed?"yes":"no")+
-        "</td><td class=mono>"+esc(x.issuer||"—")+"</td><td class=mono>"+esc(x.expires||"—")+"</td></tr>").join("")+
-      "</tbody></table>";
+    st.certs.forEach(x=>{certStat[x.id]=x;});
+    cb.innerHTML="<table><thead><tr><th>Name</th><th>Status</th><th>Expires</th><th>Issuer</th><th>Last issue</th></tr></thead><tbody>"+
+      st.certs.map(x=>"<tr><td>"+esc(x.name)+"<div class=sub>"+esc((x.domains||[]).join(", "))+"</div></td>"+
+        "<td>"+certStatusCell(x)+"</td>"+
+        "<td>"+certExpiryCell(x)+"</td>"+
+        "<td class=mono style=font-size:11.5px>"+esc(x.issuer||"—")+"</td>"+
+        "<td>"+certLastCell(x)+"</td></tr>").join("")+
+      "</tbody></table>"+
+      '<div class=hint style="padding:10px 16px">Manage and issue them under ACME &gt; Certificates.</div>';
   }
   cc.appendChild(cb);c.appendChild(cc);
 

@@ -208,6 +208,60 @@ def cert_path(cert):
     return CERT_DIR / (_sec(cert.get("name")) + ".pem")
 
 
+# Certificates count as "expiring" this many days before notAfter.
+EXPIRY_WARN_DAYS = 15
+
+
+def cert_details(p):
+    """Inspect a deployed PEM.
+
+    Distinguishes a real certificate from the self-signed placeholder that
+    Apply drops in before the first issuance -- otherwise "deployed" says yes
+    for a certificate that was never actually issued.
+    """
+    info = {"deployed": False, "status": "missing", "file": str(p),
+            "expires": None, "expires_iso": None, "days_left": None,
+            "issuer": None, "subject": None, "self_signed": False}
+    if not p.exists():
+        return info
+    info["deployed"] = True
+
+    rc, out = run(["openssl", "x509", "-noout", "-enddate", "-issuer", "-subject", "-in", str(p)])
+    if rc != 0:
+        info["status"] = "unreadable"
+        return info
+
+    def _grab(field):
+        m = re.search(r"^%s=(.+)$" % field, out, re.M)
+        return m.group(1).strip() if m else None
+
+    info["issuer"] = _grab("issuer")
+    info["subject"] = _grab("subject")
+    info["self_signed"] = bool(info["issuer"]) and info["issuer"] == info["subject"]
+    info["expires"] = _grab("notAfter")
+
+    if info["expires"]:
+        try:
+            exp = datetime.strptime(info["expires"], "%b %d %H:%M:%S %Y %Z")
+            exp = exp.replace(tzinfo=timezone.utc)
+            info["expires_iso"] = exp.isoformat(timespec="seconds")
+            info["days_left"] = int((exp - datetime.now(timezone.utc)).total_seconds() // 86400)
+        except ValueError:
+            pass
+
+    if info["self_signed"]:
+        info["status"] = "placeholder"
+    elif info["days_left"] is None:
+        info["status"] = "unknown"
+    elif info["days_left"] < 0:
+        info["status"] = "expired"
+    elif info["days_left"] <= EXPIRY_WARN_DAYS:
+        info["status"] = "expiring"
+    else:
+        info["status"] = "valid"
+    return info
+
+
 def parse_domains(cert):
     return [d.strip() for d in re.split(r"[\s,]+", cert.get("domains", "")) if d.strip()]
 
@@ -703,17 +757,21 @@ def api_status():
         if rc == 0:
             held = [v for v in vips if re.search(r"\binet6? %s/" % re.escape(v), out)]
 
+    issue_log = cfg["_meta"].get("issue_log") or {}
     certs = []
     for c in cfg["acme"]["certificates"]:
-        p = cert_path(c)
-        info = {"id": c["id"], "name": c["name"], "deployed": p.exists(), "expires": None, "issuer": None}
-        if p.exists():
-            rc, out = run(["openssl", "x509", "-enddate", "-issuer", "-noout", "-in", str(p)])
-            if rc == 0:
-                m = re.search(r"notAfter=(.+)", out)
-                info["expires"] = m.group(1).strip() if m else None
-                m = re.search(r"issuer=(.+)", out)
-                info["issuer"] = m.group(1).strip() if m else None
+        info = cert_details(cert_path(c))
+        info["id"] = c["id"]
+        info["name"] = c["name"]
+        info["domains"] = parse_domains(c)
+        info["auto_renew"] = c.get("auto_renew", True)
+        last = issue_log.get(c["id"])
+        if last:
+            # The full acme.sh log is fetched on demand from /api/acme/log/<id>.
+            info["last_issue"] = {k: v for k, v in last.items() if k != "log"}
+            info["last_issue"]["has_log"] = bool(last.get("log"))
+        else:
+            info["last_issue"] = None
         certs.append(info)
 
     return jsonify({
@@ -766,7 +824,39 @@ def ensure_account(acc):
     return acme_run(args)
 
 
+def record_issue(cert, res, started):
+    """Remember the outcome of an issuance attempt so the UI can show it.
+
+    Kept in _meta rather than on the certificate itself: _meta is outside
+    config_hash (so a renewal does not flag the configuration as changed) and
+    outside the payload pushed to the peer.
+    """
+    cid = cert.get("id")
+    if not cid:
+        return
+    with _lock:
+        cur = load_config()
+        cur["_meta"].setdefault("issue_log", {})[cid] = {
+            "time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "seconds": round(time.time() - started, 1),
+            "ok": bool(res.get("ok")),
+            "error": res.get("error") or "",
+            "log": (res.get("log") or "")[-6000:],
+        }
+        save_config(cur)
+
+
 def acme_issue(cfg, cert, force=False):
+    started = time.time()
+    res = _acme_issue(cfg, cert, force=force)
+    try:
+        record_issue(cert, res, started)
+    except OSError:
+        pass  # never fail an issuance because the log could not be written
+    return res
+
+
+def _acme_issue(cfg, cert, force=False):
     accounts = _by_id(cfg["acme"]["accounts"])
     challenges = _by_id(cfg["acme"]["challenges"])
     acc = accounts.get(cert.get("account"))
@@ -863,6 +953,15 @@ def api_acme_issue(cid):
         abort(404)
     force = bool((request.get_json(silent=True) or {}).get("force"))
     return jsonify(acme_issue(cfg, cert, force=force))
+
+
+@app.get("/api/acme/log/<cid>")
+def api_acme_log(cid):
+    """The acme.sh output of the last issue/renew attempt for one certificate."""
+    entry = (load_config()["_meta"].get("issue_log") or {}).get(cid)
+    if not entry:
+        return jsonify({"ok": False, "error": "no issuance has been attempted for this certificate yet"})
+    return jsonify({"ok": True, "entry": entry})
 
 
 @app.post("/api/acme/renew")
