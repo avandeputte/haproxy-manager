@@ -424,17 +424,28 @@ const S={
 };
 
 /* ============================ form rendering ============================ */
+/* An open dialog owns the fields it shows. Page forms and dialog forms use the
+   same f_<key> ids, and document.getElementById returns whichever comes first
+   in the document -- which is the page, not the dialog on top of it. */
+function fieldEl(k){
+  const ovl=$("#ovl");
+  if(ovl&&ovl.classList.contains("show")){
+    const inDlg=$("#dlg").querySelector('[data-field="'+k+'"]');
+    if(inDlg)return inDlg;
+  }
+  return document.querySelector('#content [data-field="'+k+'"]')||document.getElementById("f_"+k);
+}
 function fieldRow(f,val){
   const lab=document.createElement("label");lab.className="fl";lab.textContent=f.l;lab.htmlFor="f_"+f.k;
   const cell=document.createElement("div");
   let inp;
   if(f.t==="bool"){
     const wrap=document.createElement("div");wrap.className="ckbox";
-    inp=document.createElement("input");inp.type="checkbox";inp.id="f_"+f.k;
+    inp=document.createElement("input");inp.type="checkbox";inp.id="f_"+f.k;inp.dataset.field=f.k;
     inp.checked=val!==undefined?!!val:!!f.d;
     wrap.appendChild(inp);cell.appendChild(wrap);
   }else if(f.t==="select"){
-    inp=document.createElement("select");inp.id="f_"+f.k;
+    inp=document.createElement("select");inp.id="f_"+f.k;inp.dataset.field=f.k;
     /* options are plain strings, or {value,label} for things with an id */
     const opts=(typeof f.o==="function"?f.o():f.o)||[];
     const valOf=o=>(o&&typeof o==="object")?o.value:o;
@@ -447,12 +458,12 @@ function fieldRow(f,val){
     inp.value=val??f.d??(opts.length?valOf(opts[0]):"");
     cell.appendChild(inp);
   }else if(f.t==="ref"){
-    inp=document.createElement("select");inp.id="f_"+f.k;
+    inp=document.createElement("select");inp.id="f_"+f.k;inp.dataset.field=f.k;
     const none=document.createElement("option");none.value="";none.textContent="(none)";inp.appendChild(none);
     (lists[f.ref]||[]).forEach(it=>{const op=document.createElement("option");op.value=it.id;op.textContent=it.name;inp.appendChild(op);});
     inp.value=val||"";cell.appendChild(inp);
   }else if(f.t==="refmulti"){
-    inp=document.createElement("div");inp.className="cklist";inp.id="f_"+f.k;inp.dataset.refmulti="1";
+    inp=document.createElement("div");inp.className="cklist";inp.id="f_"+f.k;inp.dataset.field=f.k;inp.dataset.refmulti="1";
     const items=lists[f.ref]||[];
     if(!items.length){const d=document.createElement("div");d.className="none";d.textContent="Nothing defined yet.";inp.appendChild(d);}
     items.forEach(it=>{
@@ -464,7 +475,7 @@ function fieldRow(f,val){
     cell.appendChild(inp);
   }else if(f.t==="combo"){
     /* a list to pick from that still accepts anything typed */
-    inp=document.createElement("input");inp.type="text";inp.id="f_"+f.k;inp.value=val??"";
+    inp=document.createElement("input");inp.type="text";inp.id="f_"+f.k;inp.dataset.field=f.k;inp.value=val??"";
     inp.autocomplete="off";inp.setAttribute("list","dl_"+f.k);
     const dl=document.createElement("datalist");dl.id="dl_"+f.k;
     (typeof f.o==="function"?f.o():(f.o||[])).forEach(o=>{
@@ -475,10 +486,10 @@ function fieldRow(f,val){
     });
     cell.appendChild(inp);cell.appendChild(dl);
   }else if(f.t==="textarea"){
-    inp=document.createElement("textarea");inp.id="f_"+f.k;inp.value=val??"";cell.appendChild(inp);
+    inp=document.createElement("textarea");inp.id="f_"+f.k;inp.dataset.field=f.k;inp.value=val??"";cell.appendChild(inp);
   }else{
     inp=document.createElement("input");inp.type=f.t==="password"?"password":(f.t==="number"?"number":"text");
-    inp.id="f_"+f.k;inp.value=val??(f.d??"");
+    inp.id="f_"+f.k;inp.dataset.field=f.k;inp.value=val??(f.d??"");
     if(f.t==="password")inp.autocomplete="new-password";
     cell.appendChild(inp);
     /* Secrets you have to move to another machine need to be readable. */
@@ -536,7 +547,7 @@ function fieldRow(f,val){
 function readForm(fields){
   const out={};
   fields.forEach(f=>{
-    const el=document.getElementById("f_"+f.k);
+    const el=fieldEl(f.k);
     if(f.t==="bool")out[f.k]=el.checked;
     else if(f.t==="refmulti")out[f.k]=[...el.querySelectorAll("input:checked")].map(c=>c.value);
     else if(f.t==="number")out[f.k]=el.value===""?"":Number(el.value);
