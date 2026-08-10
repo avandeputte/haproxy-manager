@@ -2123,20 +2123,31 @@ let readOnly=false;
 function renderBanner(st){
   const b=$("#banner");
   readOnly=!!(st&&st.read_only);
-  if(!readOnly){b.innerHTML="";return;}
+  const unlocked=!!(st&&st.edit_override);
+  if(!readOnly&&!unlocked){b.innerHTML="";return;}
   b.innerHTML="";
   const box=document.createElement("div");box.className="ro";
   const txt=document.createElement("div");
-  txt.innerHTML="<b>Read-only: this node is passive</b>"+esc(st.read_only_reason||"");
+  txt.innerHTML=readOnly
+    ? "<b>Read-only: this node is passive</b>"+esc(st.read_only_reason||"")
+    : "<b>Editing is unlocked on this passive node</b>Another node holds the virtual IP. "+
+      "Anything changed here will be overwritten the next time that node pushes, so make the "+
+      "change there once it is reachable again.";
   box.appendChild(txt);
-  const act=btn("Edit here anyway","sm",async()=>{
-    if(!confirm("Allow editing the shared configuration on this passive node?\n\n"+
-                "Use this when no node holds the virtual IP, or when you are deliberately "+
-                "working here. Whatever you change must still be pushed to the others, and "+
-                "the active node's copy will overwrite this one if it pushes first."))return;
-    try{await api("local","PUT",{allow_edit_when_passive:true});refreshStatus();route();}
-    catch(e){alert(e.message);}
-  });
+  const act=readOnly
+    ? btn("Edit here anyway","sm",async()=>{
+        if(!confirm("Allow editing the shared configuration on this passive node?\n\n"+
+                    "Use this when no node holds the virtual IP, or when you are deliberately "+
+                    "working here. Whatever you change must still be pushed to the others, and "+
+                    "the active node's copy will overwrite this one if it pushes first.\n\n"+
+                    "This lasts for this sign-in only: logging out or back in locks it again."))return;
+        try{await api("unlock","POST",{on:true});refreshStatus();route();}
+        catch(e){alert(e.message);}
+      })
+    : btn("Lock again","sm",async()=>{
+        try{await api("unlock","POST",{on:false});refreshStatus();route();}
+        catch(e){alert(e.message);}
+      });
   act.style.marginLeft="auto";act.style.whiteSpace="nowrap";
   box.appendChild(act);b.appendChild(box);
 }

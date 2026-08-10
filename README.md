@@ -189,6 +189,10 @@ the VIP has to be repairable. And when *no* node holds the VIP, the banner's
 **Edit here anyway** unlocks that node, so a broken cluster is never a lockout.
 The lock is enforced by the API, not just hidden in the UI.
 
+The unlock belongs to the sign-in that asked for it: **Lock again** restores it,
+and so does signing out or back in. It is not stored, so it cannot be left on by
+accident, and another browser signed in to the same node is unaffected.
+
 ### Keepalived
 
 - **Keepalived** runs on every node that has a virtual IP configured — it is not

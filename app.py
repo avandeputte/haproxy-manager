@@ -151,7 +151,6 @@ DEFAULT_CONFIG = {
         "api_key": "",
         "node_url": "",        # how the OTHER nodes should reach this one
         "web_ui": {"enabled": False, "url": "", "certificate": "auto", "rule_id": ""},
-        "allow_edit_when_passive": False,   # escape hatch when no node holds the VIP
         # UI login. The password is only ever stored as a PBKDF2 hash.
         "admin": {"username": "admin", "salt": "", "hash": "", "iterations": 0, "updated": ""},
         "session_secret": "",      # HMAC key for session cookies; rotating it logs everyone out
@@ -224,6 +223,8 @@ def _migrate(cfg):
     """Bring an older config forward. Idempotent; persisted on the next save."""
     if not cfg["_meta"].get("setup_complete") and _looks_configured(cfg):
         cfg["_meta"]["setup_complete"] = True
+    # The unlock used to be stored here and outlived every session.
+    cfg["local"].pop("allow_edit_when_passive", None)
     # VRRP settings that must match across nodes moved from local.keepalived
     # into the shared cluster section.
     k, cl = cfg["local"]["keepalived"], cfg["cluster"]
@@ -434,9 +435,9 @@ def session_secret(cfg):
     return secret
 
 
-def make_session(cfg, username):
+def make_session(cfg, username, unlocked=False):
     exp = int(time.time()) + max(1, int(cfg["local"].get("session_hours") or 12)) * 3600
-    payload = "%s|%d" % (username, exp)
+    payload = "%s|%d|%d" % (username, exp, 1 if unlocked else 0)
     sig = hmac.new(session_secret(cfg).encode(), payload.encode(), hashlib.sha256).hexdigest()
     return base64.urlsafe_b64encode(("%s|%s" % (payload, sig)).encode()).decode()
 
@@ -445,10 +446,13 @@ def read_session(cfg, token):
     """Return the username carried by a valid, unexpired token, else None."""
     try:
         raw = base64.urlsafe_b64decode(token.encode()).decode()
-        username, exp, sig = raw.rsplit("|", 2)
+        body, sig = raw.rsplit("|", 1)
+        parts = body.split("|")
+        username, exp = parts[0], parts[1]
+        unlocked = len(parts) > 2 and parts[2] == "1"
     except Exception:
         return None
-    payload = "%s|%s" % (username, exp)
+    payload = body
     want = hmac.new(session_secret(cfg).encode(), payload.encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(want, sig):
         return None
@@ -457,13 +461,25 @@ def read_session(cfg, token):
             return None
     except ValueError:
         return None
-    return username
+    return {"user": username, "unlocked": unlocked}
+
+
+def current_session(cfg=None):
+    cfg = cfg or load_config()
+    token = request.cookies.get(SESSION_COOKIE, "")
+    return (read_session(cfg, token) if token else None) or {}
 
 
 def current_user(cfg=None):
-    cfg = cfg or load_config()
-    token = request.cookies.get(SESSION_COOKIE, "")
-    return read_session(cfg, token) if token else None
+    return current_session(cfg).get("user")
+
+
+def session_unlocked(cfg=None):
+    """Has this session lifted the passive-node lock? It cannot outlive it."""
+    try:
+        return bool(current_session(cfg).get("unlocked"))
+    except RuntimeError:            # no request context: background threads
+        return False
 
 
 PUBLIC_PATHS = {"/api/login", "/api/whoami", "/api/setup"}   # /api/setup creates the first admin
@@ -476,6 +492,7 @@ LOCAL_WRITE_PREFIXES = (
     "/api/local", "/api/password", "/api/logout", "/api/peers",
     "/api/update", "/api/version", "/api/apply", "/api/sync/receive", "/api/setup",
     "/api/webui",          # this node's own UI address, not shared
+    "/api/unlock",         # lifting the lock cannot itself be blocked by it
 )
 
 
@@ -490,7 +507,7 @@ def node_role(cfg):
 
 def readonly_state(cfg):
     """(read_only, reason). Only a passive node is read-only, and only if asked."""
-    if cfg["local"].get("allow_edit_when_passive"):
+    if session_unlocked(cfg):
         return False, ""
     role, _ = node_role(cfg)
     if role != "passive":
@@ -607,6 +624,25 @@ def api_login():
     return _login_ok(cfg, username, {"ok": True, "username": username})
 
 
+@app.post("/api/unlock")
+def api_unlock():
+    """Lift or restore the passive-node lock for this session only.
+
+    Kept in the session rather than the configuration so it cannot outlive the
+    person who set it: signing out or back in restores the lock.
+    """
+    cfg = load_config()
+    user = current_user(cfg)
+    if not user:
+        return jsonify({"ok": False, "error": "sign in first"}), 401
+    on = bool((request.get_json(silent=True) or {}).get("on"))
+    resp = jsonify({"ok": True, "unlocked": on})
+    resp.set_cookie(SESSION_COOKIE, make_session(cfg, user, unlocked=on),
+                    max_age=max(1, int(cfg["local"].get("session_hours") or 12)) * 3600,
+                    httponly=True, samesite="Strict", secure=request.is_secure, path="/")
+    return resp
+
+
 @app.post("/api/logout")
 def api_logout():
     resp = jsonify({"ok": True})
@@ -699,7 +735,7 @@ def local_settings():
     for key in ("keepalived", "sync"):
         if isinstance(body.get(key), dict):
             cfg["local"][key].update(body[key])
-    for key in ("api_key", "node_url", "allow_edit_when_passive"):
+    for key in ("api_key", "node_url"):
         if key in body:
             cfg["local"][key] = body[key].strip() if isinstance(body[key], str) else body[key]
     save_config(cfg)
@@ -1301,9 +1337,14 @@ def api_status():
 
     upd = cfg["_meta"].get("update") or {}
     ro, ro_why = readonly_state(cfg)
+    # Whether the passive-node lock has been lifted by hand, so the UI can
+    # show it and offer to put it back.
+    override = session_unlocked(cfg) and node_role(cfg)[0] == "passive" \
+        and bool(enabled_peers(cfg))
     return jsonify({
         "read_only": ro,
         "read_only_reason": ro_why,
+        "edit_override": override,
         "hostname": socket.gethostname(),
         "version": VERSION,
         "update_available": bool(upd.get("latest")) and is_newer(upd["latest"], VERSION),
