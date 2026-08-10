@@ -572,11 +572,48 @@ Then open `http://<node>:8080` and follow the same steps as above.
 Build the image on its own with `docker build -t haproxy-manager .`; the
 `acme.sh` version is pinned by the `ACME_VERSION` build arg.
 
+## If the UI feels slow
+
+Almost always it is waiting on another node, not on itself. A cluster member
+that is *hung* — accepting connections but not answering — is far worse than one
+that is cleanly down, because a refused connection fails instantly while a hung
+one has to time out.
+
+| Knob | Default | What it does |
+| --- | --- | --- |
+| `HAM_PEER_CONNECT_TIMEOUT` | `3` | how long to wait for a node to accept a connection |
+| `HAM_PEER_READ_TIMEOUT` | `5` | how long to wait for it to answer a health query |
+| `HAM_PUSH_READ_TIMEOUT` | `90` | how long to wait for it to accept and apply a pushed configuration |
+| `HAM_CLUSTER_CACHE` | `2.5` | seconds the cluster health fan-out is reused, so tabs and nodes share one round of queries |
+| `HAM_THREADS` | `16` | waitress worker threads |
+
+Two things worth knowing:
+
+- **Address peers by IP, not by name.** DNS resolution happens *before* any of
+  the timeouts above start counting, so a slow or unavailable resolver stalls a
+  peer query for as long as `/etc/resolv.conf` allows — typically 5 seconds per
+  nameserver, twice. It is also the wrong dependency: the name may be published
+  by the very cluster that is in trouble.
+- **Apply waits for the push.** With auto-sync on, Apply returns only once every
+  peer has taken the configuration or timed out, so a wedged node can keep the
+  button spinning for `HAM_PUSH_READ_TIMEOUT`. The rest of the UI stays
+  responsive throughout; only that request is waiting.
+
+Set them in the systemd unit (`systemctl edit haproxy-manager`):
+
+```ini
+[Service]
+Environment=HAM_PEER_READ_TIMEOUT=3
+Environment=HAM_THREADS=24
+```
+
 ## Environment overrides
 
 `HAM_DATA_DIR` · `HAM_CERT_DIR` · `HAM_HAPROXY_CFG` · `HAM_KEEPALIVED_CFG` ·
 `HAM_ACME_HOME` · `HAM_ACME_SH` · `HAM_LISTEN` · `HAM_PORT` · `HAM_THREADS` ·
 `HAM_LOG_FILE` · `HAM_DEBUG=1` (verbose logging) · `HAM_STATS_SOCK` ·
+`HAM_PEER_CONNECT_TIMEOUT` · `HAM_PEER_READ_TIMEOUT` · `HAM_PUSH_READ_TIMEOUT` ·
+`HAM_CLUSTER_CACHE` ·
 `HAM_VERSION_URL` · `HAM_INSTALL_URL` · `HAM_DRY_RUN=1` (skip `systemctl` calls,
 for development).
 

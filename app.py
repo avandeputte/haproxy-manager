@@ -46,6 +46,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
+import urllib.parse
 import urllib.request
 
 from flask import Flask, Response, abort, jsonify, request, send_from_directory
@@ -120,7 +121,21 @@ setup_logging()
 
 LISTEN = os.environ.get("HAM_LISTEN", "0.0.0.0")
 PORT = int(os.environ.get("HAM_PORT", "8080"))
-THREADS = max(4, int(os.environ.get("HAM_THREADS", "8")))
+THREADS = max(4, int(os.environ.get("HAM_THREADS", "16")))
+# How long to wait on another node before calling it unreachable, as
+# (connect, read). requests applies a bare number to BOTH phases, so a plain
+# timeout=6 can take 12 seconds against a node that accepts the connection and
+# then stops answering -- which is exactly what a node busy in an Apply does.
+PEER_CONNECT_TIMEOUT = float(os.environ.get("HAM_PEER_CONNECT_TIMEOUT", "3"))
+PEER_READ_TIMEOUT = float(os.environ.get("HAM_PEER_READ_TIMEOUT", "5"))
+PEER_TIMEOUT = (PEER_CONNECT_TIMEOUT, PEER_READ_TIMEOUT)
+# A push is a whole configuration and the far side applies it, so it gets a
+# much longer read budget than a health poll -- but the same connect budget.
+PUSH_READ_TIMEOUT = float(os.environ.get("HAM_PUSH_READ_TIMEOUT", "90"))
+# Health is polled by every open browser tab and by every other node. Serving
+# a couple of seconds of cached fan-out keeps N nodes from multiplying into
+# N*N in-flight requests.
+CLUSTER_CACHE_SECONDS = float(os.environ.get("HAM_CLUSTER_CACHE", "2.5"))
 DRY_RUN = os.environ.get("HAM_DRY_RUN") == "1"
 
 app = Flask(__name__, static_folder=None)
@@ -285,14 +300,23 @@ def _migrate(cfg):
 
 
 def load_config():
-    with _lock:
-        cfg = {}
-        if CONF_PATH.exists():
-            try:
-                cfg = json.loads(CONF_PATH.read_text())
-            except (ValueError, OSError):
-                cfg = {}
-        return _migrate(_merge_defaults(cfg, DEFAULT_CONFIG))
+    """Read the configuration. Deliberately does NOT take _lock.
+
+    save_config writes a temporary file and renames it into place, and rename
+    is atomic: a reader sees either the whole old file or the whole new one,
+    never a half-written mixture. Taking the write lock here would mean every
+    read -- every page of the UI -- queues behind whatever slow write is in
+    flight, so one Apply pushing to an unresponsive node froze the entire UI
+    for as long as the push took. Writers still hold _lock across their own
+    load/modify/save, which is what makes those sequences atomic.
+    """
+    cfg = {}
+    if CONF_PATH.exists():
+        try:
+            cfg = json.loads(CONF_PATH.read_text())
+        except (ValueError, OSError):
+            cfg = {}
+    return _migrate(_merge_defaults(cfg, DEFAULT_CONFIG))
 
 
 def save_config(cfg):
@@ -1555,17 +1579,21 @@ def do_apply(cfg=None, allow_push=True):
         save_config(cfg)
         result["ok"] = True
 
-        if allow_push and cfg["local"]["sync"].get("auto_sync") and enabled_peers(cfg):
-            r = sync_push(cfg)
-            result["steps"].append("auto-sync to %d peer(s): " % len(enabled_peers(cfg)) +
-                                   ("ok" if r.get("ok") else str(r.get("error"))))
-            if not r.get("ok"):
-                result.setdefault("warnings", []).append(
-                    "This node applied its own configuration, but syncing it to the other "
-                    "nodes failed: %s" % r.get("error"))
-            if r.get("warning"):
-                result.setdefault("warnings", []).append(r["warning"])
-        return result
+    # The push talks to every other node over the network, and an unresponsive
+    # one can hold it for the full timeout. That must happen with the lock
+    # released, or this node's own UI is unusable until the slowest peer gives
+    # up. cfg is already saved, so the snapshot being pushed is the applied one.
+    if allow_push and cfg["local"]["sync"].get("auto_sync") and enabled_peers(cfg):
+        r = sync_push(cfg)
+        result["steps"].append("auto-sync to %d peer(s): " % len(enabled_peers(cfg)) +
+                               ("ok" if r.get("ok") else str(r.get("error"))))
+        if not r.get("ok"):
+            result.setdefault("warnings", []).append(
+                "This node applied its own configuration, but syncing it to the other "
+                "nodes failed: %s" % r.get("error"))
+        if r.get("warning"):
+            result.setdefault("warnings", []).append(r["warning"])
+    return result
 
 
 @app.get("/api/preview")
@@ -1936,7 +1964,8 @@ def push_to_peer(peer, payload):
     try:
         r = _requests.post(url + "/api/sync/receive", json=payload,
                            headers={"X-API-Key": peer.get("api_key", "")},
-                           timeout=90, verify=bool(peer.get("verify_tls")))
+                           timeout=(PEER_CONNECT_TIMEOUT, PUSH_READ_TIMEOUT),
+                           verify=bool(peer.get("verify_tls")))
         if r.status_code != 200:
             out = {"ok": False, "name": peer.get("name") or url,
                    "error": "HTTP %s: %s" % (r.status_code, r.text[:200])}
@@ -1952,7 +1981,8 @@ def push_to_peer(peer, payload):
             return out
         return {"ok": True, "name": peer.get("name") or url, "peer": r.json()}
     except Exception as e:
-        return {"ok": False, "name": peer.get("name") or url, "error": str(e)}
+        return {"ok": False, "name": peer.get("name") or url,
+                "error": peer_error(e, url, PUSH_READ_TIMEOUT)}
 
 
 def mesh_for(cfg, target):
@@ -2392,7 +2422,7 @@ def api_peer_test(pid):
                         % (key_fingerprint(stored), peer.get("name"))})
     try:
         r = _requests.get(url + "/api/status", headers={"X-API-Key": stored.strip()},
-                          timeout=10, verify=bool(peer.get("verify_tls")))
+                          timeout=PEER_TIMEOUT, verify=bool(peer.get("verify_tls")))
     except Exception as e:
         return jsonify({"ok": False, "error": "cannot reach %s: %s" % (url, e)})
 
@@ -2423,7 +2453,37 @@ def api_peer_test(pid):
                     "role": st.get("role"), "peers": st.get("peers"), "note": " ".join(notes)})
 
 
-def _query_peer(peer, timeout=6):
+def peer_error(exc, url="", read_timeout=None):
+    """Turn a requests/urllib3 exception into something a person can act on."""
+    read_timeout = PEER_READ_TIMEOUT if read_timeout is None else read_timeout
+    text = str(exc)
+    host = ""
+    try:
+        host = urllib.parse.urlsplit(url).hostname or ""
+    except ValueError:
+        pass
+    if "NameResolution" in text or "Name or service not known" in text \
+            or "Temporary failure in name resolution" in text:
+        return ("the name %s could not be resolved. Cluster members are best "
+                "addressed by IP: DNS may be unavailable exactly when a node is "
+                "in trouble, and it may be this cluster that publishes the name."
+                % (host or "in its URL"))
+    if "ConnectTimeout" in type(exc).__name__ or "Connection to" in text and "timed out" in text:
+        return ("no answer from %s within %gs -- it is unreachable, or a firewall "
+                "is dropping the connection." % (host or url, PEER_CONNECT_TIMEOUT))
+    if "ReadTimeout" in type(exc).__name__:
+        return ("%s accepted the connection but did not reply within %gs. It is "
+                "running but busy or wedged." % (host or url, read_timeout))
+    if "ConnectionRefused" in text or "Connection refused" in text:
+        return ("%s refused the connection -- haproxy-manager is not listening "
+                "there, or the port is wrong." % (host or url))
+    if "SSLError" in type(exc).__name__ or "CERTIFICATE_VERIFY_FAILED" in text:
+        return ("the TLS certificate of %s was rejected. Untick 'Verify TLS' for "
+                "this peer, or give it a certificate this node trusts." % (host or url))
+    return text[:200]
+
+
+def _query_peer(peer, timeout=PEER_TIMEOUT):
     """Ask one node for its status."""
     url = (peer.get("url") or "").rstrip("/")
     out = {"id": peer.get("id"), "name": peer.get("name") or url, "url": url,
@@ -2446,7 +2506,7 @@ def _query_peer(peer, timeout=6):
         out["reachable"] = True
     except Exception as e:
         out["ms"] = int((time.time() - started) * 1000)
-        out["error"] = str(e)[:200]
+        out["error"] = peer_error(e, url)
     return out
 
 
@@ -2542,7 +2602,7 @@ def peer_vrrp_address(peer, vips, verify=None):
         try:
             r = _requests.get(url + "/api/keepalived/status",
                               headers={"X-API-Key": (peer.get("api_key") or "").strip()},
-                              timeout=6, verify=bool(peer.get("verify_tls")))
+                              timeout=PEER_TIMEOUT, verify=bool(peer.get("verify_tls")))
             if r.status_code == 200:
                 d = r.json()
                 for i in d.get("interfaces", []):
@@ -2682,9 +2742,25 @@ def api_cluster_unicast_apply():
     return jsonify(res), (200 if res.get("ok") else 400)
 
 
+_cluster_cache = {"at": 0.0, "value": None}
+_cluster_cache_lock = threading.Lock()
+
+
 @app.get("/api/cluster")
 def api_cluster():
-    """Every node's health, as seen from this one."""
+    """Every node's health, as seen from this one.
+
+    Cached for a couple of seconds: this is polled by every open tab and by
+    every other node, and each call fans out to all peers. Without the cache
+    an N-node cluster generates N*N status requests per poll interval, and
+    each one waits on the slowest node.
+    """
+    if request.args.get("fresh") != "1":
+        with _cluster_cache_lock:
+            hit = _cluster_cache["value"]
+            fresh = time.time() - _cluster_cache["at"] < CLUSTER_CACHE_SECONDS
+        if hit is not None and fresh:
+            return jsonify(hit)
     cfg = load_config()
     peers = cfg["local"]["sync"].get("peers") or []
 
@@ -2722,11 +2798,14 @@ def api_cluster():
     if len(versions) > 1:
         warnings.append("Nodes run different versions: %s." % ", ".join(sorted(versions)))
 
-    return jsonify({
+    payload = {
         "ok": True, "nodes": nodes,
         "summary": {"total": len(nodes), "reachable": len(reachable),
                     "active": len(holders), "warnings": warnings},
-    })
+    }
+    with _cluster_cache_lock:
+        _cluster_cache["value"], _cluster_cache["at"] = payload, time.time()
+    return jsonify(payload)
 
 
 @app.get("/api/sync/pull")
