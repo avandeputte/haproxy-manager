@@ -5,6 +5,22 @@ A small self-hosted web UI to manage an **HAProxy** configuration, obtain
 on a shared virtual IP — with settings and certificates syncing across the
 nodes.
 
+## First run
+
+The first visit asks for a username and password, then offers a setup wizard
+with two branches:
+
+- **Join an existing cluster** — point it at any node already running and give
+  that node's API key. It registers itself there and the other node pushes the
+  whole configuration, the cluster settings and the membership list back. You do
+  not touch the other nodes.
+- **Create a new cluster, or run standalone** — set the virtual IP the nodes will
+  share (or skip it and run alone). Other nodes join later by pointing at this
+  one.
+
+Either way it ends with this node's API key, which is what the other nodes need
+to reach it. "Set this up later" skips straight to the UI.
+
 ## Publishing a service
 
 The normal way to use this is **Services → Publish a service**: give it the URL
