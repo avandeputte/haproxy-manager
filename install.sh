@@ -39,6 +39,7 @@ ACME_HOME="${HAM_ACME_HOME:-/root/.acme.sh}"
 PORT="${HAM_PORT:-8080}"
 LISTEN="${HAM_LISTEN:-0.0.0.0}"
 TARBALL="${HAM_TARBALL:-}"
+WITH_APPRISE="${HAM_WITH_APPRISE:-}"     # optional: extra notification services
 SKIP_ACME="${HAM_SKIP_ACME:-0}"
 ACME_VERSION="${HAM_ACME_VERSION:-3.1.4}"
 UNIT=/etc/systemd/system/haproxy-manager.service
@@ -88,6 +89,9 @@ Options (or the equivalent environment variable):
   --api-key <key>          HAM_API_KEY    API key for peer sync (random if unset)
   --no-api-key                            do not set an API key
   --skip-acme              HAM_SKIP_ACME  do not install acme.sh
+  --with-apprise           HAM_WITH_APPRISE  add Apprise (100+ notification services)
+                                          in a venv beside the app. Email, Pushover
+                                          and webhooks work without it.
   --tarball <url|path>     HAM_TARBALL    install from this tarball instead of GitHub
                            GITHUB_TOKEN   token for a private repository
 
@@ -122,6 +126,7 @@ parse_args() {
             --admin-user) HAM_ADMIN_USER="${2:?--admin-user needs a value}"; shift 2 ;;
             --admin-password) HAM_ADMIN_PASSWORD="${2:?--admin-password needs a value}"; shift 2 ;;
             --skip-acme)  SKIP_ACME=1; shift ;;
+            --with-apprise) WITH_APPRISE=1; shift ;;
             -h|--help)    usage; exit 0 ;;
             *)            die "unknown option: $1 (try --help)" ;;
         esac
@@ -436,6 +441,26 @@ install_acme() {
     fi
 }
 
+install_apprise() {
+    [ -n "$WITH_APPRISE" ] || return 0
+    log "Installing Apprise into a virtual environment at $DEST/venv"
+    # A venv, not pip into the system interpreter: Debian marks that
+    # externally managed (PEP 668) and breaking it on a box that routes
+    # traffic is a poor trade. app.py adds this directory to its path when it
+    # exists, so nothing else about the install changes.
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        python3-venv >/dev/null 2>&1 || warn "could not install python3-venv"
+    if ! python3 -m venv "$DEST/venv" 2>/dev/null; then
+        warn "could not create the virtual environment -- skipping Apprise"
+        return 0
+    fi
+    if ! "$DEST/venv/bin/pip" install --quiet --upgrade apprise 2>/dev/null; then
+        warn "could not install Apprise (is PyPI reachable?) -- email, Pushover and webhook notifications still work without it"
+        return 0
+    fi
+    log "Installed Apprise $("$DEST/venv/bin/python" -c "import apprise;print(apprise.__version__)" 2>/dev/null)"
+}
+
 install_app() {
     log "Deploying application to $DEST"
     install -d -m 0755 "$DEST" "$DEST/static"
@@ -629,6 +654,7 @@ main() {
     install_packages
     fetch_source
     install_acme
+    install_apprise
     install_app
     configure_system
     seed_credentials
