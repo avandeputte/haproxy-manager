@@ -357,6 +357,34 @@ five seconds:
 A server with health checking switched off reports `no check` and counts as up,
 because HAProxy still routes to it.
 
+## Logs
+
+**Logs** merges four sources into one timeline, newest at the bottom:
+
+| Source | Where it comes from |
+| --- | --- |
+| **Web UI** | this app's own log — sign-ins, every configuration change and who made it, apply results, certificate outcomes, sync results |
+| **HAProxy** | `journalctl -u haproxy`, falling back to `/var/log/haproxy.log` or `/var/log/syslog` |
+| **acme.sh** | acme.sh's own log, plus the recorded outcome of every issuance |
+| **Keepalived** | `journalctl -u keepalived`, with the same fallback |
+
+Tick the sources you want, filter by level, search the text, and choose how many
+lines to keep. **Follow** re-reads every five seconds and stays pinned to the
+bottom; untick it to scroll back without the view jumping. **Download** saves
+exactly what you are looking at, filters and all, as plain text.
+
+Timestamps are the node's own, and lines that carry none sort to the end rather
+than to 1970. Requests are logged with the object's name but never the request
+body, so passwords, API keys and DNS credentials do not reach the log.
+
+The app writes its own log to `/var/lib/haproxy-manager/haproxy-manager.log`
+(mode 0600, rotated at 4 MB, three kept) and to standard output, so
+`journalctl -u haproxy-manager` shows the same lines.
+
+In the Docker image there is no journal, so a small collector binds `/dev/log`
+and tees it to both the container log and `/var/log/ham-syslog.log`, which is
+what the viewer reads.
+
 ## Version and updates
 
 The app carries a version (`VERSION`, starting at **1.0**) and asks GitHub for
@@ -430,6 +458,16 @@ over Sync, or are re-issued.
   both the password and the session cookie cross the network in the clear.
 - The service runs as **root** because it writes `/etc/haproxy`, `/etc/keepalived`
   and reloads services. Restrict who can reach port 8080.
+- **Served by waitress**, a production WSGI server — deliberately as a single
+  process with a thread pool. The app keeps state in process globals (the lock
+  that makes configuration writes atomic, the failed-sign-in counters, the
+  renewal timer), so running several worker *processes* would give each its own
+  copy and let concurrent edits overwrite one another. Raise `HAM_THREADS` if
+  you need more concurrency; do not put a multi-process server in front of it.
+  If waitress is missing the app still starts, on the development server, and
+  says so in the log.
+- **Request bodies are capped** at 16 MB, and `config.json` — which holds the
+  API key, session secret, peer keys and password hash — is written mode 0600.
 
 ## Install
 
@@ -521,8 +559,10 @@ Then open `http://<node>:8080` and follow the same steps as above.
 - **State** lives in four volumes: `/var/lib/haproxy-manager` (config.json),
   `/var/lib/acme.sh` (ACME accounts + issued certs), `/etc/haproxy`
   (haproxy.cfg + deployed cert PEMs) and `/etc/keepalived`.
-- **Logs.** HAProxy's `log /dev/log` is forwarded to the container's stdout, so
-  `docker logs` shows HAProxy, the manager and supervisord together.
+- **Logs.** A collector binds `/dev/log` and writes each message both to the
+  container's stdout — so `docker logs` shows HAProxy, Keepalived, the manager
+  and supervisord together — and to `/var/log/ham-syslog.log`, which is what the
+  UI's **Logs** page reads back (the image has no journal).
 - **Keepalived per node.** Keepalived settings are node-local, so set the
   interface/VRID/priority separately in each node's container — they are never
   synced.
@@ -535,7 +575,8 @@ Build the image on its own with `docker build -t haproxy-manager .`; the
 ## Environment overrides
 
 `HAM_DATA_DIR` · `HAM_CERT_DIR` · `HAM_HAPROXY_CFG` · `HAM_KEEPALIVED_CFG` ·
-`HAM_ACME_HOME` · `HAM_ACME_SH` · `HAM_LISTEN` · `HAM_PORT` · `HAM_STATS_SOCK` ·
+`HAM_ACME_HOME` · `HAM_ACME_SH` · `HAM_LISTEN` · `HAM_PORT` · `HAM_THREADS` ·
+`HAM_LOG_FILE` · `HAM_DEBUG=1` (verbose logging) · `HAM_STATS_SOCK` ·
 `HAM_VERSION_URL` · `HAM_INSTALL_URL` · `HAM_DRY_RUN=1` (skip `systemctl` calls,
 for development).
 

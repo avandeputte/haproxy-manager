@@ -31,12 +31,33 @@ case "$action" in
         esac
         ;;
     reload|reload-or-restart|try-restart)
+        # supervisor reports STARTING for the first `startsecs` of a program's
+        # life. Treating that as "not running" made an Apply in those seconds
+        # fall through to `start`, which is a no-op for an already-started
+        # program: the reload was skipped while Apply still reported success.
+        waited=0
+        while [ "$(state "$unit")" = "STARTING" ] && [ "$waited" -lt 15 ]; do
+            sleep 1
+            waited=$((waited + 1))
+        done
         if [ "$(state "$unit")" = "RUNNING" ]; then
             case "$unit" in
-                haproxy)    $SUPERVISORCTL signal USR2 haproxy ;;
-                keepalived) $SUPERVISORCTL signal HUP keepalived ;;
-                *)          $SUPERVISORCTL restart "$unit" ;;
+                haproxy)    sig=USR2 ;;
+                keepalived) sig=HUP ;;
+                *)          sig="" ;;
             esac
+            if [ -z "$sig" ]; then
+                $SUPERVISORCTL restart "$unit"
+            else
+                # Report a failed signal instead of swallowing it, so Apply
+                # cannot claim a reload that never happened.
+                out="$($SUPERVISORCTL signal "$sig" "$unit" 2>&1)"
+                echo "$out"
+                case "$out" in
+                    *signalled*) : ;;
+                    *) exit 1 ;;
+                esac
+            fi
         else
             [ "$action" = "try-restart" ] && exit 0
             $SUPERVISORCTL start "$unit"

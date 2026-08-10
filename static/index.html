@@ -86,6 +86,20 @@ td .sub{color:var(--mist);font-size:12px}
 .pill.down{background:#f7e6e2;color:var(--down)}
 .pill.off{background:#eceff0;color:var(--mist)}
 .pill.warn{background:#f6ecdd;color:var(--drift)}
+.logbar{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--hair)}
+.logbar label{display:flex;gap:5px;align-items:center;font-size:13px;white-space:nowrap}
+.logview{margin:0;max-height:62vh;overflow:auto;background:#10191c;padding:10px 0}
+.logview table{width:100%;border-collapse:collapse;font:12px/1.55 var(--mono)}
+.logview td{padding:1px 10px;vertical-align:top;border:0;color:#c8d4d6}
+.logview td.t{white-space:nowrap;color:#6d8085;width:1%}
+.logview td.s{white-space:nowrap;width:1%;font-size:11px;letter-spacing:.4px;text-transform:uppercase}
+.logview td.m{white-space:pre-wrap;word-break:break-word}
+.logview tr.ERROR td.m{color:#ff9c88}
+.logview tr.WARNING td.m{color:#f0c46a}
+.logview tr.DEBUG td.m{color:#8296997d;color:#7e9195}
+.logview tr:hover td{background:#1b282c}
+.src-manager{color:#7ec9b8}.src-haproxy{color:#8fb8e8}.src-acme{color:#d9a7dd}.src-keepalived{color:#e8c07d}
+.logempty{padding:26px 16px;color:#6d8085;font:13px var(--mono)}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px}
 .grid.row5{grid-template-columns:repeat(5,1fr)}
 @media (max-width:1000px){.grid.row5{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}}
@@ -2032,6 +2046,99 @@ async function renderOverview(){
 
 }
 
+/* ============================ logs ============================ */
+/* Filters live outside the render so a refresh does not wipe what you typed. */
+const logState={sources:{manager:true,haproxy:true,acme:true,keepalived:true},
+                level:"DEBUG",q:"",lines:300,follow:true};
+function logParams(){
+  const on=Object.keys(logState.sources).filter(k=>logState.sources[k]);
+  return "sources="+encodeURIComponent(on.join(","))+"&lines="+logState.lines+
+         "&level="+logState.level+"&q="+encodeURIComponent(logState.q);
+}
+function logStamp(ts){
+  if(!ts)return "--:--:--";
+  const d=new Date(ts*1000),p=n=>String(n).padStart(2,"0");
+  return p(d.getHours())+":"+p(d.getMinutes())+":"+p(d.getSeconds());
+}
+async function refreshLogs(view,note){
+  let r;
+  try{r=await api("logs?"+logParams());}
+  catch(e){note.textContent=e.message;return;}
+  const stick=logState.follow||
+              view.scrollTop+view.clientHeight>=view.scrollHeight-40;  /* at the bottom */
+  if(!r.entries.length){
+    view.innerHTML='<div class=logempty>Nothing matches. Widen the filters, or wait for '+
+      'something to happen.</div>';
+  }else{
+    view.innerHTML="<table><tbody>"+r.entries.map(e=>
+      "<tr class="+e.level+"><td class=t>"+logStamp(e.ts)+"</td>"+
+      "<td class='s src-"+e.source+"'>"+esc(e.source)+"</td>"+
+      "<td class=m>"+esc(e.text)+"</td></tr>").join("")+"</tbody></table>";
+  }
+  if(stick)view.scrollTop=view.scrollHeight;
+  note.textContent=r.entries.length+" line"+(r.entries.length===1?"":"s")+
+    (r.failed.length?"  ·  unreadable: "+r.failed.join("; "):"");
+  note.className=r.failed.length?"err":"hint";
+}
+async function renderLogs(){
+  const c=$("#content");c.innerHTML="";
+  const card=document.createElement("div");card.className="card";
+  card.innerHTML='<div class=hd><h2>Logs</h2><div class=sp></div>'+
+    '<button class="btn ghost" id=logdl>Download</button></div>';
+
+  const bar=document.createElement("div");bar.className="logbar";
+  bar.innerHTML=[["manager","Web UI"],["haproxy","HAProxy"],["acme","acme.sh"],
+                 ["keepalived","Keepalived"]].map(([k,l])=>
+      '<label><input type=checkbox data-src="'+k+'"'+(logState.sources[k]?" checked":"")+
+      '> <span class="src-'+k+'" style="font-weight:600">'+l+"</span></label>").join("")+
+    '<span style="flex:1"></span>'+
+    '<label>Level <select id=loglevel><option value=DEBUG>everything</option>'+
+      '<option value=INFO>info and above</option><option value=WARNING>warnings and errors</option>'+
+      '<option value=ERROR>errors only</option></select></label>'+
+    '<label>Lines <select id=loglines><option>100</option><option>300</option>'+
+      '<option>1000</option><option>2000</option></select></label>'+
+    '<label><input type=search id=logq placeholder="search text" style="width:170px"></label>'+
+    '<label><input type=checkbox id=logfollow'+(logState.follow?" checked":"")+"> follow</label>";
+  card.appendChild(bar);
+
+  const view=document.createElement("div");view.className="logview";
+  view.innerHTML='<div class=logempty>Loading...</div>';
+  card.appendChild(view);
+  const foot=document.createElement("div");foot.className="bd";
+  const note=document.createElement("div");note.className="hint";
+  note.textContent="Loading...";
+  foot.appendChild(note);
+  foot.insertAdjacentHTML("beforeend",
+    '<div class=hint style="margin-top:6px">HAProxy and Keepalived are read from the '+
+    'system journal, acme.sh from its own log and the record of each issuance. '+
+    'Timestamps are this node\'s.</div>');
+  card.appendChild(foot);
+  c.appendChild(card);
+
+  $("#loglevel").value=logState.level;
+  $("#loglines").value=String(logState.lines);
+  $("#logq").value=logState.q;
+  const again=()=>refreshLogs(view,note);
+  bar.querySelectorAll("input[data-src]").forEach(b=>{
+    b.onchange=()=>{logState.sources[b.dataset.src]=b.checked;again();};
+  });
+  $("#loglevel").onchange=e=>{logState.level=e.target.value;again();};
+  $("#loglines").onchange=e=>{logState.lines=parseInt(e.target.value,10)||300;again();};
+  $("#logfollow").onchange=e=>{logState.follow=e.target.checked;};
+  let typing=null;
+  $("#logq").oninput=e=>{logState.q=e.target.value;
+    clearTimeout(typing);typing=setTimeout(again,300);};
+  $("#logdl").onclick=()=>download("logs?format=text&"+logParams());
+
+  await again();
+  const tick=async()=>{
+    if(location.hash!=="#/p:logs")return;
+    if(logState.follow)await again();
+    pageTimer=setTimeout(tick,5000);
+  };
+  pageTimer=setTimeout(tick,5000);
+}
+
 /* ============================ shell ============================ */
 const NAV=[
  ["","Overview",null],
@@ -2046,6 +2153,7 @@ const NAV=[
  ["p:webui","Web UI access"],
  ["p:backup","Backup & Export"],
  ["p:admin","Administrator login"],
+ ["p:logs","Logs"],
  ["p:updates","Version & updates"],
  ["grp","ADVANCED · HAPROXY","collapse"],
  ["haproxy/frontends","Public Services"],
@@ -2060,7 +2168,7 @@ const NAV=[
 ];
 /* pages with a hand-written renderer (neither CRUD nor a settings form) */
 const P={services:renderServices,stats:renderStats,backup:renderBackup,admin:renderAdmin,
-         updates:renderUpdates,webui:renderWebui,cluster:renderCluster};
+         updates:renderUpdates,webui:renderWebui,cluster:renderCluster,logs:renderLogs};
 let pageTimer=null;      // per-page refresh timer, cleared whenever we navigate
 /* Collapsed groups are remembered, so the nav stays how you left it. */
 function openGroups(){

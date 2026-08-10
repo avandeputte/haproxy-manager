@@ -290,12 +290,12 @@ do_uninstall() {
 # --------------------------------------------------------------------------
 
 install_packages() {
-    log "Installing packages (haproxy, keepalived, python3-flask, ...)"
+    log "Installing packages (haproxy, keepalived, python3-flask, python3-waitress, ...)"
     export DEBIAN_FRONTEND=noninteractive
     export NEEDRESTART_MODE=a          # keep Ubuntu's needrestart from prompting
     apt-get update -q
     apt-get install -y --no-install-recommends \
-        python3 python3-flask python3-requests \
+        python3 python3-flask python3-requests python3-waitress \
         haproxy keepalived \
         openssl ca-certificates curl socat iproute2 procps tar
 }

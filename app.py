@@ -27,6 +27,8 @@ Environment overrides:
 
 import base64
 import concurrent.futures
+import logging
+import logging.handlers
 import copy
 import hashlib
 import hmac
@@ -41,12 +43,12 @@ import tempfile
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 import urllib.request
 
-from flask import Flask, abort, jsonify, request, send_from_directory
+from flask import Flask, Response, abort, jsonify, request, send_from_directory
 
 try:
     import requests as _requests
@@ -84,8 +86,41 @@ def _read_version():
 
 VERSION = _read_version()
 
+# --------------------------------------------------------------------------
+# logging
+# --------------------------------------------------------------------------
+
+LOG_PATH = Path(os.environ.get("HAM_LOG_FILE", str(DATA_DIR / "haproxy-manager.log")))
+LOG_MAX_BYTES = 4 * 1024 * 1024
+log = logging.getLogger("haproxy-manager")
+
+
+def setup_logging():
+    """Log to a rotating file and to stdout, so both the journal and the log
+    viewer see the same lines."""
+    if log.handlers:
+        return
+    log.setLevel(logging.DEBUG if os.environ.get("HAM_DEBUG") else logging.INFO)
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s", "%Y-%m-%dT%H:%M:%S%z")
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        fh = logging.handlers.RotatingFileHandler(LOG_PATH, maxBytes=LOG_MAX_BYTES, backupCount=3)
+        fh.setFormatter(fmt)
+        log.addHandler(fh)
+        os.chmod(LOG_PATH, 0o600)          # it records who signed in from where
+    except OSError:
+        pass                               # stdout alone is better than nothing
+    sh = logging.StreamHandler(sys.stdout)
+    sh.setFormatter(fmt)
+    log.addHandler(sh)
+    log.propagate = False       # the root logger would print every line twice
+
+
+setup_logging()
+
 LISTEN = os.environ.get("HAM_LISTEN", "0.0.0.0")
 PORT = int(os.environ.get("HAM_PORT", "8080"))
+THREADS = max(4, int(os.environ.get("HAM_THREADS", "8")))
 DRY_RUN = os.environ.get("HAM_DRY_RUN") == "1"
 
 app = Flask(__name__, static_folder=None)
@@ -528,6 +563,29 @@ def readonly_state(cfg):
                   "diverge. This node's own settings stay editable.")
 
 
+@app.after_request
+def _audit(resp):
+    """One line per change, so the log says who did what from where."""
+    if request.path.startswith("/api/") and request.method in ("POST", "PUT", "DELETE", "PATCH"):
+        if request.path not in ("/api/login", "/api/whoami"):
+            try:
+                who = current_user() or ("api-key" if request.headers.get("X-API-Key") else "anonymous")
+            except Exception:
+                who = "?"
+            what = ""
+            if request.is_json:
+                # the name only -- request bodies carry passwords and API keys
+                try:
+                    name = (request.get_json(silent=True) or {}).get("name")
+                    what = " '%s'" % str(name)[:80] if name else ""
+                except Exception:
+                    what = ""
+            level = log.info if resp.status_code < 400 else log.warning
+            level("%s %s %s%s -> %s (%s)", who, request.method, request.path,
+                  what, resp.status_code, request.remote_addr)
+    return resp
+
+
 @app.before_request
 def _auth():
     if not request.path.startswith("/api/"):
@@ -681,10 +739,12 @@ def api_login():
         else:
             _login_fails[ip] = [fails, 0]
         _prune_login_fails()
+        log.warning("failed sign-in for %r from %s (%d in a row)", username, ip, fails)
         time.sleep(0.5)  # blunt the rate of online guessing
         return jsonify({"ok": False, "error": "invalid username or password"}), 401
 
     _login_fails.pop(ip, None)
+    log.info("signed in: %s from %s", username, ip)
     return _login_ok(cfg, username, {"ok": True, "username": username})
 
 
@@ -738,6 +798,49 @@ def api_password():
 
 
 # --------------------------------------------------------------------------
+# settings validation
+#
+# `haproxy -c` is the authority on whether a configuration works, but it is
+# lenient about types: `maxconn not-a-number` parses as zero and validates
+# clean, silently capping the proxy at nothing. So the obviously-typed fields
+# are checked here first, before anything is written.
+# --------------------------------------------------------------------------
+
+NUMERIC_SETTINGS = {
+    "haproxy": {"maxconn": (1, 2000000), "nbthread": (1, 256), "retries": (0, 100)},
+    "acme": {"challenge_port": (1, 65535), "renew_hours": (1, 8760)},
+}
+TIME_SETTINGS = {"haproxy": ["timeout_client", "timeout_connect", "timeout_server",
+                             "hard_stop_after"]}
+TIME_RE = re.compile(r"^\d+(us|ms|s|m|h|d)?$")
+
+
+def check_setting_types(sec, proposed):
+    """Return a human-readable complaint, or "" when the values make sense."""
+    problems = []
+    for key, (lo, hi) in NUMERIC_SETTINGS.get(sec, {}).items():
+        if key not in proposed:
+            continue
+        raw = proposed[key]
+        if raw in ("", None):                  # empty means "use the default"
+            continue
+        try:
+            val = int(str(raw).strip())
+        except (TypeError, ValueError):
+            problems.append("%s must be a whole number, not %r." % (key, raw))
+            continue
+        if not lo <= val <= hi:
+            problems.append("%s must be between %d and %d." % (key, lo, hi))
+    for key in TIME_SETTINGS.get(sec, []):
+        raw = proposed.get(key)
+        if raw in ("", None):
+            continue
+        if not TIME_RE.match(str(raw).strip()):
+            problems.append("%s must be a time such as 50s, 5000 or 1m -- not %r." % (key, raw))
+    return "\n".join(problems)
+
+
+# --------------------------------------------------------------------------
 # generic CRUD
 # --------------------------------------------------------------------------
 
@@ -749,6 +852,9 @@ def collection(sec, col):
         if request.method == "GET":
             return jsonify(load_config()[sec]["settings"])
         proposed = request.get_json(force=True) or {}
+        bad = check_setting_types(sec, proposed)
+        if bad:
+            return jsonify({"error": "These settings were not saved.\n\n" + bad}), 400
         # validated outside the lock: it runs haproxy -c, which is slow
         ok, message = check_rendered(draft_with(sec, proposed))
         if not ok:
@@ -1276,14 +1382,14 @@ def api_keepalived_status():
             if os.path.exists(staging):
                 os.unlink(staging)
 
-    log = ""
+    journal = ""
     if shutil.which("journalctl"):
         lrc, lout = run(["journalctl", "-u", "keepalived", "-n", "25", "--no-pager"], timeout=20)
         if lrc == 0:
-            log = lout[-6000:]
+            journal = lout[-6000:]
 
     state = ""
-    m = re.findall(r"Entering (\w+) STATE", log)
+    m = re.findall(r"Entering (\w+) STATE", journal)
     if m:
         state = m[-1]
 
@@ -1365,7 +1471,10 @@ def api_validate():
     if section == "cluster":
         draft = draft_with(None, settings, cluster=True)
     elif section in ("haproxy", "acme"):
-        draft = draft_with(section, settings)
+        bad = check_setting_types(section, settings)
+        if bad:                      # the same rules the save applies, so
+            return jsonify({"ok": False, "message": bad})   # Validate cannot
+        draft = draft_with(section, settings)               # pass what save rejects
     else:
         return jsonify({"ok": False, "error": "unknown section"}), 400
     ok, message = check_rendered(draft)
@@ -1392,6 +1501,8 @@ def do_apply(cfg=None, allow_push=True):
         elif rc != 0:
             os.unlink(staging)
             result["error"] = "HAProxy configuration failed validation. Nothing was changed."
+            log.error("apply refused: haproxy -c rejected the rendered configuration: %s",
+                      out.strip()[-400:])
             return result
 
         HAPROXY_CFG.parent.mkdir(parents=True, exist_ok=True)
@@ -1401,6 +1512,10 @@ def do_apply(cfg=None, allow_push=True):
         os.chmod(HAPROXY_CFG, 0o644)
         rc, out = run(["systemctl", "reload-or-restart", "haproxy"])
         result["steps"].append("haproxy reload: " + ("ok" if rc == 0 else out))
+        if rc == 0:
+            log.info("applied: haproxy.cfg written and reloaded")
+        else:
+            log.error("applied haproxy.cfg but the reload failed: %s", out.strip()[:300])
 
         k = cfg["local"]["keepalived"]
         if keepalived_wanted(cfg):
@@ -1553,7 +1668,10 @@ def acme_run(args, env_extra=None):
         return 127, "acme.sh not found at %s -- run install.sh or set HAM_ACME_SH" % ACME_SH
     env = os.environ.copy()
     env.update(env_extra or {})
-    return run([ACME_SH, "--home", str(ACME_HOME)] + args, env=env)
+    # --log makes acme.sh keep its own log in ACME_HOME, which is what the log
+    # viewer reads back. Left at the default level: level 2 traces the DNS hook
+    # calls, and those carry API credentials.
+    return run([ACME_SH, "--home", str(ACME_HOME), "--log"] + args, env=env)
 
 
 def ensure_account(acc):
@@ -1607,9 +1725,12 @@ def acme_issue(cfg, cert, force=False):
     res = _acme_issue(cfg, cert, force=force)
     try:
         record_issue(cert, res, started)
+        if not res.get("ok"):
+            log.error("certificate %s failed: %s", cert.get("name"), res.get("error"))
     except OSError:
         pass  # never fail an issuance because the log could not be written
     if res.get("ok"):
+        log.info("certificate issued: %s (%s)", cert.get("name"), ", ".join(parse_domains(cert)))
         note = propagate_certificate(cfg, cert)
         if note:
             res["propagated"] = note
@@ -1627,11 +1748,11 @@ def _acme_issue(cfg, cert, force=False):
     if not doms:
         return {"ok": False, "error": "certificate has no domain names"}
 
-    log = []
+    trace = []
     rc, out = ensure_account(acc)
-    log.append(out)
+    trace.append(out)
     if rc != 0:
-        return {"ok": False, "error": "ACME account registration failed", "log": "\n".join(log)}
+        return {"ok": False, "error": "ACME account registration failed", "log": "\n".join(trace)}
 
     args = ["--issue", "--server", CA_SERVERS.get(acc.get("ca", "letsencrypt"), "letsencrypt")]
     for d in doms:
@@ -1650,13 +1771,13 @@ def _acme_issue(cfg, cert, force=False):
         args += ["--force"]
 
     rc, out = acme_run(args, env)
-    log.append(out)
+    trace.append(out)
     if rc not in (0, 2):  # 2 = cert not yet due for renewal, treat as success
-        return {"ok": False, "error": "issuance failed -- see log", "log": "\n".join(log)}
+        return {"ok": False, "error": "issuance failed -- see log", "log": "\n".join(trace)}
 
     dep = deploy_cert(cfg, cert)
-    log.append(dep.get("log", ""))
-    res = {"ok": dep["ok"], "log": "\n".join(x for x in log if x)}
+    trace.append(dep.get("log", ""))
+    res = {"ok": dep["ok"], "log": "\n".join(x for x in trace if x)}
     if not dep["ok"]:
         res["error"] = dep.get("error")
     return res
@@ -1886,6 +2007,11 @@ def sync_push(cfg, only=None, include_peers=True):
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(peers))) as ex:
         results = list(ex.map(send, peers))
     failed = [r for r in results if not r["ok"]]
+    for r in results:
+        if r["ok"]:
+            log.info("synced to %s", r["name"])
+        else:
+            log.warning("sync to %s failed: %s", r["name"], r.get("error"))
     out = {"ok": not failed, "results": results,
            "error": "; ".join("%s: %s" % (r["name"], r["error"]) for r in failed) or None}
     if include_peers and not (cfg["local"].get("node_url") or "").strip():
@@ -2699,6 +2825,7 @@ def _receive_locked(cfg, data, conf):
         except Exception:
             pass
     save_config(cfg)
+    log.info("received configuration from %s", request.remote_addr)
     res = do_apply(cfg, allow_push=False)  # never re-push: avoids sync loops
     return jsonify({"ok": res.get("ok", False), "node": socket.gethostname(), "applied": res})
 
@@ -2780,6 +2907,272 @@ def haproxy_stats():
 @app.get("/api/stats")
 def api_stats():
     return jsonify(haproxy_stats())
+
+
+# --------------------------------------------------------------------------
+# log collection
+#
+# Four programs write logs four different ways, and where they land depends on
+# how haproxy-manager was installed. On a systemd host HAProxy and Keepalived
+# log through syslog into the journal; in the container there is no journal, so
+# a collector tees /dev/log to a file. Each reader below therefore tries the
+# journal first and falls back to files, and every reader returns the same
+# shape so the viewer can merge them into one timeline.
+# --------------------------------------------------------------------------
+
+SYSLOG_FILES = ["/var/log/ham-syslog.log", "/var/log/haproxy.log",
+                "/var/log/syslog", "/var/log/messages"]
+MONTHS = {m: i + 1 for i, m in enumerate(
+    ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"])}
+# syslog severities 0-7; anything at warning or worse is worth colouring
+SYSLOG_LEVELS = ["ERROR", "ERROR", "ERROR", "ERROR",
+                 "WARNING", "INFO", "INFO", "DEBUG"]
+
+
+def _tail(path, lines):
+    """Last `lines` lines of a file, read from the end so a large log is cheap."""
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return []
+    want = min(size, max(4096, lines * 400))
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(size - want)
+            data = fh.read()
+    except OSError:
+        return []
+    if want < size:
+        data = data.split(b"\n", 1)[-1]        # drop the partial first line
+    return data.decode("utf-8", "replace").splitlines()[-lines:]
+
+
+def _epoch(dt):
+    return dt.replace(tzinfo=dt.tzinfo or timezone.utc).timestamp()
+
+
+def _level_of(text):
+    up = text.upper()
+    for word in ("CRITICAL", "ALERT", "EMERG", "FATAL"):
+        if word in up:
+            return "ERROR"
+    if "ERROR" in up or "ERR:" in up or "FAILED" in up or "FAILURE" in up:
+        return "ERROR"
+    if "WARNING" in up or "WARN " in up or "WARN:" in up:
+        return "WARNING"
+    if "DEBUG" in up:
+        return "DEBUG"
+    return "INFO"
+
+
+def _entry(ts, source, level, text):
+    return {"ts": ts, "source": source, "level": level, "text": text.rstrip()}
+
+
+def _parse_syslog_date(token_month, token_day, token_time):
+    """Classic syslog stamps carry no year; assume the most recent one."""
+    try:
+        now = datetime.now()
+        dt = datetime(now.year, MONTHS[token_month], int(token_day),
+                      *[int(x) for x in token_time.split(":")])
+        if dt > now + timedelta(days=1):        # December log read in January
+            dt = dt.replace(year=now.year - 1)
+        return dt.astimezone().timestamp()
+    except (KeyError, ValueError):
+        return None
+
+
+def read_manager_log(lines):
+    """Our own log: '2026-08-10T12:00:00+0000 INFO message'."""
+    out = []
+    for line in _tail(str(LOG_PATH), lines):
+        stamp, level, text = None, None, line
+        parts = line.split(" ", 2)
+        if len(parts) == 3 and "T" in parts[0]:
+            try:
+                stamp = _epoch(datetime.strptime(parts[0], "%Y-%m-%dT%H:%M:%S%z"))
+                level, text = parts[1], parts[2]
+            except ValueError:
+                stamp = None
+        if level not in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
+            level, text = _level_of(line), line
+        out.append(_entry(stamp, "manager", "ERROR" if level == "CRITICAL" else level, text))
+    return out
+
+
+def read_journal(unit, source, lines):
+    """journalctl, when there is a journal to read."""
+    if not shutil.which("journalctl"):
+        return None
+    rc, out = run(["journalctl", "-u", unit, "-n", str(lines),
+                   "-o", "short-iso", "--no-pager"], timeout=20)
+    if rc != 0:
+        return None
+    entries = []
+    for line in out.splitlines():
+        if not line or line.startswith("-- "):   # "-- No entries --", boot markers
+            continue
+        stamp, text = None, line
+        head = line.split(" ", 1)
+        if len(head) == 2:
+            try:
+                stamp = _epoch(datetime.strptime(head[0], "%Y-%m-%dT%H:%M:%S%z"))
+                # strip the hostname, keep 'unit[pid]: message'
+                rest = head[1].split(" ", 1)
+                text = rest[1] if len(rest) == 2 else head[1]
+            except ValueError:
+                pass
+        entries.append(_entry(stamp, source, _level_of(text), text))
+    return entries
+
+
+def parse_syslog_line(line):
+    """Split one syslog line into (timestamp, program, message, level).
+
+    Two shapes have to work. Datagrams read straight off /dev/log keep their
+    '<134>' priority prefix and carry no hostname; lines written by a syslog
+    daemon drop the priority and add one. Rather than guess by position, find
+    the field that ends in ':' -- that is the program -- and treat whatever
+    precedes it as the hostname.
+    """
+    level = None
+    if line.startswith("<") and ">" in line[:6]:
+        pri, _, line = line[1:].partition(">")
+        if pri.isdigit():
+            level = SYSLOG_LEVELS[int(pri) % 8]
+    parts = line.split(None, 3)
+    if len(parts) < 4 or parts[0] not in MONTHS:
+        return None, "", line, level
+    stamp = _parse_syslog_date(parts[0], parts[1], parts[2])
+    rest = parts[3]
+    prog, message = "", rest
+    for i, tok in enumerate(rest.split(None, 2)[:2]):
+        if tok.endswith(":"):
+            prog = tok[:-1].split("[")[0]       # 'haproxy[1234]:' -> 'haproxy'
+            message = rest.split(None, i + 1)[i + 1] if len(rest.split(None, i + 1)) > i + 1 else ""
+            break
+    return stamp, prog, "%s: %s" % (prog, message) if prog else message, level
+
+
+def read_syslog_files(match, source, lines):
+    """Fallback for hosts without a journal, and for the container's collector.
+
+    /var/log/syslog holds every program's output, so filtering on the program
+    field (not the whole line) keeps a HAProxy message that happens to mention
+    keepalived out of the Keepalived view.
+    """
+    needle = match.lower()
+    entries = []
+    for path in SYSLOG_FILES:
+        if not os.path.exists(path):
+            continue
+        for line in _tail(path, lines * 6):
+            stamp, prog, text, level = parse_syslog_line(line)
+            if needle not in (prog or line).lower():
+                continue
+            entries.append(_entry(stamp, source, level or _level_of(text), text))
+        if entries:
+            break                               # first file that has anything wins
+    return entries[-lines:]
+
+
+def read_service_log(unit, match, source, lines):
+    entries = read_journal(unit, source, lines)
+    if entries:
+        return entries
+    return read_syslog_files(match, source, lines)
+
+
+def read_acme_log(lines):
+    """acme.sh's own log, plus the outcome of each issuance we ran."""
+    entries = []
+    for line in _tail(str(ACME_HOME / "acme.sh.log"), lines):
+        stamp, text = None, line
+        if line.startswith("["):
+            head, _, rest = line[1:].partition("]")
+            for fmt in ("%a %b %d %H:%M:%S %Z %Y", "%a %b %d %H:%M:%S %Y"):
+                try:
+                    stamp = _epoch(datetime.strptime(head.strip(), fmt))
+                    text = rest.strip()
+                    break
+                except ValueError:
+                    continue
+        entries.append(_entry(stamp, "acme", _level_of(text), text))
+    # issuance results are kept in _meta by record_issue(); surface them here so
+    # a failed renewal is visible even when acme.sh wrote nothing useful
+    cfg = load_config()
+    names = {c.get("id"): c.get("name", "?") for c in cfg["acme"].get("certificates", [])}
+    for cid, rec in (cfg.get("_meta", {}).get("issue_log") or {}).items():
+        stamp = None
+        try:
+            stamp = _epoch(datetime.fromisoformat(rec.get("time", "")))
+        except ValueError:
+            pass
+        ok = rec.get("ok")
+        entries.append(_entry(
+            stamp, "acme", "INFO" if ok else "ERROR",
+            "certificate %s: %s in %ss%s" % (
+                names.get(cid, cid), "issued" if ok else "failed",
+                rec.get("seconds", "?"),
+                "" if ok else " -- " + (rec.get("error") or "no detail"))))
+    return entries
+
+
+LOG_SOURCES = [
+    ("manager", "Web UI", lambda n: read_manager_log(n)),
+    ("haproxy", "HAProxy", lambda n: read_service_log("haproxy", "haproxy", "haproxy", n)),
+    ("acme", "acme.sh", lambda n: read_acme_log(n)),
+    ("keepalived", "Keepalived",
+     lambda n: read_service_log("keepalived", "Keepalived", "keepalived", n)),
+]
+LEVEL_ORDER = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3}
+
+
+def collect_logs(sources, lines, query="", min_level="DEBUG"):
+    wanted = [s for s in LOG_SOURCES if s[0] in sources]
+    entries, failed = [], []
+    for key, _label, reader in wanted:
+        try:
+            entries.extend(reader(lines) or [])
+        except Exception as exc:                # one unreadable source must not
+            failed.append("%s: %s" % (key, exc))  # blank the whole viewer
+            log.exception("could not read the %s log", key)
+    floor = LEVEL_ORDER.get(min_level, 0)
+    if floor:
+        entries = [e for e in entries if LEVEL_ORDER.get(e["level"], 1) >= floor]
+    if query:
+        needle = query.lower()
+        entries = [e for e in entries if needle in e["text"].lower()]
+    # entries with no parsable timestamp sort to the end of their source rather
+    # than to 1970, which would bury them
+    fallback = max([e["ts"] for e in entries if e["ts"]] or [time.time()])
+    entries.sort(key=lambda e: e["ts"] if e["ts"] else fallback)
+    return entries[-lines:], failed
+
+
+@app.get("/api/logs")
+def api_logs():
+    args = request.args
+    sources = [s for s in (args.get("sources") or "").split(",") if s]
+    if not sources:
+        sources = [s[0] for s in LOG_SOURCES]
+    try:
+        lines = max(1, min(2000, int(args.get("lines", "300"))))
+    except ValueError:
+        lines = 300
+    entries, failed = collect_logs(sources, lines, args.get("q", "").strip(),
+                                   (args.get("level") or "DEBUG").upper())
+    if args.get("format") == "text":
+        body = "\n".join(
+            "%s  %-10s %-7s %s" % (
+                datetime.fromtimestamp(e["ts"], timezone.utc).isoformat(timespec="seconds")
+                if e["ts"] else "-" * 25, e["source"], e["level"], e["text"])
+            for e in entries)
+        return Response(body + "\n", mimetype="text/plain", headers={
+            "Content-Disposition": "attachment; filename=haproxy-manager-logs.txt"})
+    return jsonify({"ok": True, "entries": entries, "failed": failed,
+                    "sources": [{"key": k, "label": lab} for k, lab, _ in LOG_SOURCES]})
 
 
 # --------------------------------------------------------------------------
@@ -2926,7 +3319,9 @@ def api_update():
         cmd = ["setsid", "/bin/sh", "-c", shell]
     rc, out = run(cmd, timeout=30)
     if rc != 0:
+        log.error("could not start the updater: %s", out)
         return jsonify({"ok": False, "error": "could not start the updater: %s" % out}), 500
+    log.warning("update started from %s -- this service will restart", url)
     return jsonify({"ok": True, "note": "The update is running. This service restarts when it finishes."})
 
 
@@ -3433,9 +3828,26 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
     # again repoints it instead of quietly adding a second server behind it.
     srv_ids = []
     for t in tgts:
-        srv = _find(hp["servers"], lambda s: s.get("address") == t["host"]
-                    and str(s.get("port")) == str(t["port"])
-                    and bool(s.get("ssl")) == (t["scheme"] == "https"))
+        # A target already claimed by an earlier entry cannot be claimed again:
+        # two targets sharing one address:port would otherwise both resolve to
+        # the same server, and the pool would list it twice -- which HAProxy
+        # rejects as "another server named 'a' was already defined".
+        label = (t.get("label") or "").strip()
+        srv = None
+        if label:
+            # An explicitly named target names the server, so match on that
+            # first: editing galera2's address should repoint galera2, not
+            # invent a second server.
+            srv = _find(hp["servers"], lambda s: s.get("name") == label
+                        and s["id"] not in srv_ids)
+            if srv:
+                srv["address"], srv["port"] = t["host"], t["port"]
+                srv["ssl"] = t["scheme"] == "https"
+        if srv is None:
+            srv = _find(hp["servers"], lambda s: s.get("address") == t["host"]
+                        and str(s.get("port")) == str(t["port"])
+                        and bool(s.get("ssl")) == (t["scheme"] == "https")
+                        and s["id"] not in srv_ids)
         if srv:
             act("reused", "Real Server", srv["name"])
         else:
@@ -3450,7 +3862,8 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
             act("created", "Real Server", srv["name"])
         if check_port:
             srv["check_port"] = check_port
-        srv_ids.append(srv["id"])
+        if srv["id"] not in srv_ids:
+            srv_ids.append(srv["id"])
 
     pool_opts = {
         "mode": "tcp" if is_tcp else "http",
@@ -4413,6 +4826,35 @@ def _cli(argv):
     return 2
 
 
+def _serve():
+    """Serve with waitress, a production WSGI server.
+
+    Deliberately one process with a thread pool: this app keeps state in
+    process globals -- the write lock that makes configuration changes atomic,
+    the failed-sign-in counters and the renewal timer -- so a multi-process
+    server would give each worker its own copy and reintroduce lost updates.
+    Waitress is threaded within a single process, which is exactly right here.
+    """
+    try:
+        from waitress import serve as waitress_serve
+    except ImportError:
+        log.warning("waitress is not installed; falling back to the development "
+                    "server, which is not meant for production. Install it with "
+                    "'apt-get install -y python3-waitress'.")
+        app.run(host=LISTEN, port=PORT, threaded=True)
+        return
+    for name in ("waitress", "waitress.queue"):
+        wl = logging.getLogger(name)
+        wl.handlers = list(log.handlers)
+        wl.setLevel(logging.INFO)
+        wl.propagate = False
+    log.info("haproxy-manager %s listening on %s:%s (waitress)", VERSION, LISTEN, PORT)
+    waitress_serve(app, host=LISTEN, port=PORT, threads=THREADS,
+                   ident="haproxy-manager", clear_untrusted_proxy_headers=True,
+                   max_request_body_size=app.config["MAX_CONTENT_LENGTH"],
+                   channel_timeout=120, asyncore_use_poll=True)
+
+
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         sys.exit(_cli(sys.argv[1:]))
@@ -4421,4 +4863,4 @@ if __name__ == "__main__":
         save_config(load_config())
     threading.Thread(target=_renew_loop, daemon=True).start()
     threading.Thread(target=_update_loop, daemon=True).start()
-    app.run(host=LISTEN, port=PORT, threaded=True)
+    _serve()

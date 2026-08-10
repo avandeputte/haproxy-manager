@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 \
         python3-flask \
         python3-requests \
+        python3-waitress \
         haproxy \
         keepalived \
         openssl \
@@ -43,11 +44,13 @@ COPY app.py ./app.py
 COPY VERSION ./VERSION
 COPY static/ ./static/
 
+COPY docker/syslogd.py /usr/local/bin/ham-syslogd
 COPY docker/systemctl /usr/local/bin/systemctl
 COPY docker/haproxy-run /usr/local/bin/haproxy-run
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY docker/supervisord.conf /etc/supervisor/supervisord.conf
-RUN chmod 0755 /usr/local/bin/systemctl /usr/local/bin/haproxy-run /usr/local/bin/entrypoint.sh
+RUN chmod 0755 /usr/local/bin/systemctl /usr/local/bin/haproxy-run \
+               /usr/local/bin/entrypoint.sh /usr/local/bin/ham-syslogd
 
 ENV HAM_DATA_DIR=/var/lib/haproxy-manager \
     HAM_CERT_DIR=/etc/haproxy/certs \
