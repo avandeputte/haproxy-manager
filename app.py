@@ -1834,10 +1834,40 @@ def is_newer(candidate, current):
     return version_tuple(candidate) > version_tuple(current)
 
 
+def _read_version_url(url):
+    headers = {"User-Agent": "haproxy-manager/" + VERSION,
+               "Cache-Control": "no-cache", "Pragma": "no-cache"}
+    if "api.github.com" in url:
+        headers["Accept"] = "application/vnd.github.raw"
+    with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=15) as r:
+        body = r.read(4096).decode("utf-8", "replace").strip()
+    if body.startswith("{"):                     # API answered with JSON metadata
+        body = base64.b64decode(json.loads(body).get("content", "")).decode("utf-8", "replace").strip()
+    return body
+
+
 def fetch_latest_version():
-    req = urllib.request.Request(VERSION_URL, headers={"User-Agent": "haproxy-manager/" + VERSION})
-    with urllib.request.urlopen(req, timeout=15) as r:
-        return r.read(64).decode("utf-8", "replace").strip()
+    """The published version.
+
+    Ask the GitHub API first: raw.githubusercontent.com is behind a CDN that
+    serves a file for up to five minutes after it changes, so a check straight
+    after a release reports the previous version. The API is not cached that
+    way. Fall back to raw if the API is unreachable or rate limited.
+    """
+    if os.environ.get("HAM_VERSION_URL"):
+        return _read_version_url(VERSION_URL)      # explicitly pointed somewhere
+    urls = ["https://api.github.com/repos/%s/contents/VERSION?ref=%s" % (UPDATE_REPO, UPDATE_REF),
+            VERSION_URL]
+    last = None
+    for url in urls:
+        try:
+            body = _read_version_url(url)
+            if re.match(r"^v?\d+(\.\d+)*$", body):
+                return body
+            last = ValueError("unexpected content at %s: %r" % (url, body[:40]))
+        except Exception as e:
+            last = e
+    raise last or ValueError("no version source answered")
 
 
 def check_for_update(cfg=None):

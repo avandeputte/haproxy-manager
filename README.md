@@ -288,8 +288,12 @@ One-click update applies to the installer-managed (systemd) install. In a
 container the button explains that you should pull a new image instead.
 
 To publish a new version: bump `VERSION`, push, and every node offers it within
-a day. `HAM_VERSION_URL` / `HAM_INSTALL_URL` point the whole mechanism at a fork
-or a private mirror.
+a day. The check asks the GitHub API rather than `raw.githubusercontent.com`,
+because raw is behind a CDN that keeps serving the old file for up to five
+minutes after a push — long enough for a check straight after a release to
+report the previous version. Raw is the fallback if the API is unreachable or
+rate limited. `HAM_VERSION_URL` / `HAM_INSTALL_URL` point the whole mechanism at
+a fork or a private mirror.
 
 > The update fetches a script over the network and runs it as root. It is pinned
 > to the repository above, and reaching it already requires an administrator
