@@ -87,6 +87,28 @@ and the resulting `haproxy.cfg`, before anything is written.
 
   The database checks expect the servers to speak that protocol, so point them
   at the database itself; the wizard says so when you pick one.
+- **The check can use a different port and protocol from the traffic.** Set a
+  **check port** and HAProxy checks each server at its own address on that port,
+  which is how a PostgreSQL cluster behind Patroni is fronted: route TCP to 5432
+  while an HTTP check asks each node's own API on 8008 whether it is the
+  primary. The HTTP check can carry a method, an HTTP version and a Host header,
+  and a pool can override the connect, server and check timeouts:
+
+  ```
+  backend be_postgres_backend
+      mode tcp
+      balance source
+      option httpchk
+      http-check send meth GET uri /master ver HTTP/2 hdr Host localhost
+      http-check expect status 200
+      timeout connect 5s
+      timeout server 30s
+      stick-table type ip size 50k expire 30m
+      stick on src
+      server postgresql1 192.168.1.111:5432 check inter 3000 port 8008
+      server postgresql2 192.168.1.112:5432 check inter 3000 port 8008
+      server postgresql3 192.168.1.113:5432 check inter 3000 port 8008
+  ```
 - **A path** works too: `https://ps2.iothing.net/api` routes only that prefix.
   More specific rules are placed ahead of broader ones, so a host+path rule is
   never swallowed by the host-only rule for the same name.

@@ -949,7 +949,22 @@ def render_haproxy(cfg):
         if hc:
             htype = hc.get("type")
             if htype == "http":
-                A("    option httpchk %s %s" % (hc.get("http_method", "GET"), hc.get("http_uri", "/")))
+                # An HTTP check can front a TCP service -- Patroni's /master on
+                # 8008 deciding which PostgreSQL takes connections on 5432.
+                method = hc.get("http_method", "GET")
+                uri = hc.get("http_uri", "/")
+                ver, host_hdr = hc.get("http_version"), hc.get("http_host")
+                if ver or host_hdr:
+                    # the form that can carry a version and headers
+                    A("    option httpchk")
+                    send = "    http-check send meth %s uri %s" % (_sec(method), uri)
+                    if ver in ("HTTP/1.0", "HTTP/1.1", "HTTP/2"):
+                        send += " ver %s" % ver      # the slash must survive sanitising
+                    if host_hdr:
+                        send += " hdr Host %s" % _sec(host_hdr)
+                    A(send)
+                else:
+                    A("    option httpchk %s %s" % (method, uri))
                 if hc.get("expect_status"):
                     A("    http-check expect status %s" % hc["expect_status"])
             elif htype == "ssl":
@@ -964,6 +979,11 @@ def render_haproxy(cfg):
             # "tcp" needs nothing here: `check` on the server line is a connect test
         if be.get("log_health_checks"):
             A("    option log-health-checks")
+        for key, directive in (("timeout_connect", "timeout connect"),
+                               ("timeout_server", "timeout server"),
+                               ("timeout_check", "timeout check")):
+            if be.get(key):
+                A("    %s %s" % (directive, _sec(str(be[key]))))
         use_cookie = be.get("persistence") == "cookie" and mode == "http"
         if use_cookie:
             A("    cookie %s insert indirect nocache" % (be.get("cookie_name") or "SRVID"))
@@ -3132,7 +3152,7 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
                    certificate_id=None, new_certificate=False,
                    balance=None, persistence=None, stick_size=None, stick_expire=None,
                    stick_type=None, log_health_checks=False, check_port=None,
-                   service_id=None):
+                   timeout_connect=None, timeout_server=None, service_id=None):
     """Create (or update) everything needed to serve `pub` from `tgts`.
 
     Re-running for the same public host updates that mapping instead of adding
@@ -3206,6 +3226,8 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
         "stick_expire": stick_expire or "30m",
         "stick_type": stick_type if stick_type in ("ip", "ipv6") else "ip",
         "log_health_checks": bool(log_health_checks),
+        "timeout_connect": timeout_connect or "",
+        "timeout_server": timeout_server or "",
     }
 
     # -- Health Monitor ---------------------------------------------------
@@ -3221,8 +3243,10 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
     if monitor is None and htype != "none":
         want = {"type": htype,
                 "interval": (health.get("interval") or "2s"),
-                "http_method": "GET",
+                "http_method": (health.get("method") or "GET"),
                 "http_uri": health.get("uri") or "/",
+                "http_version": health.get("version") or "",
+                "http_host": health.get("host") or "",
                 "expect_status": str(health.get("status") or "") if htype == "http" else "",
                 "db_user": health.get("user") or ("postgres" if htype == "pgsql" else "haproxy"),
                 "mysql_post41": bool(health.get("post41", True))}
@@ -3720,11 +3744,16 @@ def api_services():
             "stick_expire": pool.get("stick_expire") or "30m",
             "log_health_checks": bool(pool.get("log_health_checks")),
             "check_port": first.get("check_port") or "",
+            "timeout_connect": pool.get("timeout_connect") or "",
+            "timeout_server": pool.get("timeout_server") or "",
             "health": {"type": m.get("type") if m else "none",
                        "interval": (m or {}).get("interval") or "2s",
                        "uri": (m or {}).get("http_uri") or "/",
                        "status": (m or {}).get("expect_status") or "",
-                       "user": (m or {}).get("db_user") or ""},
+                       "user": (m or {}).get("db_user") or "",
+                       "method": (m or {}).get("http_method") or "GET",
+                       "version": (m or {}).get("http_version") or "",
+                       "host": (m or {}).get("http_host") or ""},
         }
 
     def pool_targets(pool):
@@ -3959,6 +3988,8 @@ def api_wizard_publish():
                 stick_type=body.get("stick_type") or None,
                 log_health_checks=bool(body.get("log_health_checks")),
                 check_port=body.get("check_port") or None,
+                timeout_connect=body.get("timeout_connect") or None,
+                timeout_server=body.get("timeout_server") or None,
             )
         except ValueError as e:                     # a rejected request, not a crash
             return jsonify({"ok": False, "error": str(e)}), 400

@@ -266,6 +266,9 @@ const E={
    {k:"healthcheck",l:"Health Monitor",t:"ref",ref:"haproxy/healthchecks"},
    {k:"persistence",l:"Persistence",t:"select",o:["none","cookie","source"],d:"none",h:"cookie = HTTP only; source = stick table on the client IP, the usual choice for TCP"},
    {k:"cookie_name",l:"Cookie name",t:"text",h:"Defaults to SRVID"},
+   {k:"timeout_connect",l:"Connect timeout",t:"text",h:"For this pool only, e.g. 5s"},
+   {k:"timeout_server",l:"Server timeout",t:"text",h:"For this pool only, e.g. 30s"},
+   {k:"timeout_check",l:"Check timeout",t:"text",h:"For this pool only"},
    {k:"stick_type",l:"Stick table type",t:"select",o:["ip","ipv6"],d:"ip",h:"HAProxy spells the IPv4 type \"ip\"; \"ipv4\" is not valid"},
    {k:"stick_size",l:"Stick table size",t:"text",h:"For source persistence, e.g. 50k"},
    {k:"stick_expire",l:"Stick table expiry",t:"text",h:"For source persistence, e.g. 30m"},
@@ -334,6 +337,8 @@ const E={
    {k:"http_method",l:"HTTP method",t:"select",o:["GET","HEAD","OPTIONS"],d:"GET"},
    {k:"http_uri",l:"HTTP request URI",t:"text",h:"e.g. /health"},
    {k:"expect_status",l:"Expected status",t:"text",h:"e.g. 200"},
+ {k:"http_version",l:"HTTP version",t:"select",o:["","HTTP/1.1","HTTP/2"],d:"",h:"Only for the HTTP check"},
+   {k:"http_host",l:"Host header",t:"text",h:"Only for the HTTP check"},
    {k:"db_user",l:"Database user",t:"text",h:"For the PostgreSQL and MySQL/MariaDB checks. Only the login handshake is performed -- no password is sent, so an account with no privileges is enough."},
    {k:"mysql_post41",l:"MySQL 4.1+ authentication",t:"bool",d:true,h:"Leave on for MariaDB and any modern MySQL"}]},
 
@@ -688,15 +693,22 @@ const WIZ_FIELDS=[
  {k:"health_interval",l:"Check every",t:"text",d:"2s",h:"e.g. 2s, 10s"},
  {k:"health_uri",l:"Request path",t:"text",d:"/",h:"For the HTTP check, e.g. /health"},
  {k:"health_status",l:"Expected status",t:"text",d:"200",h:"For the HTTP check. Leave empty to accept any 2xx/3xx."},
+ {k:"health_method",l:"Request method",t:"select",d:"GET",o:["GET","HEAD","OPTIONS","POST"]},
+ {k:"health_version",l:"HTTP version",t:"select",d:"",o:["","HTTP/1.1","HTTP/2"],
+  h:"Leave empty unless the checked service needs one -- Patroni's REST API wants HTTP/2"},
+ {k:"health_host",l:"Host header",t:"text",h:"Sent with the check request, e.g. localhost"},
  {k:"health_user",l:"Database user",t:"text",h:"For the database checks. Only the login handshake runs -- no password is sent -- so an unprivileged account is enough."},
- {k:"check_port",l:"Check port",t:"text",h:"Optional. Leave empty to health check the port traffic goes to."},
+ {k:"check_port",l:"Check port",t:"text",
+  h:"Optional. Check a different port from the one traffic uses -- e.g. route to PostgreSQL on 5432 while checking Patroni's HTTP API on 8008."},
+ {k:"timeout_connect",l:"Connect timeout",t:"text",h:"Optional, for this pool only, e.g. 5s"},
+ {k:"timeout_server",l:"Server timeout",t:"text",h:"Optional, for this pool only, e.g. 30s. Long-lived connections such as databases usually need more than the default."},
  {k:"log_health_checks",l:"Log health check changes",t:"bool",h:"option log-health-checks -- records every up/down transition"},
  {k:"http_redirect",l:"Redirect HTTP to HTTPS",t:"bool",d:true,h:"Also listens on port 80 and sends visitors to HTTPS"},
  {k:"apply",l:"Apply immediately",t:"bool",d:true,h:"Write haproxy.cfg and reload once the objects are created"},
 ];
 /* which of the health_* rows make sense for each check kind */
 const HEALTH_SHOWS={none:[],tcp:["health_interval"],
-  http:["health_interval","health_uri","health_status"],
+  http:["health_interval","health_uri","health_status","health_method","health_version","health_host"],
   pgsql:["health_interval","health_user"],mysql:["health_interval","health_user"]};
 const CERT_MODE_LABEL={auto:"auto -- reuse one that covers this host",
                        new:"always request a new certificate",
@@ -746,7 +758,8 @@ function openWizard(prefill){
   const setRow=(k,on)=>{(rows[k]||[]).forEach(el=>{el.style.display=on?"":"none";});};
   const syncRows=()=>{
     const show=HEALTH_SHOWS[hsel?hsel.value:"none"]||[];
-    ["health_interval","health_uri","health_status","health_user"].forEach(k=>setRow(k,show.includes(k)));
+    ["health_interval","health_uri","health_status","health_user","health_method",
+     "health_version","health_host"].forEach(k=>setRow(k,show.includes(k)));
     setRow("check_port",(hsel?hsel.value:"none")!=="none");
     // tcp:// forwards a raw port: no host name, so no certificate and no redirect
     const isTcp=((document.getElementById("f_url")||{}).value||"").trim().toLowerCase().startsWith("tcp");
@@ -779,8 +792,10 @@ function openWizard(prefill){
     if(prefill&&prefill.certificate_id&&d.cert_mode==="auto")d.certificate_id=prefill.certificate_id;
     if(prefill&&prefill.service_id)d.service_id=prefill.service_id;   // edit, not publish anew
     d.health={type:d.health,interval:d.health_interval,uri:d.health_uri,
-              status:d.health_status,user:d.health_user};
-    ["cert_mode","health_interval","health_uri","health_status","health_user"].forEach(k=>delete d[k]);
+              status:d.health_status,user:d.health_user,method:d.health_method,
+              version:d.health_version,host:d.health_host};
+    ["cert_mode","health_interval","health_uri","health_status","health_user",
+     "health_method","health_version","health_host"].forEach(k=>delete d[k]);
     return d;   // balance / persistence / stick_* / check_port / log_health_checks pass straight through
   };
   const show=(r,saved)=>{
@@ -864,7 +879,9 @@ async function servicesCard(){
         log_health_checks:s.log_health_checks,check_port:s.check_port,
         health:(s.health||{}).type,health_interval:(s.health||{}).interval,
         health_uri:(s.health||{}).uri,health_status:(s.health||{}).status,
-        health_user:(s.health||{}).user,
+        health_user:(s.health||{}).user,health_method:(s.health||{}).method,
+        health_version:(s.health||{}).version,health_host:(s.health||{}).host,
+        timeout_connect:s.timeout_connect,timeout_server:s.timeout_server,
         certificate_id:s.certificate_id,
       })));
       act.appendChild(document.createTextNode(" "));
