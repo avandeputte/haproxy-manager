@@ -75,8 +75,10 @@ and the resulting `haproxy.cfg`, before anything is written.
   using.
 
 The **Advanced** section still exposes every object individually, for the cases
-the wizard does not cover (TCP mode, header rewriting, custom ACLs). The
-navigation there mirrors the two OPNsense plugins this UI was modeled on:
+the wizard does not cover (header rewriting, custom ACLs, per-object tuning). It
+is grouped by topic — **Advanced · HAProxy**, **Advanced · ACME** and
+**Advanced · Keepalived** — and mirrors the two OPNsense plugins this UI was
+modeled on:
 
 | This UI | OPNsense `net/haproxy` |
 |---|---|
@@ -142,6 +144,26 @@ navigation there mirrors the two OPNsense plugins this UI was modeled on:
 | HAProxy Settings | API key |
 | ACME accounts, challenges, certificates, automations | Administrator login |
 | Deployed certificate PEM files | |
+
+## Reaching the UI over HTTPS
+
+**System → Web UI access** publishes this management UI through HAProxy itself,
+so it answers at a name you choose:
+
+```
+Serve the UI through HAProxy   [x]
+Address                        https://proxy.iothing.net
+```
+
+It builds the same objects the publish wizard would — a pool pointing at
+`127.0.0.1:8080`, a host rule, the HTTPS listener, an HTTP→HTTPS redirect and a
+certificate — and reuses a wildcard that already covers the name. Turning it off
+removes them again. A host name already used by another service is refused
+rather than quietly stolen from it.
+
+Once it works, set `HAM_LISTEN=127.0.0.1` in the service unit and restart, so the
+plain-HTTP port is no longer reachable from anywhere but HAProxy. The page says
+so while the UI is still listening on all addresses.
 
 ## Requesting a certificate
 

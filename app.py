@@ -2158,6 +2158,107 @@ def wizard_publish(cfg, pub, tgts, name=None, want_cert=True, account=None,
     return acts, warns
 
 
+# --------------------------------------------------------------------------
+# front the management UI itself with HAProxy + a certificate
+# --------------------------------------------------------------------------
+
+WEBUI_NAME = "haproxy-manager-ui"
+
+
+def _webui_setting(cfg):
+    return cfg["haproxy"]["settings"].setdefault(
+        "web_ui", {"enabled": False, "url": "", "certificate": "auto", "rule_id": ""})
+
+
+@app.get("/api/webui")
+def api_webui_get():
+    cfg = load_config()
+    s = _webui_setting(cfg)
+    return jsonify({
+        "enabled": bool(s.get("enabled")), "url": s.get("url", ""),
+        "certificate": s.get("certificate", "auto"), "rule_id": s.get("rule_id", ""),
+        "port": PORT, "listen": LISTEN,
+        "exposed_directly": LISTEN not in ("127.0.0.1", "localhost", "::1"),
+    })
+
+
+@app.post("/api/webui")
+def api_webui_set():
+    """Publish (or withdraw) the management UI as a normal HAProxy service."""
+    body = request.get_json(force=True, silent=True) or {}
+    enabled = bool(body.get("enabled"))
+
+    with _lock:
+        cfg = load_config()
+        s = _webui_setting(cfg)
+
+        if not enabled:
+            removed = []
+            rid = s.get("rule_id")
+            if rid:
+                removed = _remove_service_objects(cfg["haproxy"], rid)
+            s.update({"enabled": False, "rule_id": ""})
+            save_config(cfg)
+            return jsonify({"ok": True, "enabled": False, "removed": removed,
+                            "note": "Press Apply to stop serving it."})
+
+        pub, err = _split_url(body.get("url"), "The web UI address",
+                              default_scheme="https", allow=("http", "https"))
+        if err:
+            return jsonify({"ok": False, "error": err}), 400
+
+        # Refuse to take a host name that already points somewhere else.
+        hp = cfg["haproxy"]
+        conds = _by_id(hp["conditions"])
+        for rule in hp["rules"]:
+            if rule.get("type") != "use_backend" or rule.get("id") == s.get("rule_id"):
+                continue
+            hosts = [conds[c].get("value", "").lower() for c in (rule.get("conditions") or [])
+                     if c in conds and conds[c].get("type") == "host_matches"]
+            if pub["host"].lower() in hosts:
+                pool = _by_id(hp["backends"]).get(rule.get("backend"))
+                if not pool or pool.get("name") != WEBUI_NAME:
+                    return jsonify({"ok": False, "error":
+                                    "%s already points at the service \"%s\". Choose another host name "
+                                    "for the UI, or remove that service first."
+                                    % (pub["host"], pool["name"] if pool else rule.get("name", "?"))}), 409
+
+        draft = copy.deepcopy(cfg)
+        mode = body.get("certificate", "auto")
+        target = {"scheme": "http", "host": "127.0.0.1", "port": PORT, "path": "", "label": WEBUI_NAME}
+        try:
+            acts, warns = wizard_publish(
+                draft, pub, [target], name=WEBUI_NAME,
+                want_cert=(mode != "none"), new_certificate=(mode == "new"),
+                http_redirect=bool(body.get("http_redirect", True)),
+                health={"type": "http", "interval": "5s", "uri": "/", "status": "200"},
+            )
+        except ValueError as e:
+            return jsonify({"ok": False, "error": str(e)}), 400
+
+        pool = _find(draft["haproxy"]["backends"], lambda b: b.get("name") == WEBUI_NAME)
+        rule = _find(draft["haproxy"]["rules"], lambda r: r.get("backend") == (pool or {}).get("id"))
+        ws = _webui_setting(draft)
+        ws.update({"enabled": True, "url": "%s://%s" % (pub["scheme"], pub["host"]),
+                   "certificate": mode, "rule_id": (rule or {}).get("id", "")})
+
+        if LISTEN not in ("127.0.0.1", "localhost", "::1"):
+            warns.append("The UI still answers directly on %s:%d in plain HTTP. Once this works, set "
+                         "HAM_LISTEN=127.0.0.1 in the service unit so only HAProxy can reach it."
+                         % (LISTEN, PORT))
+        if pub["scheme"] != "https":
+            warns.append("This publishes the UI over plain HTTP: the password and session cookie "
+                         "would cross the network in the clear.")
+        save_config(draft)
+        cfg = draft
+
+    result = {"ok": True, "enabled": True, "actions": acts, "warnings": warns,
+              "url": ws["url"], "note": "Press Apply to start serving it."}
+    if body.get("apply"):
+        result["applied"] = do_apply()
+    return jsonify(result)
+
+
 @app.get("/api/services")
 def api_services():
     """The published mappings, derived from the objects the wizard creates.
@@ -2272,6 +2373,45 @@ def api_services():
     return jsonify(out)
 
 
+def _remove_service_objects(hp, rid):
+    """Drop a use_backend rule and everything only it was using."""
+    rule = _by_id(hp["rules"]).get(rid)
+    if not rule:
+        return []
+    for fe in hp["frontends"]:
+        if rid in (fe.get("rules") or []):
+            fe["rules"] = [x for x in fe["rules"] if x != rid]
+    hp["rules"] = [r for r in hp["rules"] if r.get("id") != rid]
+    removed = [{"type": "Rule", "name": rule.get("name")}]
+
+    still_used = {c for r in hp["rules"] for c in (r.get("conditions") or [])}
+    for cid in rule.get("conditions") or []:
+        if cid in still_used:
+            continue
+        cond = _by_id(hp["conditions"]).get(cid)
+        if cond:
+            hp["conditions"] = [c for c in hp["conditions"] if c.get("id") != cid]
+            removed.append({"type": "Condition", "name": cond.get("name")})
+
+    pool_id = rule.get("backend")
+    pool = _by_id(hp["backends"]).get(pool_id)
+    pool_used = any(r.get("backend") == pool_id for r in hp["rules"]) or \
+        any(f.get("default_backend") == pool_id for f in hp["frontends"])
+    if pool and not pool_used:
+        server_ids = list(pool.get("servers") or [])
+        hp["backends"] = [b for b in hp["backends"] if b.get("id") != pool_id]
+        removed.append({"type": "Backend Pool", "name": pool.get("name")})
+        in_use = {s for b in hp["backends"] for s in (b.get("servers") or [])}
+        for sid in server_ids:
+            if sid in in_use:
+                continue
+            srv = _by_id(hp["servers"]).get(sid)
+            if srv:
+                hp["servers"] = [s for s in hp["servers"] if s.get("id") != sid]
+                removed.append({"type": "Real Server", "name": srv.get("name")})
+    return removed
+
+
 @app.delete("/api/services/<rid>")
 def api_service_delete(rid):
     """Remove a mapping and every object it alone was using."""
@@ -2300,43 +2440,9 @@ def api_service_delete(rid):
             save_config(cfg)
             return jsonify({"ok": True, "removed": removed, "note": "Press Apply."})
 
-        rule = _by_id(hp["rules"]).get(rid)
-        if not rule:
+        if not _by_id(hp["rules"]).get(rid):
             abort(404)
-
-        for fe in hp["frontends"]:
-            if rid in (fe.get("rules") or []):
-                fe["rules"] = [x for x in fe["rules"] if x != rid]
-        hp["rules"] = [r for r in hp["rules"] if r.get("id") != rid]
-        removed = [{"type": "Rule", "name": rule.get("name")}]
-
-        # Conditions, the pool and its servers go too -- unless shared.
-        still_used_conds = {c for r in hp["rules"] for c in (r.get("conditions") or [])}
-        for cid in rule.get("conditions") or []:
-            if cid in still_used_conds:
-                continue
-            cond = _by_id(hp["conditions"]).get(cid)
-            if cond:
-                hp["conditions"] = [c for c in hp["conditions"] if c.get("id") != cid]
-                removed.append({"type": "Condition", "name": cond.get("name")})
-
-        pool_id = rule.get("backend")
-        pool = _by_id(hp["backends"]).get(pool_id)
-        pool_used = any(r.get("backend") == pool_id for r in hp["rules"]) or \
-            any(f.get("default_backend") == pool_id for f in hp["frontends"])
-        if pool and not pool_used:
-            server_ids = list(pool.get("servers") or [])
-            hp["backends"] = [b for b in hp["backends"] if b.get("id") != pool_id]
-            removed.append({"type": "Backend Pool", "name": pool.get("name")})
-            in_use = {s for b in hp["backends"] for s in (b.get("servers") or [])}
-            for sid in server_ids:
-                if sid in in_use:
-                    continue
-                srv = _by_id(hp["servers"]).get(sid)
-                if srv:
-                    hp["servers"] = [s for s in hp["servers"] if s.get("id") != sid]
-                    removed.append({"type": "Real Server", "name": srv.get("name")})
-
+        removed = _remove_service_objects(hp, rid)
         save_config(cfg)
     return jsonify({"ok": True, "removed": removed,
                     "note": "Certificates and Public Services were left in place. Press Apply."})
