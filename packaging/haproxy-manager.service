@@ -1,0 +1,34 @@
+[Unit]
+Description=HAProxy Manager web UI
+Documentation=https://github.com/avandeputte/haproxy-manager
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Runs as root: it writes /etc/haproxy, /etc/keepalived and reloads services.
+# To harden, grant CAP_NET_ADMIN + write access to those paths and drop privileges instead.
+User=root
+Environment=HAM_DATA_DIR=/var/lib/haproxy-manager
+Environment=HAM_CERT_DIR=/etc/haproxy/certs
+Environment=HAM_HAPROXY_CFG=/etc/haproxy/haproxy.cfg
+Environment=HAM_KEEPALIVED_CFG=/etc/keepalived/keepalived.conf
+Environment=HAM_ACME_HOME=/root/.acme.sh
+Environment=HAM_LISTEN=0.0.0.0
+Environment=HAM_PORT=8080
+# Anything you want to change belongs here rather than in this file, which is
+# replaced on upgrade:  systemctl edit haproxy-manager
+EnvironmentFile=-/etc/default/haproxy-manager
+ExecStart=/usr/bin/python3 /opt/haproxy-manager/app.py
+Restart=on-failure
+RestartSec=3
+# Hang detection. The app pings systemd only when a real request to its own
+# listener succeeds, so a process whose worker threads are all blocked -- alive,
+# but answering nothing -- stops pinging and gets restarted. NotifyAccess must
+# be set explicitly: for Type=simple it defaults to none, and the pings would
+# be discarded.
+NotifyAccess=main
+WatchdogSec=90
+
+[Install]
+WantedBy=multi-user.target

@@ -31,6 +31,43 @@ send VRRP to one another.
 
 ## Install
 
+Either a package or the script — both produce the same node: the app in
+`/opt/haproxy-manager`, settings in `/var/lib/haproxy-manager`, one systemd
+unit called `haproxy-manager`.
+
+### From a package (recommended)
+
+`.deb` and `.rpm` are attached to each [release](https://github.com/avandeputte/haproxy-manager/releases).
+They carry acme.sh inside, so installing needs no network beyond your own
+package mirrors.
+
+```bash
+# Debian / Ubuntu
+curl -fsSLO https://github.com/avandeputte/haproxy-manager/releases/latest/download/haproxy-manager_1.47.0_all.deb
+sudo apt-get install -y ./haproxy-manager_1.47.0_all.deb
+
+# Fedora
+curl -fsSLO https://github.com/avandeputte/haproxy-manager/releases/latest/download/haproxy-manager-1.47.0-1.noarch.rpm
+sudo dnf install -y ./haproxy-manager-1.47.0-1.noarch.rpm
+
+# RHEL / Rocky / Alma -- python3-flask and python3-waitress live in EPEL
+sudo dnf install -y epel-release
+sudo dnf install -y ./haproxy-manager-1.47.0-1.noarch.rpm
+```
+
+The package installs and starts the service, prints the generated
+administrator password, and requires `haproxy` and `keepalived`, so your
+package manager pulls both in.
+
+Upgrading is `apt-get install ./…deb` or `dnf install ./…rpm` again: the
+configuration, the login and issued certificates are left alone. Removing the
+package keeps `/var/lib/haproxy-manager`; `apt-get purge` deletes it.
+
+Tested on Debian 12, Ubuntu 24.04, Rocky 9 and Fedora 41 — each install is
+verified in CI by installing on that distribution and signing in.
+
+### From the script
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
 ```

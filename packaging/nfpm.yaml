@@ -1,0 +1,103 @@
+# Package definition for .deb and .rpm, built with nfpm (goreleaser/nfpm).
+#
+#   nfpm package -f packaging/nfpm.yaml -p deb -t dist/
+#   nfpm package -f packaging/nfpm.yaml -p rpm -t dist/
+#
+# The layout matches the install script exactly, so a node installed either way
+# is the same node: the app in /opt/haproxy-manager, settings in
+# /var/lib/haproxy-manager, one systemd unit.
+name: haproxy-manager
+arch: all
+platform: linux
+version: ${VERSION}
+section: net
+priority: optional
+maintainer: avandeputte <avndptt@gmail.com>
+description: |
+  Web UI for HAProxy, Keepalived and acme.sh.
+  Publish services, obtain Let's Encrypt certificates and run a cluster on a
+  shared virtual IP, with settings and certificates syncing between nodes.
+vendor: avandeputte
+homepage: https://github.com/avandeputte/haproxy-manager
+license: GPL-3.0
+
+# HAProxy and Keepalived are both required. A single node with no virtual IP
+# does not strictly need Keepalived, but installing it up front means adding a
+# second node later is a configuration change rather than a package install on
+# a machine that is already serving traffic.
+depends:
+  - python3
+  - python3-flask
+  - python3-requests
+  - python3-waitress
+  - haproxy
+  - openssl
+  - curl
+  - socat
+  - keepalived
+
+overrides:
+  deb:
+    depends:
+      - python3
+      - python3-flask
+      - python3-requests
+      - python3-waitress
+      - haproxy
+      - openssl
+      - curl
+      - socat
+      - iproute2
+      - procps
+      - keepalived
+  rpm:
+    # RHEL and Rocky carry python3-flask and python3-waitress in EPEL, not in
+    # the base repositories. Fedora has both. dnf says so plainly if EPEL is
+    # missing, which is better than the package pretending it does not need it.
+    depends:
+      - python3
+      - python3-flask
+      - python3-requests
+      - python3-waitress
+      - haproxy
+      - openssl
+      - curl
+      - socat
+      - iproute
+      - procps-ng
+      - keepalived
+
+contents:
+  - src: ./app.py
+    dst: /opt/haproxy-manager/app.py
+  - src: ./static/index.html
+    dst: /opt/haproxy-manager/static/index.html
+  - src: ./VERSION
+    dst: /opt/haproxy-manager/VERSION
+  - src: ./install.sh
+    dst: /opt/haproxy-manager/install.sh
+    file_info:
+      mode: 0755
+  - src: ./packaging/haproxy-manager.service
+    dst: /usr/lib/systemd/system/haproxy-manager.service
+  - src: ./README.md
+    dst: /usr/share/doc/haproxy-manager/README.md
+  - src: ./docs
+    dst: /usr/share/doc/haproxy-manager/docs
+  # acme.sh travels inside the package, so installing needs no network and an
+  # air-gapped node can still issue certificates once DNS credentials are set.
+  - src: ./dist/acme.sh
+    dst: /usr/share/haproxy-manager/acme.sh
+  - dst: /var/lib/haproxy-manager
+    type: dir
+    file_info:
+      mode: 0700
+  - dst: /etc/haproxy/certs
+    type: dir
+    file_info:
+      mode: 0700
+
+scripts:
+  postinstall: ./packaging/postinstall.sh
+  preremove: ./packaging/preremove.sh
+  postremove: ./packaging/postremove.sh

@@ -1,0 +1,105 @@
+name: Build .deb and .rpm
+
+# Builds both packages, installs each one on a real systemd host of the family
+# it targets, and checks the UI answers before the run passes. On a tag the
+# packages are attached to the release.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # attaching packages to a release
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the version
+        id: version
+        run: echo "value=$(tr -d ' \n' < VERSION)" >> "$GITHUB_OUTPUT"
+
+      - name: Vendor acme.sh
+        run: |
+          set -eu
+          ACME=$(grep -oP 'ACME_VERSION=\K[0-9.]+' Dockerfile | head -1)
+          curl -fsSL "https://github.com/acmesh-official/acme.sh/archive/refs/tags/${ACME}.tar.gz" -o /tmp/acme.tgz
+          mkdir -p dist/acme.sh
+          tar -xzf /tmp/acme.tgz -C dist/acme.sh --strip-components=1
+          echo "vendored acme.sh $ACME"
+
+      - name: Build the packages
+        run: |
+          set -eu
+          for fmt in deb rpm; do
+            docker run --rm -v "$PWD":/w -w /w -e VERSION="${{ steps.version.outputs.value }}" \
+              goreleaser/nfpm:latest package -f packaging/nfpm.yaml -p "$fmt" -t dist/
+          done
+          ls -la dist/*.deb dist/*.rpm
+
+      # Installing on the distribution itself is the only check that means
+      # anything: dependency names and scriptlet behaviour differ per family.
+      - name: Install on Debian, Ubuntu, Rocky and Fedora
+        run: |
+          set -eu
+          test_one() {
+            img="$1"; fmt="$2"; setup="$3"
+            echo "== $img =="
+            cid=$(docker run -d --privileged --cgroupns=host \
+                  -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock "$img" /sbin/init)
+            for i in $(seq 30); do
+              docker exec "$cid" systemctl is-system-running >/dev/null 2>&1 && break
+              sleep 2
+            done
+            docker exec "$cid" sh -c "$setup" >/dev/null 2>&1 || true
+            # /tmp can be a tmpfs mounted by systemd, which hides anything
+            # docker cp wrote into the image layer underneath it.
+            if [ "$fmt" = deb ]; then
+              docker cp dist/*.deb "$cid":/root/p.deb
+              docker exec "$cid" sh -c 'apt-get update -q >/dev/null && apt-get install -y /root/p.deb'
+            else
+              docker cp dist/*.rpm "$cid":/root/p.rpm
+              docker exec "$cid" sh -c 'dnf -y install /root/p.rpm'
+            fi
+            ok=""
+            for i in $(seq 45); do
+              if docker exec "$cid" curl -sf -o /dev/null http://127.0.0.1:8080/api/whoami; then ok=1; break; fi
+              sleep 2
+            done
+            [ -n "$ok" ] || { docker exec "$cid" journalctl -u haproxy-manager -n 30 --no-pager; exit 1; }
+            docker exec "$cid" sh -c '
+              PW=$(awk "/password/{print \$2}" /var/lib/haproxy-manager/admin-credentials.txt)
+              code=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:8080/api/login \
+                     -H "Content-Type: application/json" -d "{\"username\":\"admin\",\"password\":\"$PW\"}")
+              echo "   service=$(systemctl is-active haproxy-manager) login=$code"
+              [ "$code" = 200 ] || exit 1'
+            docker rm -f "$cid" >/dev/null
+          }
+          SYSD_DEB='apt-get update -q && apt-get install -y --no-install-recommends systemd systemd-sysv dbus curl ca-certificates'
+          test_one debian:bookworm deb "$SYSD_DEB"
+          test_one ubuntu:24.04    deb "$SYSD_DEB"
+          test_one rockylinux:9    rpm 'dnf -y install systemd systemd-sysv epel-release curl'
+          test_one fedora:41       rpm 'dnf -y install systemd curl'
+
+      - name: Keep the packages as build artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ steps.version.outputs.value }}
+          path: |
+            dist/*.deb
+            dist/*.rpm
+          retention-days: 90
+
+      - name: Attach them to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.deb
+            dist/*.rpm

@@ -377,8 +377,14 @@ def run(cmd, env=None, timeout=600):
     """Run a command, return (rc, combined output)."""
     if DRY_RUN and cmd[0] in ("systemctl", "keepalived"):
         return 0, "[dry-run] " + " ".join(cmd)
+    # Children must not inherit NOTIFY_SOCKET. With NotifyAccess=main, systemd
+    # logs "Got notification message from PID ..., but reception only permitted
+    # for main PID ..." for every helper that touches it -- one line of noise
+    # per subprocess, and this app runs a lot of them.
+    child_env = dict(env if env is not None else os.environ)
+    child_env.pop("NOTIFY_SOCKET", None)
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=timeout)
+        p = subprocess.run(cmd, capture_output=True, text=True, env=child_env, timeout=timeout)
         return p.returncode, (p.stdout + p.stderr).strip()
     except FileNotFoundError:
         return 127, "command not found: " + cmd[0]
@@ -5606,6 +5612,8 @@ def _cli(argv):
         app.py set-admin <username> <password>   create/replace the UI login
         app.py set-admin <username> -            read the password from stdin
         app.py show-admin                        print the configured username
+        app.py set-api-key <key>                 set this node's API key
+        app.py set-api-key -                     read it from stdin
         app.py keys                              print key fingerprints, for comparing nodes
     """
     cmd = argv[0]
@@ -5650,6 +5658,22 @@ def _cli(argv):
             print("  %-28s %-34s fingerprint %s%s"
                   % (p.get("name", "?"), p.get("url", "?"), fp,
                      "   <-- " + ", ".join(flags) if flags else ""))
+        return 0
+    if cmd == "set-api-key":
+        if len(argv) != 2:
+            print("usage: app.py set-api-key <key|->", file=sys.stderr)
+            return 2
+        key = sys.stdin.read().strip() if argv[1] == "-" else argv[1]
+        if not key:
+            print("the key must not be empty", file=sys.stderr)
+            return 2
+        # Read, change, write -- never replace the file wholesale, which would
+        # discard everything else on an existing installation.
+        with _lock:
+            cfg = load_config()
+            cfg["local"]["api_key"] = key
+            save_config(cfg)
+        print(key_fingerprint(key))
         return 0
     if cmd == "show-admin":
         admin = load_config()["local"].get("admin") or {}
