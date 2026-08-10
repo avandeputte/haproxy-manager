@@ -28,13 +28,28 @@ and the resulting `haproxy.cfg`, before anything is written.
   `a.b.iothing.net`. Set Certificate to *always request a new certificate* to
   override, or *no certificate* to terminate TLS elsewhere.
 - **Several targets**, comma separated, are load balanced across.
+- **A health check** can be set up in the same step, and servers that fail it are
+  taken out of rotation:
+
+  | Check | What HAProxy does |
+  |---|---|
+  | ping | opens a TCP connection to the port (HAProxy has no ICMP ping) |
+  | HTTP request | `option httpchk`, with a path and an expected status |
+  | TLS handshake | `option ssl-hello-chk` |
+  | PostgreSQL login | `option pgsql-check` — the login handshake only, no password |
+  | MariaDB / MySQL login | `option mysql-check`, `post-41` for anything modern |
+
+  The database checks expect the servers to speak that protocol, so point them
+  at the database itself; the wizard says so when you pick one.
 - **A path** works too: `https://ps2.iothing.net/api` routes only that prefix.
   More specific rules are placed ahead of broader ones, so a host+path rule is
   never swallowed by the host-only rule for the same name.
 - **Publishing the same URL again edits it** — repointing a service replaces its
   target rather than quietly adding a second server behind it.
-- **Services** lists every mapping with its target and certificate state, and
-  Delete removes the objects that mapping alone was using.
+- **Overview** is the landing page and lists every configured service alongside
+  node health, certificates and the generated configuration. **Services** shows
+  the same table on its own. Delete removes the objects that mapping alone was
+  using.
 
 The **Advanced** section still exposes every object individually, for the cases
 the wizard does not cover (TCP mode, header rewriting, custom ACLs). The

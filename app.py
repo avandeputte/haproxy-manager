@@ -726,12 +726,21 @@ def render_haproxy(cfg):
         hc = checks.get(be.get("healthcheck")) if be.get("healthcheck_enabled") else None
         inter = (hc.get("interval") if hc else None) or "2s"
         if hc:
-            if hc.get("type") == "http" and mode == "http":
+            htype = hc.get("type")
+            if htype == "http":
                 A("    option httpchk %s %s" % (hc.get("http_method", "GET"), hc.get("http_uri", "/")))
                 if hc.get("expect_status"):
                     A("    http-check expect status %s" % hc["expect_status"])
-            elif hc.get("type") == "ssl":
+            elif htype == "ssl":
                 A("    option ssl-hello-chk")
+            elif htype == "pgsql":
+                # HAProxy opens a PostgreSQL startup packet as this user; the
+                # server only has to answer the handshake, no password is sent.
+                A("    option pgsql-check user %s" % _sec(hc.get("db_user") or "postgres"))
+            elif htype == "mysql":
+                A("    option mysql-check user %s%s" % (_sec(hc.get("db_user") or "haproxy"),
+                                                        " post-41" if hc.get("mysql_post41", True) else ""))
+            # "tcp" needs nothing here: `check` on the server line is a connect test
         use_cookie = be.get("persistence") == "cookie" and mode == "http"
         if use_cookie:
             A("    cookie %s insert indirect nocache" % (be.get("cookie_name") or "SRVID"))
@@ -1422,7 +1431,7 @@ def _place_rule(hp, rule_ids, rule):
 
 
 def wizard_publish(cfg, pub, tgts, name=None, want_cert=True, account=None,
-                   challenge=None, http_redirect=True, healthcheck=None,
+                   challenge=None, http_redirect=True, health=None,
                    certificate_id=None, new_certificate=False):
     """Create (or update) everything needed to serve `pub` from `tgts`.
 
@@ -1459,11 +1468,39 @@ def wizard_publish(cfg, pub, tgts, name=None, want_cert=True, account=None,
             act("created", "Real Server", srv["name"])
         srv_ids.append(srv["id"])
 
+    # -- Health Monitor ---------------------------------------------------
+    monitor = None
+    htype = (health or {}).get("type") or "none"
+    if htype != "none":
+        want = {"type": htype,
+                "interval": (health.get("interval") or "2s"),
+                "http_method": "GET",
+                "http_uri": health.get("uri") or "/",
+                "expect_status": str(health.get("status") or "") if htype == "http" else "",
+                "db_user": health.get("user") or ("postgres" if htype == "pgsql" else "haproxy"),
+                "mysql_post41": bool(health.get("post41", True))}
+        monitor = _find(hp["healthchecks"], lambda m: all(
+            str(m.get(k, "")) == str(v) for k, v in want.items() if k != "mysql_post41"))
+        if monitor:
+            act("reused", "Health Monitor", monitor["name"])
+        else:
+            monitor = dict(want)
+            monitor["id"] = str(uuid.uuid4())
+            monitor["name"] = _uniq_name({m["name"] for m in hp["healthchecks"]}, base + "-check")
+            hp["healthchecks"].append(monitor)
+            act("created", "Health Monitor", monitor["name"])
+        if htype in ("pgsql", "mysql"):
+            warns.append("A %s check expects the servers behind this service to speak that database "
+                         "protocol. Point it at the database itself, not at a web server, or every "
+                         "server will be marked down." % ("PostgreSQL" if htype == "pgsql" else "MySQL/MariaDB"))
+
     # -- Backend Pool -----------------------------------------------------
     pool = _find(hp["backends"], lambda b: b.get("name") == _sec(base))
     if pool:
         previous = list(pool.get("servers") or [])
         pool["servers"] = srv_ids
+        pool["healthcheck_enabled"] = bool(monitor)
+        pool["healthcheck"] = monitor["id"] if monitor else ""
         act("updated" if previous != srv_ids else "reused", "Backend Pool", pool["name"])
         _drop_orphan_wizard_servers(hp, previous, acts)
     else:
@@ -1471,7 +1508,8 @@ def wizard_publish(cfg, pub, tgts, name=None, want_cert=True, account=None,
                 "name": _uniq_name({b["name"] for b in hp["backends"]}, base),
                 "mode": "http", "balance": "roundrobin", "enabled": True,
                 "servers": srv_ids,
-                "healthcheck_enabled": bool(healthcheck), "healthcheck": healthcheck or ""}
+                "healthcheck_enabled": bool(monitor),
+                "healthcheck": monitor["id"] if monitor else ""}
         hp["backends"].append(pool)
         act("created", "Backend Pool", pool["name"])
 
@@ -1735,7 +1773,7 @@ def api_wizard_publish():
                 account=body.get("account") or None,
                 challenge=body.get("challenge") or None,
                 http_redirect=body.get("http_redirect", True),
-                healthcheck=body.get("healthcheck") or None,
+                health=body.get("health") or None,
                 certificate_id=body.get("certificate_id") or None,
                 new_certificate=bool(body.get("new_certificate")),
             )

@@ -210,6 +210,16 @@ document.addEventListener("keydown",e=>{if(e.key==="Escape")closeDlg();});
 function btn(label,cls,fn){const b=document.createElement("button");b.className="btn "+(cls||"");b.textContent=label;b.onclick=fn;return b;}
 function showText(title,text){const p=document.createElement("pre");p.textContent=text;openDlg(title,p,[btn("Close","",closeDlg)]);}
 
+/* health check kinds, shared by the wizard and the Health Monitors page */
+const HEALTH_LABEL={
+  none:"none -- always considered up",
+  tcp:"ping (TCP connect to the port)",
+  http:"HTTP request",
+  ssl:"TLS handshake",
+  pgsql:"PostgreSQL login",
+  mysql:"MariaDB / MySQL login",
+};
+
 /* ============================ entity registry ============================ */
 /* Field types: text number bool select ref refmulti textarea password */
 const E={
@@ -298,15 +308,19 @@ const E={
 
  "haproxy/healthchecks":{title:"Health Monitors",add:"Add monitor",
   intro:"How Backend Pools decide whether a Real Server is alive.",
-  cols:[["name","Name"],["type","Type"],["interval","Interval",r=>r.interval||"2s"],
-        ["det","Detail",r=>r.type==="http"?"<span class=mono>"+esc((r.http_method||"GET")+" "+(r.http_uri||"/"))+"</span>":"—"]],
+  cols:[["name","Name"],["type","Type",r=>esc(HEALTH_LABEL[r.type]||r.type)],
+        ["interval","Interval",r=>r.interval||"2s"],
+        ["det","Detail",r=>r.type==="http"?"<span class=mono>"+esc((r.http_method||"GET")+" "+(r.http_uri||"/")+(r.expect_status?" -> "+r.expect_status:""))+"</span>"
+              :(r.type==="pgsql"||r.type==="mysql")?"<span class=mono>user "+esc(r.db_user||"")+"</span>":"—"]],
   fields:[
    {k:"name",l:"Name",t:"text"},
-   {k:"type",l:"Type",t:"select",o:["tcp","http","ssl"],d:"tcp"},
+   {k:"type",l:"Type",t:"select",o:["tcp","http","ssl","pgsql","mysql"],d:"tcp"},
    {k:"interval",l:"Check interval",t:"text",h:"e.g. 2s"},
    {k:"http_method",l:"HTTP method",t:"select",o:["GET","HEAD","OPTIONS"],d:"GET"},
    {k:"http_uri",l:"HTTP request URI",t:"text",h:"e.g. /health"},
-   {k:"expect_status",l:"Expected status",t:"text",h:"e.g. 200"}]},
+   {k:"expect_status",l:"Expected status",t:"text",h:"e.g. 200"},
+   {k:"db_user",l:"Database user",t:"text",h:"For the PostgreSQL and MySQL/MariaDB checks. Only the login handshake is performed -- no password is sent, so an account with no privileges is enough."},
+   {k:"mysql_post41",l:"MySQL 4.1+ authentication",t:"bool",d:true,h:"Leave on for MariaDB and any modern MySQL"}]},
 
  "acme/accounts":{title:"Accounts",add:"Add account",
   intro:"ACME accounts used to request certificates.",
@@ -608,9 +622,19 @@ const WIZ_FIELDS=[
   h:"HTTPS only. \"auto\" reuses an existing certificate that already covers this host -- including a wildcard -- and only requests a new one when nothing does."},
  {k:"account",l:"ACME account",t:"ref",ref:"acme/accounts",h:"For a new certificate; only needed when you have more than one"},
  {k:"challenge",l:"Challenge type",t:"ref",ref:"acme/challenges"},
+ {k:"health",l:"Health check",t:"select",d:"http",o:["none","tcp","http","pgsql","mysql"],
+  h:"How HAProxy decides a server is alive. Dead servers are taken out of rotation."},
+ {k:"health_interval",l:"Check every",t:"text",d:"2s",h:"e.g. 2s, 10s"},
+ {k:"health_uri",l:"Request path",t:"text",d:"/",h:"For the HTTP check, e.g. /health"},
+ {k:"health_status",l:"Expected status",t:"text",d:"200",h:"For the HTTP check. Leave empty to accept any 2xx/3xx."},
+ {k:"health_user",l:"Database user",t:"text",h:"For the database checks. Only the login handshake runs -- no password is sent -- so an unprivileged account is enough."},
  {k:"http_redirect",l:"Redirect HTTP to HTTPS",t:"bool",d:true,h:"Also listens on port 80 and sends visitors to HTTPS"},
  {k:"apply",l:"Apply immediately",t:"bool",d:true,h:"Write haproxy.cfg and reload once the objects are created"},
 ];
+/* which of the health_* rows make sense for each check kind */
+const HEALTH_SHOWS={none:[],tcp:["health_interval"],
+  http:["health_interval","health_uri","health_status"],
+  pgsql:["health_interval","health_user"],mysql:["health_interval","health_user"]};
 const CERT_MODE_LABEL={auto:"auto -- reuse one that covers this host",
                        new:"always request a new certificate",
                        none:"no certificate"};
@@ -644,11 +668,26 @@ async function updateCertNote(note){
 function openWizard(prefill){
   const wrap=document.createElement("div");
   const frm=document.createElement("div");frm.className="frm";
-  WIZ_FIELDS.forEach(f=>fieldRow(f,prefill?prefill[f.k]:undefined).forEach(el=>frm.appendChild(el)));
+  const rows={};
+  WIZ_FIELDS.forEach(f=>{
+    const cells=fieldRow(f,prefill?prefill[f.k]:undefined);
+    rows[f.k]=cells;
+    cells.forEach(el=>frm.appendChild(el));
+  });
   wrap.appendChild(frm);
   // friendlier labels than the raw option values
   const sel=frm.querySelector("#f_cert_mode");
   if(sel)[...sel.options].forEach(o=>{o.textContent=CERT_MODE_LABEL[o.value]||o.value;});
+  const hsel=frm.querySelector("#f_health");
+  if(hsel)[...hsel.options].forEach(o=>{o.textContent=HEALTH_LABEL[o.value]||o.value;});
+  const syncHealthRows=()=>{
+    const show=HEALTH_SHOWS[hsel?hsel.value:"none"]||[];
+    ["health_interval","health_uri","health_status","health_user"].forEach(k=>{
+      (rows[k]||[]).forEach(el=>{el.style.display=show.includes(k)?"":"none";});
+    });
+  };
+  if(hsel)hsel.addEventListener("change",syncHealthRows);
+  syncHealthRows();
   const note=document.createElement("div");note.className="hint";note.style.margin="2px 0 0";
   const noteRow=document.createElement("div");noteRow.appendChild(note);
   frm.appendChild(document.createElement("div"));frm.appendChild(noteRow);
@@ -665,7 +704,9 @@ function openWizard(prefill){
     d.certificate=d.cert_mode!=="none";        // "none" attaches nothing
     d.new_certificate=d.cert_mode==="new";     // otherwise reuse whatever covers the host
     if(prefill&&prefill.certificate_id&&d.cert_mode==="auto")d.certificate_id=prefill.certificate_id;
-    delete d.cert_mode;
+    d.health={type:d.health,interval:d.health_interval,uri:d.health_uri,
+              status:d.health_status,user:d.health_user};
+    ["cert_mode","health_interval","health_uri","health_status","health_user"].forEach(k=>delete d[k]);
     return d;
   };
   const show=(r,saved)=>{
@@ -694,15 +735,20 @@ function openWizard(prefill){
       const r=await api("wizard/publish","POST",read());
       show(r,true);
       create.disabled=true;preview.disabled=true;
-      await renderServices();refreshStatus();
+      await route();refreshStatus();
     }catch(e){err.textContent=e.message;create.disabled=false;}
   });
   openDlg(prefill?"Edit service":"Publish a service",wrap,[err,btn("Close","",closeDlg),preview,create]);
 }
 
 async function renderServices(){
-  const [svcs]=await Promise.all([api("services"),list("acme/accounts",true),list("acme/challenges",true)]);
   const c=$("#content");c.innerHTML="";
+  c.appendChild(await servicesCard());
+}
+
+/* The services table, shared by the Services page and the Overview. */
+async function servicesCard(){
+  const [svcs]=await Promise.all([api("services"),list("acme/accounts",true),list("acme/challenges",true)]);
   const card=document.createElement("div");card.className="card";
   const hd=document.createElement("div");hd.className="hd";
   hd.innerHTML="<h2>Services</h2><div class=sp></div>";
@@ -739,7 +785,7 @@ async function renderServices(){
         try{
           const r=await api("services/"+s.id,"DELETE");
           showText("Removed "+s.url,(r.removed||[]).map(x=>"- "+x.type+" "+x.name).join("\n")+"\n\n"+r.note);
-          await renderServices();refreshStatus();
+          await route();refreshStatus();
         }catch(e){alert(e.message);}
       }));
       tr.appendChild(act);tb.appendChild(tr);
@@ -749,7 +795,8 @@ async function renderServices(){
     hint.textContent="Each row is a host name routed to a backend pool. The Advanced pages expose the same objects individually.";
     bd.appendChild(hint);
   }
-  card.appendChild(bd);c.appendChild(card);
+  card.appendChild(bd);
+  return card;
 }
 
 /* ============================ authentication ============================ */
@@ -975,15 +1022,7 @@ async function renderOverview(){
     '<div class=stat><div class=k>acme.sh</div><div class=v style="font-size:13px">'+(st.acme_installed?'<span class="pill up">installed</span>':'<span class="pill down">missing</span>')+"</div></div>";
   c.appendChild(grid);
 
-  const quick=document.createElement("div");quick.className="card";
-  quick.innerHTML='<div class=hd><h2>Publish a service</h2><div class=sp></div></div>';
-  const qb=document.createElement("div");qb.className="bd";
-  qb.innerHTML='<p class=hint style="margin-bottom:12px">Map a public URL to a server behind it &mdash; '+
-    'the backend pool, condition, rule, listener and certificate are created for you.</p>';
-  qb.appendChild(btn("Publish a service","pri",()=>openWizard()));
-  qb.appendChild(document.createTextNode(" "));
-  qb.appendChild(btn("All services","",()=>{location.hash="#/p:services";}));
-  quick.appendChild(qb);c.appendChild(quick);
+  c.appendChild(await servicesCard());
 
   const cc=document.createElement("div");cc.className="card";
   cc.innerHTML='<div class=hd><h2>Certificates</h2><div class=sp></div></div>';
@@ -1031,8 +1070,8 @@ async function renderOverview(){
 
 /* ============================ shell ============================ */
 const NAV=[
- ["p:services","Services"],
  ["","Overview",null],
+ ["p:services","Services"],
  ["grp","CERTIFICATES"],
  ["acme/certificates","Certificates"],
  ["acme/accounts","ACME Accounts"],
@@ -1117,8 +1156,7 @@ function boot(){
   await refreshWho();
   if(who.needs_setup){showLogin(true);return;}      // first run: create an administrator
   if(!who.authenticated){showLogin(false);return;}
-  if(!location.hash)location.hash="#/p:services";   // land on the simple view
-  boot();
+  boot();                                           // no hash => Overview
 })();
 </script>
 </body>
