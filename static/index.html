@@ -417,11 +417,12 @@ const S={
    {k:"renew_hours",l:"Renewal check interval (hours)",t:"number"},
    {k:"challenge_port",l:"HTTP-01 challenge port",t:"number",h:"Local port acme.sh listens on during HTTP-01 validation"},
    {k:"haproxy_integration",l:"HAProxy integration",t:"bool",d:true,h:"Route /.well-known/acme-challenge/ on all HTTP services to the local challenge listener"}]},
- "keepalived":{title:"Keepalived",ep:"local",sub:"keepalived",
+ "keepalived":{title:"Keepalived",ep:"local",sub:"keepalived",pre:loadKeepalivedDiag,extra:keepalivedDiagCard,
   intro:"Node-local VRRP settings for the active-passive pair. These are never overwritten by sync -- configure them on each node. For non-preempting failover, set state BACKUP on both nodes with different priorities and enable nopreempt.",
   fields:[
    {k:"enabled",l:"Enabled",t:"bool"},
-   {k:"interface",l:"Interface",t:"text",h:"e.g. eth0"},
+   {k:"interface",l:"Interface",t:"combo",o:()=>kaIfaceOptions,
+    h:"The interface on THIS node that carries the virtual IP. It is node-local -- the two nodes often differ."},
    {k:"vrid",l:"Virtual router ID",t:"number",h:"Same on both nodes (1-255)"},
    {k:"state",l:"Initial state",t:"select",o:["MASTER","BACKUP"],d:"BACKUP"},
    {k:"priority",l:"Priority",t:"number",h:"Higher wins; e.g. 150 on the preferred node, 100 on the other"},
@@ -590,6 +591,7 @@ function openEditor(key,item){
 /* ============================ settings views ============================ */
 async function renderSettings(key){
   const def=S[key];
+  if(def.pre)await def.pre();
   let cur=await api(def.ep);
   if(def.sub)cur=cur[def.sub]||{};
   const c=$("#content");c.innerHTML="";
@@ -613,6 +615,7 @@ async function renderSettings(key){
   foot.appendChild(msg);
   if(key==="sync")foot.appendChild(syncExtras());
   bd.appendChild(foot);card.appendChild(bd);c.appendChild(card);
+  if(def.extra)c.appendChild(def.extra());
   if(key==="sync")c.appendChild(apiKeyCard());
 }
 function syncExtras(){
@@ -918,6 +921,83 @@ function dnsCredentialHelp(frm){
     }
   };
   sel.addEventListener("change",render);sel.addEventListener("blur",render);render();
+}
+
+/* ============================ keepalived diagnostics ============================ */
+let kaDiag=null,kaIfaceOptions=[];
+async function loadKeepalivedDiag(){
+  try{
+    kaDiag=await api("keepalived/status");
+    kaIfaceOptions=(kaDiag.interfaces||[]).filter(i=>i.name!=="lo")
+      .map(i=>({value:i.name,label:i.name+(i.addresses.length?" ("+i.addresses.join(", ")+")":" (no address)")}));
+  }catch(e){kaDiag=null;kaIfaceOptions=[];}
+  return kaDiag;
+}
+function keepalivedDiagCard(){
+  const card=document.createElement("div");card.className="card";
+  card.innerHTML='<div class=hd><h2>This node right now</h2></div>';
+  const bd=document.createElement("div");bd.className="bd";
+  const d=kaDiag;
+  if(!d){bd.innerHTML='<p class=hint>Diagnostics are unavailable.</p>';card.appendChild(bd);return card;}
+
+  /* Name the fault outright rather than making it a reading exercise. */
+  const problems=[];
+  if(d.enabled){
+    if(!d.interface_exists)
+      problems.push("Interface <span class=mono>"+esc(d.interface||"(unset)")+"</span> does not exist on this node. "+
+        "Available: <span class=mono>"+esc((d.interfaces||[]).map(i=>i.name).filter(n=>n!=="lo").join(", ")||"none")+
+        "</span>. Keepalived exits with a config error when the interface is wrong, so no node takes the VIP.");
+    if(d.validation&&d.validation.ran&&d.validation.ok===false)
+      problems.push("Keepalived rejects the configuration this node would write, so Apply leaves "+
+        "<span class=mono>"+esc(d.config_path)+"</span> untouched. See the output below.");
+    if(!d.config_present)
+      problems.push("<span class=mono>"+esc(d.config_path)+"</span> does not exist, so keepalived.service "+
+        "never starts (its unit has ConditionFileNotEmpty). Fix the configuration above, then press Apply.");
+    if(d.service!=="active"&&d.config_present)
+      problems.push("keepalived.service is <b>"+esc(d.service)+"</b>.");
+    if(!d.vips.length)
+      problems.push("No virtual IP is configured, so there is nothing to take over.");
+    if(d.service==="active"&&d.interface_exists&&d.vips.length&&!d.vip_held.length)
+      problems.push("Keepalived is running but this node holds no VIP. If the peer holds it, this node is "+
+        "correctly passive. If <b>neither</b> node holds it, the two are not seeing each other's VRRP: "+
+        "check that both use the same virtual router ID, and set the unicast peer fields if multicast is "+
+        "blocked on your network.");
+  }
+  const pill=(v,good)=>'<span class="pill '+(good?"up":v==="disabled"?"off":"down")+'">'+esc(v)+"</span>";
+  bd.innerHTML='<div class=grid style="margin-bottom:14px">'+
+    '<div class=stat><div class=k>Keepalived</div><div class="v" style="font-size:13px">'+pill(d.service,d.service==="active")+"</div></div>"+
+    '<div class=stat><div class=k>Interface</div><div class="v" style="font-size:13px">'+
+      (d.interface?pill(d.interface,d.interface_exists):'<span class="pill off">unset</span>')+"</div></div>"+
+    '<div class=stat><div class=k>VRRP state</div><div class="v" style="font-size:13px">'+
+      (d.vrrp_state?pill(d.vrrp_state,d.vrrp_state==="MASTER"):'<span class="pill off">unknown</span>')+"</div></div>"+
+    '<div class=stat><div class=k>Virtual IPs held</div><div class="v" style="font-size:13px">'+
+      (d.vips.length?d.vips.map(v=>esc(v)+(d.vip_held.includes(v)?' <span class="pill up">here</span>'
+                                                                 :' <span class="pill off">elsewhere</span>')).join("<br>")
+                    :'<span class=sub>none configured</span>')+"</div></div>"+
+    '<div class=stat><div class=k>Config file</div><div class="v" style="font-size:13px">'+
+      (d.config_present?'<span class="pill up">written</span>':'<span class="pill down">missing</span>')+"</div></div>"+
+    '<div class=stat><div class=k>VRID / priority</div><div class=v style="font-size:13px">'+
+      esc(d.vrid)+" / "+esc(d.priority)+"</div></div></div>";
+  problems.forEach(p=>{
+    const el=document.createElement("div");el.className="hint";el.style.marginBottom="8px";
+    el.innerHTML="! "+p;bd.appendChild(el);
+  });
+  if(!problems.length&&d.enabled){
+    const el=document.createElement("div");el.className="hint";
+    el.textContent=d.vip_held.length?"This node holds the virtual IP: it is the active one."
+                                    :"Nothing looks wrong here.";
+    bd.appendChild(el);
+  }
+  const row=document.createElement("div");row.style.marginTop="14px";
+  if(d.validation&&d.validation.output)
+    row.appendChild(btn("Show keepalived -t output","sm",()=>showText("keepalived -t",d.validation.output)));
+  if(d.log){
+    row.appendChild(document.createTextNode(" "));
+    row.appendChild(btn("Show the keepalived log","sm",()=>showText("journalctl -u keepalived",d.log)));
+  }
+  row.appendChild(document.createTextNode(" "));
+  row.appendChild(btn("Refresh","sm",async()=>{await loadKeepalivedDiag();route();}));
+  bd.appendChild(row);card.appendChild(bd);return card;
 }
 
 /* ============================ certificate wizard ============================ */
@@ -1627,10 +1707,16 @@ async function doApply(){
   const b=$("#applybtn");b.disabled=true;b.textContent="Applying...";
   try{
     const r=await api("apply","POST",{});
-    let text=(r.ok?"Applied.\n\n":"FAILED: "+(r.error||"")+"\n\n")+
-      (r.steps||[]).map(s=>"* "+s).join("\n")+
-      "\n\n--- haproxy -c output ---\n"+(r.haproxy_check||"(none)");
-    showText(r.ok?"Configuration applied":"Apply failed",text);
+    const warn=r.warnings||[];
+    let text="";
+    if(!r.ok)text+="FAILED: "+(r.error||"")+"\n\n";
+    else if(warn.length)text+="HAProxy was applied, but something else needs attention:\n\n";
+    else text+="Applied.\n\n";
+    if(warn.length)text+=warn.map(w=>"!! "+w).join("\n\n")+"\n\n";
+    text+=(r.steps||[]).map(s=>"* "+s).join("\n")+
+      "\n\n--- haproxy -c output ---\n"+(r.haproxy_check||"(none)")+
+      (r.keepalived_check?"\n\n--- keepalived -t output ---\n"+r.keepalived_check:"");
+    showText(!r.ok?"Apply failed":warn.length?"Applied with problems":"Configuration applied",text);
   }catch(e){showText("Apply failed",e.message);}
   b.disabled=false;b.textContent="Apply";
   refreshStatus();

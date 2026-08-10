@@ -906,6 +906,102 @@ def ensure_cert_files(cfg):
     return made
 
 
+def node_interfaces():
+    """Interface names on this node, with their addresses and link state."""
+    out_ifaces = {}
+    rc, out = run(["ip", "-o", "link"])
+    if rc == 0:
+        for line in out.splitlines():
+            m = re.match(r"\d+:\s+([^:@]+)[:@]", line)
+            if m:
+                name = m.group(1).strip()
+                out_ifaces[name] = {"name": name, "addresses": [],
+                                    "up": " state UP " in line or "LOWER_UP" in line}
+    rc, out = run(["ip", "-o", "addr"])
+    if rc == 0:
+        for line in out.splitlines():
+            m = re.match(r"\d+:\s+(\S+)\s+inet6?\s+(\S+)", line)
+            if m and m.group(1) in out_ifaces:
+                out_ifaces[m.group(1)]["addresses"].append(m.group(2))
+    # Interfaces that actually carry an address first: a node is full of tunnel
+    # stubs (gre0, sit0, ip_vti0) that are never the answer.
+    return sorted(out_ifaces.values(),
+                  key=lambda i: (i["name"] == "lo", not i["addresses"], not i["up"], i["name"]))
+
+
+def _keepalived_hint(output, k):
+    """Turn keepalived's own complaint into the thing to actually go fix."""
+    text = (output or "").lower()
+    m = re.search(r"interface (\S+) .*?doesn't exist", output or "", re.I)
+    if m or "doesn't exist" in text:
+        ifaces = [i for i in node_interfaces() if i["name"] != "lo"]
+        names = [i["name"] for i in ifaces if i["addresses"]] or [i["name"] for i in ifaces]
+        return ("Interface \"%s\" does not exist on this node. Interfaces here: %s. "
+                "The interface is node-local -- set it separately on each node."
+                % (k.get("interface", ""), ", ".join(names) or "none found"))
+    if "script" in text and "security" in text:
+        return "Keepalived refused the tracking script; see the output below."
+    return "See the keepalived output below."
+
+
+@app.get("/api/keepalived/status")
+def api_keepalived_status():
+    """Why this node does or does not hold the virtual IP."""
+    cfg = load_config()
+    k = cfg["local"]["keepalived"]
+    ifaces = node_interfaces()
+    names = [i["name"] for i in ifaces]
+    configured = k.get("interface", "")
+
+    vips = [v.strip().split("/")[0] for v in (k.get("vips") or "").splitlines() if v.strip()]
+    held = []
+    rc, out = run(["ip", "-o", "addr"])
+    if rc == 0:
+        held = [v for v in vips if re.search(r"\binet6? %s/" % re.escape(v), out)]
+
+    rc, svc = run(["systemctl", "is-active", "keepalived"])
+    service = (svc.splitlines() or ["unknown"])[0]
+
+    # Validate what Apply would write right now -- this is what names the fault.
+    validation = {"ran": False, "ok": None, "output": ""}
+    if k.get("enabled"):
+        fd, staging = tempfile.mkstemp(suffix=".conf")
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(render_keepalived(cfg))
+            vrc, vout = run(["keepalived", "-t", "-f", staging], timeout=20)
+            validation = {"ran": vrc != 127, "ok": vrc == 0, "output": vout[-4000:]}
+        finally:
+            if os.path.exists(staging):
+                os.unlink(staging)
+
+    log = ""
+    if shutil.which("journalctl"):
+        lrc, lout = run(["journalctl", "-u", "keepalived", "-n", "25", "--no-pager"], timeout=20)
+        if lrc == 0:
+            log = lout[-6000:]
+
+    state = ""
+    m = re.findall(r"Entering (\w+) STATE", log)
+    if m:
+        state = m[-1]
+
+    return jsonify({
+        "enabled": bool(k.get("enabled")),
+        "service": service if k.get("enabled") else "disabled",
+        "config_present": KEEPALIVED_CFG.exists(),
+        "config_path": str(KEEPALIVED_CFG),
+        "interface": configured,
+        "interface_exists": configured in names,
+        "interfaces": ifaces,
+        "vrid": k.get("vrid"), "priority": k.get("priority"), "state_setting": k.get("state"),
+        "vips": vips, "vip_held": held,
+        "vrrp_state": state,
+        "validation": validation,
+        "log": log,
+    })
+
+
 def do_apply(cfg=None, allow_push=True):
     with _lock:
         cfg = cfg or load_config()
@@ -945,7 +1041,15 @@ def do_apply(cfg=None, allow_push=True):
             rc, out = run(["keepalived", "-t", "-f", kstaging])
             if rc not in (0, 127):
                 os.unlink(kstaging)
-                result["steps"].append("keepalived config validation failed: " + out)
+                # Loud, not a step line: keepalived.conf is left untouched here,
+                # so the node keeps whatever it had -- or never starts at all,
+                # and both nodes sit passive with no VIP anywhere.
+                result["steps"].append("keepalived config NOT updated")
+                result.setdefault("warnings", []).append(
+                    "Keepalived configuration was rejected, so /etc/keepalived/keepalived.conf "
+                    "was left unchanged and Keepalived is still running the old configuration "
+                    "(or not running at all). " + _keepalived_hint(out, k))
+                result["keepalived_check"] = out
             else:
                 KEEPALIVED_CFG.parent.mkdir(parents=True, exist_ok=True)
                 if KEEPALIVED_CFG.exists():
@@ -953,6 +1057,10 @@ def do_apply(cfg=None, allow_push=True):
                 shutil.move(kstaging, KEEPALIVED_CFG)
                 rc, out = run(["systemctl", "reload-or-restart", "keepalived"])
                 result["steps"].append("keepalived reload: " + ("ok" if rc == 0 else out))
+                if rc != 0:
+                    result.setdefault("warnings", []).append(
+                        "Keepalived did not reload: %s. Without it this node cannot take the "
+                        "virtual IP." % out.strip()[:300])
 
         cfg["_meta"]["applied_hash"] = config_hash(cfg)
         save_config(cfg)
