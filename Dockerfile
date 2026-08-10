@@ -40,6 +40,7 @@ RUN curl -fsSL "https://github.com/acmesh-official/acme.sh/archive/refs/tags/${A
 
 WORKDIR /opt/haproxy-manager
 COPY app.py ./app.py
+COPY VERSION ./VERSION
 COPY static/ ./static/
 
 COPY docker/systemctl /usr/local/bin/systemctl

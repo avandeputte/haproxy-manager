@@ -836,6 +836,146 @@ async function servicesCard(){
   return card;
 }
 
+/* ============================ live statistics ============================ */
+const ST_PILL={UP:"up",OPEN:"up",DOWN:"down",MAINT:"warn",DRAIN:"warn",NOLB:"warn"};
+function statusPill(v){
+  const head=String(v||"").split(" ")[0].replace(/^\d+\//,"");   // "UP 2/3" -> "UP"
+  const cls=ST_PILL[head]||"off";
+  return '<span class="pill '+cls+'">'+esc(v||"—")+"</span>";
+}
+function num(v){const n=Number(v);return isNaN(n)?(v||"0"):n.toLocaleString();}
+function bytes(v){
+  let n=Number(v)||0;const u=["B","kB","MB","GB","TB"];let i=0;
+  while(n>=1024&&i<u.length-1){n/=1024;i++;}
+  return (i?n.toFixed(1):n)+" "+u[i];
+}
+function since(sec){
+  let n=Number(sec);if(isNaN(n)||n<0)return "—";
+  if(n<60)return n+"s";if(n<3600)return Math.floor(n/60)+"m";
+  if(n<86400)return Math.floor(n/3600)+"h";return Math.floor(n/86400)+"d";
+}
+async function renderStats(){
+  const c=$("#content");
+  let st;
+  try{st=await api("stats");}catch(e){c.innerHTML='<div class="card"><div class="bd">'+esc(e.message)+"</div></div>";return;}
+  c.innerHTML="";
+  if(!st.ok){
+    c.innerHTML='<div class="card"><div class=hd><h2>Statistics</h2></div><div class="bd"><p class=hint>'+esc(st.error)+"</p></div></div>";
+    return;
+  }
+
+  const fe=document.createElement("div");fe.className="card";
+  fe.innerHTML='<div class=hd><h2>Listeners</h2><div class=sp></div><span class=hint>refreshes every 5s</span></div>'+
+    (st.frontends.length?"<table><thead><tr><th>Name</th><th>Status</th><th>Sessions</th><th>Rate</th>"+
+      "<th>In</th><th>Out</th><th>Denied</th><th>Errors</th></tr></thead><tbody>"+
+      st.frontends.map(f=>"<tr><td class=mono>"+esc(f.proxy)+"</td><td>"+statusPill(f.status)+"</td>"+
+        "<td>"+num(f.scur)+" <span class=sub>max "+num(f.smax)+", total "+num(f.stot)+"</span></td>"+
+        "<td>"+num(f.rate)+"/s <span class=sub>max "+num(f.rate_max)+"</span></td>"+
+        "<td>"+bytes(f.bin)+"</td><td>"+bytes(f.bout)+"</td>"+
+        "<td>"+num(f.dreq)+"</td><td>"+num(f.ereq)+"</td></tr>").join("")+"</tbody></table>"
+     :'<div class=empty>No listeners are running. Publish a service and press Apply.</div>');
+  c.appendChild(fe);
+
+  st.backends.forEach(be=>{
+    const card=document.createElement("div");card.className="card";
+    const allUp=be.servers_total&&be.servers_up===be.servers_total;
+    card.innerHTML='<div class=hd><h2>'+esc(be.proxy)+'</h2><div class=sp></div>'+
+        statusPill(be.status)+' <span class="pill '+(be.servers_total?(allUp?"up":be.servers_up?"warn":"down"):"off")+'">'+
+        be.servers_up+"/"+be.servers_total+" up</span></div>"+
+      "<table><thead><tr><th>Server</th><th>Status</th><th>Role</th><th>Sessions</th><th>Queue</th>"+
+      "<th>In</th><th>Out</th><th>Last check</th><th>Flaps</th><th>Downtime</th></tr></thead><tbody>"+
+      (be.servers.length?be.servers.map(s=>"<tr>"+
+        "<td class=mono>"+esc(s.name)+(s.addr?"<div class=sub>"+esc(s.addr)+"</div>":"")+"</td>"+
+        "<td>"+statusPill(s.status)+"<div class=sub>for "+since(s.lastchg)+"</div></td>"+
+        "<td>"+(s.bck==="1"?"backup":"active")+"<div class=sub>weight "+esc(s.weight||"")+"</div></td>"+
+        "<td>"+num(s.scur)+" <span class=sub>max "+num(s.smax)+", total "+num(s.stot)+"</span></td>"+
+        "<td>"+num(s.qcur)+"</td><td>"+bytes(s.bin)+"</td><td>"+bytes(s.bout)+"</td>"+
+        "<td>"+esc(s.check_status||"—")+(s.check_code?" <span class=sub>"+esc(s.check_code)+"</span>":"")+
+          (s.check_duration?"<div class=sub>"+esc(s.check_duration)+" ms</div>":"")+"</td>"+
+        "<td>"+num(s.chkfail)+" fail <span class=sub>"+num(s.chkdown)+" down</span></td>"+
+        "<td>"+since(s.downtime)+"</td></tr>").join("")
+        :'<tr><td colspan=10 class=sub style="padding:14px 12px">This pool has no servers.</td></tr>')+
+      "<tr><td class=mono><b>total</b></td><td>"+statusPill(be.status)+"</td><td>"+esc(be.algo||"")+"</td>"+
+        "<td>"+num(be.scur)+" <span class=sub>total "+num(be.stot)+"</span></td><td>"+num(be.qcur)+"</td>"+
+        "<td>"+bytes(be.bin)+"</td><td>"+bytes(be.bout)+"</td><td>—</td>"+
+        "<td>"+num(be.econ)+" conn err</td><td>"+since(be.downtime)+"</td></tr>"+
+      "</tbody></table>";
+    c.appendChild(card);
+  });
+
+  pageTimer=setTimeout(()=>{if(location.hash==="#/p:stats")renderStats();},5000);
+}
+
+/* ============================ version and updates ============================ */
+async function renderUpdates(){
+  const c=$("#content");c.innerHTML="";
+  const v=await api("version");
+  const card=document.createElement("div");card.className="card";
+  card.innerHTML='<div class=hd><h2>Version</h2></div>';
+  const bd=document.createElement("div");bd.className="bd";
+  bd.innerHTML='<div class=grid style="margin-bottom:16px">'+
+    '<div class=stat><div class=k>Installed</div><div class=v>'+esc(v.version)+"</div></div>"+
+    '<div class=stat><div class=k>Published</div><div class=v>'+esc(v.latest||"—")+"</div></div>"+
+    '<div class=stat><div class=k>Status</div><div class="v" style="font-size:13px">'+
+      (v.available?'<span class="pill warn">update available</span>'
+                  :v.latest?'<span class="pill up">up to date</span>':'<span class="pill off">not checked yet</span>')+"</div></div>"+
+    '<div class=stat><div class=k>Last checked</div><div class="v" style="font-size:13px">'+
+      (v.checked?fmtTime(v.checked):"never")+"</div></div></div>"+
+    '<p class=hint>Checked once a day against <span class=mono>'+esc(v.repo)+"</span> ("+esc(v.ref)+")."+
+    (v.error?" Last check failed: "+esc(v.error):"")+"</p>";
+  const row=document.createElement("div");row.style.marginTop="14px";
+  const msg=document.createElement("div");msg.className="hint";msg.style.marginTop="12px";
+  row.appendChild(btn("Check now","",async()=>{
+    msg.textContent="Checking...";
+    try{await api("version/check","POST",{});await renderUpdates();}
+    catch(e){msg.textContent=e.message;}
+  }));
+  row.appendChild(document.createTextNode(" "));
+  const up=btn(v.available?("Update to "+v.latest):"Update","pri",async()=>{
+    if(!confirm("Update haproxy-manager from "+v.version+" to "+(v.latest||"the published version")+"?\n\n"+
+                "The installer runs on this node and the service restarts when it finishes. "+
+                "Your configuration, certificates and login are kept. HAProxy keeps serving traffic throughout."))return;
+    up.disabled=true;msg.textContent="Starting the updater...";
+    try{
+      const r=await api("update","POST",{});
+      msg.textContent=r.note||"Update started.";
+      watchUpdate(msg);
+    }catch(e){msg.textContent=e.message;up.disabled=false;}
+  });
+  if(!v.can_update||!v.available)up.disabled=true;
+  row.appendChild(up);
+  if(!v.can_update){
+    const w=document.createElement("div");w.className="hint";w.style.marginTop="10px";
+    w.textContent="One-click update is not available here: "+v.cannot_update_reason;
+    row.appendChild(w);
+  }
+  bd.appendChild(row);bd.appendChild(msg);card.appendChild(bd);c.appendChild(card);
+
+  const logCard=document.createElement("div");logCard.className="card";
+  logCard.innerHTML='<div class=hd><h2>Update log</h2></div>';
+  const lb=document.createElement("div");lb.className="bd";
+  const pre=document.createElement("pre");pre.id="updlog";pre.textContent="(nothing yet)";
+  lb.appendChild(pre);logCard.appendChild(lb);c.appendChild(logCard);
+  try{const l=await api("update/log");if(l.log)pre.textContent=l.log;if(l.running)watchUpdate(msg);}catch(e){}
+}
+/* Poll the log while the updater runs; the service restarts underneath us. */
+function watchUpdate(msg){
+  const tick=async()=>{
+    let alive=true;
+    try{
+      const l=await api("update/log");
+      const pre=document.getElementById("updlog");
+      if(pre&&l.log)pre.textContent=l.log;
+      if(!l.running){
+        alive=false;
+        msg.innerHTML="Update finished &mdash; now running <b>"+esc(l.version)+"</b>. Reload the page.";
+      }
+    }catch(e){msg.textContent="Service is restarting...";}   // expected mid-update
+    if(alive)pageTimer=setTimeout(tick,3000);
+  };
+  pageTimer=setTimeout(tick,3000);
+}
+
 /* ============================ authentication ============================ */
 let who={authenticated:false,needs_setup:false,username:"",admin_username:"admin"};
 function showLogin(setup){
@@ -1109,6 +1249,7 @@ async function renderOverview(){
 const NAV=[
  ["","Overview",null],
  ["p:services","Services"],
+ ["p:stats","Statistics"],
  ["grp","CERTIFICATES"],
  ["acme/certificates","Certificates"],
  ["acme/accounts","ACME Accounts"],
@@ -1119,6 +1260,7 @@ const NAV=[
  ["grp","SYSTEM"],
  ["p:backup","Backup & Export"],
  ["p:admin","Administrator login"],
+ ["p:updates","Version & updates"],
  ["grp","ADVANCED"],
  ["haproxy/frontends","Public Services"],
  ["haproxy/backends","Backend Pools"],
@@ -1131,7 +1273,9 @@ const NAV=[
  ["s:acme-settings","ACME Settings"],
 ];
 /* pages with a hand-written renderer (neither CRUD nor a settings form) */
-const P={services:renderServices,backup:renderBackup,admin:renderAdmin};
+const P={services:renderServices,stats:renderStats,backup:renderBackup,
+         admin:renderAdmin,updates:renderUpdates};
+let pageTimer=null;      // per-page refresh timer, cleared whenever we navigate
 function buildNav(){
   const n=$("#navlinks");
   NAV.forEach(([key,label])=>{
@@ -1141,6 +1285,7 @@ function buildNav(){
   });
 }
 async function route(){
+  if(pageTimer){clearTimeout(pageTimer);pageTimer=null;}
   const key=location.hash.replace(/^#\//,"");
   document.querySelectorAll("#nav a.item").forEach(a=>a.classList.toggle("on",a.dataset.key===key));
   const entry=NAV.find(x=>x[0]===key)||NAV[0];
@@ -1157,12 +1302,17 @@ async function route(){
 async function refreshStatus(){
   try{
     const st=await api("status");
-    $("#brandhost").textContent=st.hostname;
+    $("#brandhost").textContent=st.hostname+(st.version?" · v"+st.version:"");
     const ns=$("#nodestrip");ns.innerHTML="";
     const role=document.createElement("span");
     role.className="chip role-"+st.role;role.textContent=st.role.toUpperCase()+(st.vip_held.length?" · "+st.vip_held[0]:"");
     ns.appendChild(role);
     if(st.dirty){const d=document.createElement("span");d.className="chip drift";d.textContent="unapplied changes";ns.appendChild(d);}
+    if(st.update_available){
+      const u=document.createElement("a");u.className="chip drift";u.href="#/p:updates";
+      u.style.textDecoration="none";u.textContent="v"+st.latest_version+" available";
+      ns.appendChild(u);
+    }
     $("#applybtn").classList.toggle("warn",st.dirty);
     $("#applybtn").classList.toggle("pri",!st.dirty);
   }catch(e){/* not fatal */}

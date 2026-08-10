@@ -334,6 +334,7 @@ fetch_source() {
 
     [ -f "$SRC/app.py" ] && [ -f "$SRC/static/index.html" ] \
         || die "archive does not contain app.py and static/index.html -- wrong --repo/--ref?"
+    return 0
 }
 
 install_acme() {
@@ -377,6 +378,11 @@ install_app() {
     install -d -m 0700 "$CERTS"
     install -m 0644 "$SRC/app.py" "$DEST/app.py"
     install -m 0644 "$SRC/static/index.html" "$DEST/static/index.html"
+    # The app reads its own version from this file and compares it with GitHub.
+    if [ -f "$SRC/VERSION" ]; then
+        install -m 0644 "$SRC/VERSION" "$DEST/VERSION"
+        log "Installed version $(cat "$SRC/VERSION")"
+    fi
 }
 
 configure_system() {

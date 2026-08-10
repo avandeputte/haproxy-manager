@@ -43,6 +43,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
+import urllib.request
 
 from flask import Flask, abort, jsonify, request, send_from_directory
 
@@ -59,6 +60,29 @@ KEEPALIVED_CFG = Path(os.environ.get("HAM_KEEPALIVED_CFG", "/etc/keepalived/keep
 ACME_HOME = Path(os.environ.get("HAM_ACME_HOME", str(Path.home() / ".acme.sh")))
 ACME_SH = os.environ.get("HAM_ACME_SH", str(ACME_HOME / "acme.sh"))
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+STATS_SOCK = Path(os.environ.get("HAM_STATS_SOCK", "/run/haproxy/admin.sock"))
+
+# Where the daily update check looks, and what a one-click update installs.
+UPDATE_REPO = os.environ.get("HAM_REPO", "avandeputte/haproxy-manager")
+UPDATE_REF = os.environ.get("HAM_REF", "main")
+UPDATE_CHECK_HOURS = 24
+# Overridable so a fork, a private mirror or a test rig can be pointed at.
+VERSION_URL = os.environ.get(
+    "HAM_VERSION_URL", "https://raw.githubusercontent.com/%s/%s/VERSION" % (UPDATE_REPO, UPDATE_REF))
+INSTALL_URL = os.environ.get(
+    "HAM_INSTALL_URL", "https://raw.githubusercontent.com/%s/%s/install.sh" % (UPDATE_REPO, UPDATE_REF))
+
+
+def _read_version():
+    """The VERSION file shipped next to app.py is the single source of truth."""
+    try:
+        return (Path(__file__).with_name("VERSION")).read_text().strip() or "0"
+    except OSError:
+        return "0"
+
+
+VERSION = _read_version()
+
 LISTEN = os.environ.get("HAM_LISTEN", "0.0.0.0")
 PORT = int(os.environ.get("HAM_PORT", "8080"))
 DRY_RUN = os.environ.get("HAM_DRY_RUN") == "1"
@@ -986,8 +1010,12 @@ def api_status():
             info["last_issue"] = None
         certs.append(info)
 
+    upd = cfg["_meta"].get("update") or {}
     return jsonify({
         "hostname": socket.gethostname(),
+        "version": VERSION,
+        "update_available": bool(upd.get("latest")) and is_newer(upd["latest"], VERSION),
+        "latest_version": upd.get("latest", ""),
         "haproxy": svc_state("haproxy"),
         "keepalived": svc_state("keepalived") if k.get("enabled") else "disabled",
         "vips": vips,
@@ -1293,6 +1321,228 @@ def api_sync_receive():
     save_config(cfg)
     res = do_apply(cfg, allow_push=False)  # never re-push: avoids sync loops
     return jsonify({"ok": res.get("ok", False), "node": socket.gethostname(), "applied": res})
+
+
+# --------------------------------------------------------------------------
+# live statistics, straight from HAProxy's admin socket
+# --------------------------------------------------------------------------
+
+def _socket_command(cmd):
+    """Send one command to the HAProxy stats socket and return its output."""
+    if not STATS_SOCK.exists():
+        return None, ("HAProxy is not running, or its stats socket is missing at %s. "
+                      "Press Apply once -- the generated configuration creates it." % STATS_SOCK)
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(5)
+            s.connect(str(STATS_SOCK))
+            s.sendall((cmd + "\n").encode())
+            chunks = []
+            while True:
+                buf = s.recv(65536)
+                if not buf:
+                    break
+                chunks.append(buf)
+        return b"".join(chunks).decode("utf-8", "replace"), None
+    except OSError as e:
+        return None, "could not talk to the HAProxy stats socket: %s" % e
+
+
+# Columns worth showing; the socket reports about a hundred.
+_STAT_KEEP = ("status", "weight", "act", "bck", "scur", "smax", "slim", "stot",
+              "bin", "bout", "qcur", "qmax", "ereq", "econ", "eresp", "dreq", "dresp",
+              "wretr", "wredis", "chkfail", "chkdown", "lastchg", "downtime",
+              "check_status", "check_code", "check_duration", "rate", "rate_max",
+              "lastsess", "addr", "mode", "algo")
+
+
+def haproxy_stats():
+    text, err = _socket_command("show stat")
+    if err:
+        return {"ok": False, "error": err}
+    lines = [l for l in text.splitlines() if l.strip()]
+    if not lines or not lines[0].startswith("#"):
+        return {"ok": False, "error": "unexpected output from the stats socket"}
+
+    header = [h.strip() for h in lines[0].lstrip("# ").split(",")]
+    frontends, backends, order = [], {}, []
+    for line in lines[1:]:
+        row = dict(zip(header, line.split(",")))
+        px, sv = row.get("pxname", ""), row.get("svname", "")
+        if not px or not sv:
+            continue
+        keep = {k: row.get(k, "") for k in _STAT_KEEP}
+        keep["proxy"] = px
+        keep["name"] = sv
+        if sv == "FRONTEND":
+            frontends.append(keep)
+        elif sv == "BACKEND":
+            backends.setdefault(px, {"proxy": px, "servers": []}).update(keep)
+            if px not in order:
+                order.append(px)
+        else:
+            backends.setdefault(px, {"proxy": px, "servers": []})["servers"].append(keep)
+            if px not in order:
+                order.append(px)
+
+    for be in backends.values():
+        # "no check" means health checking is off, and HAProxy still routes to
+        # the server -- counting it as down would misreport a working pool.
+        up = sum(1 for s in be["servers"]
+                 if s.get("status", "").startswith("UP") or s.get("status") == "no check")
+        be["servers_up"] = up
+        be["servers_total"] = len(be["servers"])
+    return {"ok": True, "frontends": frontends,
+            "backends": [backends[p] for p in order],
+            "generated": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+
+
+@app.get("/api/stats")
+def api_stats():
+    return jsonify(haproxy_stats())
+
+
+# --------------------------------------------------------------------------
+# version and one-click update
+# --------------------------------------------------------------------------
+
+UPDATE_LOG = DATA_DIR / "update.log"
+UPDATE_UNIT = "haproxy-manager-update"
+
+
+def version_tuple(v):
+    parts = re.split(r"[.\-+]", (v or "").strip().lstrip("vV"))
+    out = []
+    for p in parts[:4]:
+        out.append(int(p) if p.isdigit() else 0)
+    return tuple(out + [0] * (4 - len(out)))
+
+
+def is_newer(candidate, current):
+    return version_tuple(candidate) > version_tuple(current)
+
+
+def fetch_latest_version():
+    req = urllib.request.Request(VERSION_URL, headers={"User-Agent": "haproxy-manager/" + VERSION})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return r.read(64).decode("utf-8", "replace").strip()
+
+
+def check_for_update(cfg=None):
+    """Ask GitHub for the published version and remember the answer."""
+    result = {"checked": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+              "latest": "", "available": False, "error": ""}
+    try:
+        latest = fetch_latest_version()
+        if not re.match(r"^v?\d+(\.\d+)*$", latest):
+            raise ValueError("unexpected content at VERSION: %r" % latest[:40])
+        result["latest"] = latest
+        result["available"] = is_newer(latest, VERSION)
+    except Exception as e:
+        result["error"] = str(e)
+    with _lock:
+        cur = cfg or load_config()
+        cur["_meta"]["update"] = result      # _meta: not hashed, not synced
+        save_config(cur)
+    return result
+
+
+def update_supported():
+    """One-click update only makes sense for the systemd install."""
+    if not Path("/run/systemd/system").exists():
+        return False, "this node runs in a container -- pull a new image instead"
+    if not Path("/etc/systemd/system/haproxy-manager.service").exists():
+        return False, "no haproxy-manager.service was found; this is not an installer-managed node"
+    return True, ""
+
+
+@app.get("/api/version")
+def api_version():
+    cfg = load_config()
+    info = cfg["_meta"].get("update") or {}
+    ok, why = update_supported()
+    return jsonify({
+        "version": VERSION,
+        "latest": info.get("latest", ""),
+        # Recomputed, not read back: after an update the stored flag is stale
+        # until the next daily check.
+        "available": bool(info.get("latest")) and is_newer(info["latest"], VERSION),
+        "checked": info.get("checked", ""),
+        "error": info.get("error", ""),
+        "repo": UPDATE_REPO, "ref": UPDATE_REF,
+        "can_update": ok, "cannot_update_reason": why,
+        "updating": _update_running(),
+    })
+
+
+@app.post("/api/version/check")
+def api_version_check():
+    info = check_for_update()
+    return jsonify(dict(info, version=VERSION))
+
+
+def _update_running():
+    rc, out = run(["systemctl", "is-active", UPDATE_UNIT])
+    return out.strip().startswith("activ")
+
+
+@app.post("/api/update")
+def api_update():
+    ok, why = update_supported()
+    if not ok:
+        return jsonify({"ok": False, "error": why}), 400
+    if _update_running():
+        return jsonify({"ok": False, "error": "an update is already running"}), 409
+
+    url = INSTALL_URL
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with open(UPDATE_LOG, "a") as f:
+        f.write("\n=== update started %s (from %s) ===\n"
+                % (datetime.now(timezone.utc).isoformat(timespec="seconds"), url))
+
+    # systemd-run puts the updater in its own unit. Running it as a child of
+    # this service would kill it halfway: restarting haproxy-manager.service
+    # takes down everything in that service's cgroup, the updater included.
+    shell = "curl -fsSL %s | bash -s -- --update --yes >>%s 2>&1" % (url, UPDATE_LOG)
+    if shutil.which("systemd-run"):
+        cmd = ["systemd-run", "--unit=" + UPDATE_UNIT, "--collect", "--quiet",
+               "/bin/sh", "-c", shell]
+    else:
+        cmd = ["setsid", "/bin/sh", "-c", shell]
+    rc, out = run(cmd, timeout=30)
+    if rc != 0:
+        return jsonify({"ok": False, "error": "could not start the updater: %s" % out}), 500
+    return jsonify({"ok": True, "note": "The update is running. This service restarts when it finishes."})
+
+
+@app.get("/api/update/log")
+def api_update_log():
+    try:
+        text = UPDATE_LOG.read_text()[-20000:]
+    except OSError:
+        text = ""
+    return jsonify({"ok": True, "running": _update_running(), "version": VERSION, "log": text})
+
+
+def _update_loop():
+    """Check GitHub once a day."""
+    time.sleep(30)                      # let the service settle before the first check
+    while True:
+        try:
+            cfg = load_config()
+            last = (cfg["_meta"].get("update") or {}).get("checked") or ""
+            due = True
+            if last:
+                try:
+                    age = datetime.now(timezone.utc) - datetime.fromisoformat(last)
+                    due = age.total_seconds() >= UPDATE_CHECK_HOURS * 3600
+                except ValueError:
+                    due = True
+            if due:
+                check_for_update(cfg)
+        except Exception:
+            pass
+        time.sleep(3600)
 
 
 # --------------------------------------------------------------------------
@@ -2093,4 +2343,5 @@ if __name__ == "__main__":
     if not CONF_PATH.exists():
         save_config(load_config())
     threading.Thread(target=_renew_loop, daemon=True).start()
+    threading.Thread(target=_update_loop, daemon=True).start()
     app.run(host=LISTEN, port=PORT, threaded=True)

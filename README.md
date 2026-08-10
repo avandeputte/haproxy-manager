@@ -143,6 +143,49 @@ navigation there mirrors the two OPNsense plugins this UI was modeled on:
 | ACME accounts, challenges, certificates, automations | Administrator login |
 | Deployed certificate PEM files | |
 
+## Statistics
+
+**Statistics** reads HAProxy's admin socket (`show stat`) and refreshes every
+five seconds:
+
+- **Listeners** — status, current/max/total sessions, request rate, bytes in and
+  out, denied requests and errors.
+- **Each pool** — its own status, how many servers are up, and per server: state
+  (UP / DOWN / MAINT / DRAIN / NOLB) with how long it has held it, active or
+  backup, weight, sessions, queue, traffic, the last health check result
+  (`L7OK`, `L4CON`, …) with its duration, failed-check and flap counts, and
+  total downtime.
+
+A server with health checking switched off reports `no check` and counts as up,
+because HAProxy still routes to it.
+
+## Version and updates
+
+The app carries a version (`VERSION`, starting at **1.0**) and asks GitHub for
+the published one **once a day**. When a newer version exists, a chip appears in
+the header and **System → Version & updates** offers a one-click update.
+
+The update runs `install.sh --update --yes` on the node under `systemd-run`, in
+its own transient unit. That detail matters: as a child of the service it would
+be killed halfway, because restarting `haproxy-manager.service` takes down
+everything in that service's cgroup. Progress is streamed into
+`/var/lib/haproxy-manager/update.log` and shown live in the UI; the page keeps
+polling across the restart. Your configuration, certificates and login are kept,
+and **HAProxy keeps serving traffic** — only the management UI restarts.
+
+One-click update applies to the installer-managed (systemd) install. In a
+container the button explains that you should pull a new image instead.
+
+To publish a new version: bump `VERSION`, push, and every node offers it within
+a day. `HAM_VERSION_URL` / `HAM_INSTALL_URL` point the whole mechanism at a fork
+or a private mirror.
+
+> The update fetches a script over the network and runs it as root. It is pinned
+> to the repository above, and reaching it already requires an administrator
+> login — the same login that can run arbitrary commands through an ACME
+> automation — but if you would rather not have that path at all, leave the
+> button alone and update with `install.sh --update` over SSH.
+
 ## Backup & Export
 
 **System → Backup & Export** covers two different jobs:
@@ -285,8 +328,9 @@ Build the image on its own with `docker build -t haproxy-manager .`; the
 ## Environment overrides
 
 `HAM_DATA_DIR` · `HAM_CERT_DIR` · `HAM_HAPROXY_CFG` · `HAM_KEEPALIVED_CFG` ·
-`HAM_ACME_HOME` · `HAM_ACME_SH` · `HAM_LISTEN` · `HAM_PORT` · `HAM_DRY_RUN=1`
-(skip `systemctl` calls, for development).
+`HAM_ACME_HOME` · `HAM_ACME_SH` · `HAM_LISTEN` · `HAM_PORT` · `HAM_STATS_SOCK` ·
+`HAM_VERSION_URL` · `HAM_INSTALL_URL` · `HAM_DRY_RUN=1` (skip `systemctl` calls,
+for development).
 
 The app also has a small maintenance CLI, used by the installer and the Docker
 entrypoint so neither has to reimplement password hashing:
