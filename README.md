@@ -5,8 +5,33 @@ A small self-hosted web UI to manage an **HAProxy** configuration, obtain
 on a shared virtual IP — with settings and certificates syncing between the two
 nodes.
 
-The navigation and object model deliberately mirror the two OPNsense plugins the
-UI is modeled on:
+## Publishing a service
+
+The normal way to use this is **Services → Publish a service**: give it the URL
+people will visit and the server behind it.
+
+```
+Public URL    https://ps2.iothing.net
+Forward to    http://192.168.1.100:1781
+```
+
+From those two lines it creates the Real Server, Backend Pool, host Condition,
+routing Rule, the HTTPS listener, an ACME certificate, and an HTTP listener that
+redirects to HTTPS — then applies. **Preview** shows exactly what it will create,
+and the resulting `haproxy.cfg`, before anything is written.
+
+- **Several targets**, comma separated, are load balanced across.
+- **A path** works too: `https://ps2.iothing.net/api` routes only that prefix.
+  More specific rules are placed ahead of broader ones, so a host+path rule is
+  never swallowed by the host-only rule for the same name.
+- **Publishing the same URL again edits it** — repointing a service replaces its
+  target rather than quietly adding a second server behind it.
+- **Services** lists every mapping with its target and certificate state, and
+  Delete removes the objects that mapping alone was using.
+
+The **Advanced** section still exposes every object individually, for the cases
+the wizard does not cover (TCP mode, header rewriting, custom ACLs). The
+navigation there mirrors the two OPNsense plugins this UI was modeled on:
 
 | This UI | OPNsense `net/haproxy` |
 |---|---|

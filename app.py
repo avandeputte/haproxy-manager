@@ -42,6 +42,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from flask import Flask, abort, jsonify, request, send_from_directory
 
@@ -1271,6 +1272,428 @@ def api_sync_receive():
     save_config(cfg)
     res = do_apply(cfg, allow_push=False)  # never re-push: avoids sync loops
     return jsonify({"ok": res.get("ok", False), "node": socket.gethostname(), "applied": res})
+
+
+# --------------------------------------------------------------------------
+# publish wizard: one URL + one target -> every object needed to serve it
+# --------------------------------------------------------------------------
+
+def _split_url(raw, what):
+    """Parse a user-typed URL into (scheme, host, port, path)."""
+    raw = (raw or "").strip()
+    if not raw:
+        return None, "%s is required" % what
+    if "://" not in raw:
+        raw = "http://" + raw          # be forgiving: 192.168.1.100:1781
+    parts = urlsplit(raw)
+    if parts.scheme not in ("http", "https"):
+        return None, "%s must be an http:// or https:// URL" % what
+    if not parts.hostname:
+        return None, "%s has no host name" % what
+    try:
+        port = parts.port or (443 if parts.scheme == "https" else 80)
+    except ValueError:
+        return None, "%s has an invalid port" % what
+    path = parts.path or ""
+    if path in ("/", ""):
+        path = ""
+    return {"scheme": parts.scheme, "host": parts.hostname, "port": port, "path": path}, None
+
+
+def _uniq_name(existing, base):
+    base = _sec(base)
+    if base not in existing:
+        return base
+    n = 2
+    while "%s-%d" % (base, n) in existing:
+        n += 1
+    return "%s-%d" % (base, n)
+
+
+def _find(items, pred):
+    for it in items:
+        if pred(it):
+            return it
+    return None
+
+
+def _bind_ports(fe):
+    ports = set()
+    for line in (fe.get("binds") or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        hostport = line.split()[0]
+        if ":" in hostport:
+            tail = hostport.rsplit(":", 1)[1]
+            if tail.isdigit():
+                ports.add(int(tail))
+    return ports
+
+
+WIZARD_MARK = "created by the publish wizard"
+
+
+def _drop_orphan_wizard_servers(hp, candidate_ids, acts):
+    """Remove wizard-made Real Servers that no pool references any more.
+
+    Hand-made servers are left alone even when unused -- someone may be keeping
+    them on purpose, and the Real Servers page is where those belong.
+    """
+    referenced = {s for b in hp["backends"] for s in (b.get("servers") or [])}
+    for sid in candidate_ids:
+        if sid in referenced:
+            continue
+        srv = _by_id(hp["servers"]).get(sid)
+        if srv and srv.get("description") == WIZARD_MARK:
+            hp["servers"] = [s for s in hp["servers"] if s.get("id") != sid]
+            acts.append({"action": "removed", "type": "Real Server", "name": srv.get("name")})
+
+
+def _place_rule(hp, rule_ids, rule):
+    """Position a rule among a frontend's rules by how specific it is.
+
+    HAProxy takes the first matching use_backend, so a rule for
+    host + /api must come before the host-only rule it refines -- otherwise
+    the broader one swallows the traffic and the narrower one never fires.
+    """
+    rules = _by_id(hp["rules"])
+    ids = [r for r in rule_ids if r != rule["id"]]
+    mine = set(rule.get("conditions") or [])
+    for i, rid in enumerate(ids):
+        other = rules.get(rid)
+        if other and set(other.get("conditions") or []) < mine:
+            return ids[:i] + [rule["id"]] + ids[i:]
+    return ids + [rule["id"]]
+
+
+def wizard_publish(cfg, pub, tgts, name=None, want_cert=True, account=None,
+                   challenge=None, http_redirect=True, healthcheck=None):
+    """Create (or update) everything needed to serve `pub` from `tgts`.
+
+    Re-running for the same public host updates that mapping instead of adding
+    a second one, so the wizard is safe to use as an editor.
+    """
+    hp, ac = cfg["haproxy"], cfg["acme"]
+    acts, warns = [], []
+
+    def act(action, kind, nm):
+        acts.append({"action": action, "type": kind, "name": nm})
+
+    base = name.strip() if name else (pub["host"].split(".")[0] +
+                                      ("-" + _sec(pub["path"].strip("/")).replace("/", "-") if pub["path"] else ""))
+
+    # -- Real Servers -----------------------------------------------------
+    # The targets given here ARE the pool's servers: publishing the same URL
+    # again repoints it instead of quietly adding a second server behind it.
+    srv_ids = []
+    for t in tgts:
+        srv = _find(hp["servers"], lambda s: s.get("address") == t["host"]
+                    and str(s.get("port")) == str(t["port"])
+                    and bool(s.get("ssl")) == (t["scheme"] == "https"))
+        if srv:
+            act("reused", "Real Server", srv["name"])
+        else:
+            srv = {"id": str(uuid.uuid4()),
+                   "name": _uniq_name({s["name"] for s in hp["servers"]},
+                                      base + "-srv" if len(tgts) == 1 else "%s-%s" % (base, t["host"])),
+                   "address": t["host"], "port": t["port"], "enabled": True,
+                   "ssl": t["scheme"] == "https", "ssl_verify": False,
+                   "description": WIZARD_MARK}
+            hp["servers"].append(srv)
+            act("created", "Real Server", srv["name"])
+        srv_ids.append(srv["id"])
+
+    # -- Backend Pool -----------------------------------------------------
+    pool = _find(hp["backends"], lambda b: b.get("name") == _sec(base))
+    if pool:
+        previous = list(pool.get("servers") or [])
+        pool["servers"] = srv_ids
+        act("updated" if previous != srv_ids else "reused", "Backend Pool", pool["name"])
+        _drop_orphan_wizard_servers(hp, previous, acts)
+    else:
+        pool = {"id": str(uuid.uuid4()),
+                "name": _uniq_name({b["name"] for b in hp["backends"]}, base),
+                "mode": "http", "balance": "roundrobin", "enabled": True,
+                "servers": srv_ids,
+                "healthcheck_enabled": bool(healthcheck), "healthcheck": healthcheck or ""}
+        hp["backends"].append(pool)
+        act("created", "Backend Pool", pool["name"])
+
+    # -- Conditions: host, and a path prefix when the URL has one ---------
+    cond_ids = []
+    host_cond = _find(hp["conditions"], lambda c: c.get("type") == "host_matches"
+                      and (c.get("value") or "").lower() == pub["host"].lower())
+    if host_cond:
+        act("reused", "Condition", host_cond["name"])
+    else:
+        host_cond = {"id": str(uuid.uuid4()),
+                     "name": _uniq_name({c["name"] for c in hp["conditions"]}, "host-" + base),
+                     "type": "host_matches", "value": pub["host"],
+                     "description": "created by the publish wizard"}
+        hp["conditions"].append(host_cond)
+        act("created", "Condition", host_cond["name"])
+    cond_ids.append(host_cond["id"])
+
+    if pub["path"]:
+        pc = _find(hp["conditions"], lambda c: c.get("type") == "path_starts_with"
+                   and c.get("value") == pub["path"])
+        if pc:
+            act("reused", "Condition", pc["name"])
+        else:
+            pc = {"id": str(uuid.uuid4()),
+                  "name": _uniq_name({c["name"] for c in hp["conditions"]}, "path-" + base),
+                  "type": "path_starts_with", "value": pub["path"],
+                  "description": "created by the publish wizard"}
+            hp["conditions"].append(pc)
+            act("created", "Condition", pc["name"])
+        cond_ids.append(pc["id"])
+
+    # -- Rule -------------------------------------------------------------
+    rule = _find(hp["rules"], lambda r: r.get("type") == "use_backend"
+                 and set(r.get("conditions") or []) == set(cond_ids))
+    if rule:
+        rule["backend"] = pool["id"]
+        act("updated", "Rule", rule["name"])
+    else:
+        rule = {"id": str(uuid.uuid4()),
+                "name": _uniq_name({r["name"] for r in hp["rules"]}, "to-" + base),
+                "type": "use_backend", "test": "if", "operator": "and",
+                "conditions": cond_ids, "backend": pool["id"]}
+        hp["rules"].append(rule)
+        act("created", "Rule", rule["name"])
+
+    # -- Certificate (https only; the object also gives Apply a placeholder)
+    cert = None
+    if pub["scheme"] == "https" and want_cert:
+        cert = _find(ac["certificates"], lambda c: pub["host"] in parse_domains(c))
+        if cert:
+            act("reused", "Certificate", cert["name"])
+        else:
+            accounts, challenges = ac["accounts"], ac["challenges"]
+            acc_id = account or (accounts[0]["id"] if len(accounts) == 1 else "")
+            ch_id = challenge or (challenges[0]["id"] if len(challenges) == 1 else "")
+            cert = {"id": str(uuid.uuid4()),
+                    "name": _uniq_name({c["name"] for c in ac["certificates"]}, base),
+                    "domains": pub["host"], "account": acc_id, "challenge": ch_id,
+                    "key_type": "ec-256", "auto_renew": True, "automations": []}
+            ac["certificates"].append(cert)
+            act("created", "Certificate", cert["name"])
+            if not acc_id or not ch_id:
+                warns.append("The certificate has no %s yet, so it cannot be issued. Apply installs a "
+                             "self-signed placeholder meanwhile; add one under ACME and press Issue."
+                             % (" and ".join([x for x in ["ACME account" if not acc_id else "",
+                                                          "challenge type" if not ch_id else ""] if x])))
+
+    # -- Public Service (frontend) ---------------------------------------
+    want_ssl = pub["scheme"] == "https"
+    fe = _find(hp["frontends"], lambda f: pub["port"] in _bind_ports(f)
+               and bool(f.get("ssl_enabled")) == want_ssl)
+    if fe:
+        act("updated", "Public Service", fe["name"])
+    else:
+        fe = {"id": str(uuid.uuid4()),
+              "name": _uniq_name({f["name"] for f in hp["frontends"]},
+                                 ("https" if want_ssl else "http") + "-" + str(pub["port"])),
+              "enabled": True, "mode": "http", "binds": "0.0.0.0:%d" % pub["port"],
+              "ssl_enabled": want_ssl, "http2": want_ssl, "forwardfor": True,
+              "certificates": [], "rules": [], "custom": ""}
+        hp["frontends"].append(fe)
+        act("created", "Public Service", fe["name"])
+    fe["rules"] = _place_rule(hp, fe.get("rules") or [], rule)
+    if cert and cert["id"] not in (fe.get("certificates") or []):
+        fe.setdefault("certificates", []).append(cert["id"])
+    if not fe.get("default_backend"):
+        warns.append("Public Service \"%s\" has no default Backend Pool, so requests for any other host "
+                     "get a 503. That is usually what you want." % fe["name"])
+
+    # -- Optional :80 service that redirects to https ---------------------
+    if want_ssl and http_redirect:
+        red = _find(hp["frontends"], lambda f: 80 in _bind_ports(f) and not f.get("ssl_enabled"))
+        if red:
+            if not red.get("http_to_https"):
+                red["http_to_https"] = True
+                act("updated", "Public Service", red["name"])
+            else:
+                act("reused", "Public Service", red["name"])
+        else:
+            red = {"id": str(uuid.uuid4()),
+                   "name": _uniq_name({f["name"] for f in hp["frontends"]}, "http-redirect"),
+                   "enabled": True, "mode": "http", "binds": "0.0.0.0:80",
+                   "ssl_enabled": False, "forwardfor": True, "http_to_https": True,
+                   "certificates": [], "rules": [], "custom": ""}
+            hp["frontends"].append(red)
+            act("created", "Public Service", red["name"])
+
+    return acts, warns
+
+
+@app.get("/api/services")
+def api_services():
+    """The published mappings, derived from the objects the wizard creates.
+
+    A service is a use_backend rule whose conditions pin a host name; that is
+    exactly what the wizard builds, and it also picks up equivalent rules made
+    by hand on the Advanced pages.
+    """
+    cfg = load_config()
+    hp = cfg["haproxy"]
+    conds, backends = _by_id(hp["conditions"]), _by_id(hp["backends"])
+    servers, rules = _by_id(hp["servers"]), _by_id(hp["rules"])
+    certs = _by_id(cfg["acme"]["certificates"])
+
+    out = []
+    for fe in hp["frontends"]:
+        ports = sorted(_bind_ports(fe))
+        scheme = "https" if fe.get("ssl_enabled") else "http"
+        for rid in fe.get("rules") or []:
+            rule = rules.get(rid)
+            if not rule or rule.get("type") != "use_backend":
+                continue
+            host, path = None, ""
+            for cid in rule.get("conditions") or []:
+                c = conds.get(cid)
+                if not c:
+                    continue
+                if c.get("type") == "host_matches":
+                    host = c.get("value")
+                elif c.get("type") == "path_starts_with":
+                    path = c.get("value") or ""
+            if not host:
+                continue
+
+            pool = backends.get(rule.get("backend"))
+            targets = []
+            for sid in (pool.get("servers") if pool else []) or []:
+                s = servers.get(sid)
+                if s:
+                    targets.append("%s://%s:%s" % ("https" if s.get("ssl") else "http",
+                                                   s.get("address"), s.get("port")))
+            default_port = 443 if scheme == "https" else 80
+            shown_port = "" if (not ports or ports[0] == default_port) else ":%d" % ports[0]
+
+            cert = None
+            for cid in fe.get("certificates") or []:
+                c = certs.get(cid)
+                if c and host in parse_domains(c):
+                    cert = c
+                    break
+            info = cert_details(cert_path(cert)) if cert else None
+
+            out.append({
+                "id": rule["id"],
+                "url": "%s://%s%s%s" % (scheme, host, shown_port, path),
+                "host": host, "path": path, "scheme": scheme,
+                "port": ports[0] if ports else None,
+                "targets": targets,
+                "pool": pool["name"] if pool else None,
+                "frontend": fe["name"], "frontend_id": fe["id"],
+                "enabled": fe.get("enabled", True) and (pool.get("enabled", True) if pool else False),
+                "certificate": cert["name"] if cert else None,
+                "certificate_id": cert["id"] if cert else None,
+                "certificate_status": info["status"] if info else None,
+                "expires_iso": info["expires_iso"] if info else None,
+                "days_left": info["days_left"] if info else None,
+            })
+    return jsonify(out)
+
+
+@app.delete("/api/services/<rid>")
+def api_service_delete(rid):
+    """Remove a mapping and every object it alone was using."""
+    with _lock:
+        cfg = load_config()
+        hp = cfg["haproxy"]
+        rule = _by_id(hp["rules"]).get(rid)
+        if not rule:
+            abort(404)
+
+        for fe in hp["frontends"]:
+            if rid in (fe.get("rules") or []):
+                fe["rules"] = [x for x in fe["rules"] if x != rid]
+        hp["rules"] = [r for r in hp["rules"] if r.get("id") != rid]
+        removed = [{"type": "Rule", "name": rule.get("name")}]
+
+        # Conditions, the pool and its servers go too -- unless shared.
+        still_used_conds = {c for r in hp["rules"] for c in (r.get("conditions") or [])}
+        for cid in rule.get("conditions") or []:
+            if cid in still_used_conds:
+                continue
+            cond = _by_id(hp["conditions"]).get(cid)
+            if cond:
+                hp["conditions"] = [c for c in hp["conditions"] if c.get("id") != cid]
+                removed.append({"type": "Condition", "name": cond.get("name")})
+
+        pool_id = rule.get("backend")
+        pool = _by_id(hp["backends"]).get(pool_id)
+        pool_used = any(r.get("backend") == pool_id for r in hp["rules"]) or \
+            any(f.get("default_backend") == pool_id for f in hp["frontends"])
+        if pool and not pool_used:
+            server_ids = list(pool.get("servers") or [])
+            hp["backends"] = [b for b in hp["backends"] if b.get("id") != pool_id]
+            removed.append({"type": "Backend Pool", "name": pool.get("name")})
+            in_use = {s for b in hp["backends"] for s in (b.get("servers") or [])}
+            for sid in server_ids:
+                if sid in in_use:
+                    continue
+                srv = _by_id(hp["servers"]).get(sid)
+                if srv:
+                    hp["servers"] = [s for s in hp["servers"] if s.get("id") != sid]
+                    removed.append({"type": "Real Server", "name": srv.get("name")})
+
+        save_config(cfg)
+    return jsonify({"ok": True, "removed": removed,
+                    "note": "Certificates and Public Services were left in place. Press Apply."})
+
+
+@app.post("/api/wizard/publish")
+def api_wizard_publish():
+    body = request.get_json(force=True, silent=True) or {}
+    pub, err = _split_url(body.get("url"), "The public URL")
+    if err:
+        return jsonify({"ok": False, "error": err}), 400
+
+    raw_targets = [t for t in re.split(r"[\s,]+", body.get("target") or "") if t]
+    if not raw_targets:
+        return jsonify({"ok": False, "error": "The target address is required"}), 400
+    tgts = []
+    for raw in raw_targets:
+        t, err = _split_url(raw, "The target address \"%s\"" % raw)
+        if err:
+            return jsonify({"ok": False, "error": err}), 400
+        tgts.append(t)
+
+    dry_run = bool(body.get("dry_run"))
+    with _lock:
+        cfg = load_config()
+        draft = copy.deepcopy(cfg)
+        try:
+            acts, warns = wizard_publish(
+                draft, pub, tgts,
+                name=body.get("name"),
+                want_cert=body.get("certificate", True),
+                account=body.get("account") or None,
+                challenge=body.get("challenge") or None,
+                http_redirect=body.get("http_redirect", True),
+                healthcheck=body.get("healthcheck") or None,
+            )
+        except Exception as e:                      # a malformed draft must not corrupt the store
+            return jsonify({"ok": False, "error": "could not build the configuration: %s" % e}), 400
+
+        summary = {"ok": True, "actions": acts, "warnings": warns, "dry_run": dry_run,
+                   "public": "%s://%s%s" % (pub["scheme"], pub["host"], pub["path"]),
+                   "target": ", ".join("%s://%s:%d" % (t["scheme"], t["host"], t["port"]) for t in tgts)}
+        try:
+            summary["preview"] = render_haproxy(draft)
+        except Exception as e:
+            return jsonify({"ok": False, "error": "the resulting configuration is not renderable: %s" % e}), 400
+        if dry_run:
+            return jsonify(summary)
+        save_config(draft)
+
+    if body.get("apply"):
+        summary["applied"] = do_apply()
+    return jsonify(summary)
 
 
 # --------------------------------------------------------------------------

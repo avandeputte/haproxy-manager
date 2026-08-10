@@ -598,6 +598,108 @@ function apiKeyCard(){
   return card;
 }
 
+/* ============================ services (the simple view) ============================ */
+const WIZ_FIELDS=[
+ {k:"url",l:"Public URL",t:"text",h:"What users type, e.g. https://ps2.iothing.net (a path like /api is allowed)"},
+ {k:"target",l:"Forward to",t:"text",h:"The server behind it, e.g. http://192.168.1.100:1781. Several (comma separated) are load balanced."},
+ {k:"name",l:"Name",t:"text",h:"Optional -- derived from the host name when left empty"},
+ {k:"certificate",l:"Get a Let's Encrypt certificate",t:"bool",d:true,h:"HTTPS only. Until it is issued, a self-signed placeholder keeps HAProxy running."},
+ {k:"account",l:"ACME account",t:"ref",ref:"acme/accounts",h:"Only needed when you have more than one"},
+ {k:"challenge",l:"Challenge type",t:"ref",ref:"acme/challenges"},
+ {k:"http_redirect",l:"Redirect HTTP to HTTPS",t:"bool",d:true,h:"Also listens on port 80 and sends visitors to HTTPS"},
+ {k:"apply",l:"Apply immediately",t:"bool",d:true,h:"Write haproxy.cfg and reload once the objects are created"},
+];
+function openWizard(prefill){
+  const wrap=document.createElement("div");
+  const frm=document.createElement("div");frm.className="frm";
+  WIZ_FIELDS.forEach(f=>fieldRow(f,prefill?prefill[f.k]:undefined).forEach(el=>frm.appendChild(el)));
+  wrap.appendChild(frm);
+  const out=document.createElement("div");out.style.marginTop="16px";wrap.appendChild(out);
+  const err=document.createElement("div");err.className="err";
+
+  const read=()=>{const d=readForm(WIZ_FIELDS);d.certificate=!!d.certificate;return d;};
+  const show=(r,saved)=>{
+    out.innerHTML="";
+    const box=document.createElement("div");box.className="card";box.style.margin="0";
+    box.innerHTML='<div class=hd><h2>'+(saved?"Created":"What this will create")+'</h2></div>';
+    const bd=document.createElement("div");bd.className="bd";
+    bd.innerHTML='<div class=mono style="margin-bottom:10px">'+esc(r.public)+" &rarr; "+esc(r.target)+"</div>"+
+      "<table><tbody>"+r.actions.map(a=>"<tr><td style='width:90px'><span class='pill "+
+        (a.action==="created"?"up":a.action==="updated"?"warn":"off")+"'>"+esc(a.action)+"</span></td><td>"+
+        esc(a.type)+"</td><td class=mono>"+esc(a.name)+"</td></tr>").join("")+"</tbody></table>"+
+      (r.warnings||[]).map(w=>'<div class=hint style="margin-top:10px">! '+esc(w)+"</div>").join("");
+    bd.appendChild(btn("Show the generated haproxy.cfg","sm",()=>showText("haproxy.cfg (preview)",r.preview)));
+    if(saved&&r.applied)bd.appendChild(document.createTextNode(" "+(r.applied.ok?"Applied.":"Apply FAILED: "+(r.applied.error||""))));
+    box.appendChild(bd);out.appendChild(box);
+  };
+
+  const preview=btn("Preview","",async()=>{
+    err.textContent="";
+    try{show(await api("wizard/publish","POST",Object.assign(read(),{dry_run:true})),false);}
+    catch(e){err.textContent=e.message;}
+  });
+  const create=btn("Publish","pri",async()=>{
+    err.textContent="";create.disabled=true;
+    try{
+      const r=await api("wizard/publish","POST",read());
+      show(r,true);
+      create.disabled=true;preview.disabled=true;
+      await renderServices();refreshStatus();
+    }catch(e){err.textContent=e.message;create.disabled=false;}
+  });
+  openDlg(prefill?"Edit service":"Publish a service",wrap,[err,btn("Close","",closeDlg),preview,create]);
+}
+
+async function renderServices(){
+  const [svcs]=await Promise.all([api("services"),list("acme/accounts",true),list("acme/challenges",true)]);
+  const c=$("#content");c.innerHTML="";
+  const card=document.createElement("div");card.className="card";
+  const hd=document.createElement("div");hd.className="hd";
+  hd.innerHTML="<h2>Services</h2><div class=sp></div>";
+  hd.appendChild(btn("Publish a service","pri sm",()=>openWizard()));
+  card.appendChild(hd);
+  const bd=document.createElement("div");
+  if(!svcs.length){
+    bd.innerHTML='<div class=empty>Nothing published yet.<br><br>'+
+      '"Publish a service" maps a public URL such as <span class=mono>https://ps2.iothing.net</span> to a server '+
+      'such as <span class=mono>http://192.168.1.100:1781</span> and creates everything HAProxy needs for it.</div>';
+  }else{
+    const t=document.createElement("table");
+    t.innerHTML="<thead><tr><th>Public URL</th><th>Forwards to</th><th>Certificate</th><th></th></tr></thead>";
+    const tb=document.createElement("tbody");
+    svcs.forEach(s=>{
+      const tr=document.createElement("tr");
+      const cs=s.certificate_status;
+      const cls=CERT_STATUS[cs]?CERT_STATUS[cs][0]:"off";
+      const lbl=CERT_STATUS[cs]?CERT_STATUS[cs][1]:(s.scheme==="https"?"none":"not needed");
+      tr.innerHTML="<td><span class=mono>"+esc(s.url)+"</span>"+
+          (s.enabled?"":"<div class=sub>disabled</div>")+"</td>"+
+        "<td class=mono>"+(s.targets.length?s.targets.map(esc).join("<br>"):"<span class=sub>no server</span>")+
+          "<div class=sub>pool "+esc(s.pool||"—")+"</div></td>"+
+        "<td><span class='pill "+cls+"'>"+esc(lbl)+"</span>"+
+          (s.days_left!==null&&s.days_left!==undefined?"<div class=sub>"+(s.days_left<0?"expired":"in "+s.days_left+" days")+"</div>":"")+"</td>";
+      const act=document.createElement("td");act.style.textAlign="right";act.style.whiteSpace="nowrap";
+      act.appendChild(btn("Edit","sm",()=>openWizard({url:s.url,target:s.targets[0]||"",name:s.pool||""})));
+      act.appendChild(document.createTextNode(" "));
+      act.appendChild(btn("Delete","sm dngr",async()=>{
+        if(!confirm("Remove "+s.url+"?\n\nThe rule, its conditions, the backend pool and its servers are deleted "+
+                    "when nothing else uses them. Certificates and the listening service are kept."))return;
+        try{
+          const r=await api("services/"+s.id,"DELETE");
+          showText("Removed "+s.url,(r.removed||[]).map(x=>"- "+x.type+" "+x.name).join("\n")+"\n\n"+r.note);
+          await renderServices();refreshStatus();
+        }catch(e){alert(e.message);}
+      }));
+      tr.appendChild(act);tb.appendChild(tr);
+    });
+    t.appendChild(tb);bd.appendChild(t);
+    const hint=document.createElement("div");hint.className="hint";hint.style.padding="10px 16px";
+    hint.textContent="Each row is a host name routed to a backend pool. The Advanced pages expose the same objects individually.";
+    bd.appendChild(hint);
+  }
+  card.appendChild(bd);c.appendChild(card);
+}
+
 /* ============================ authentication ============================ */
 let who={authenticated:false,needs_setup:false,username:"",admin_username:"admin"};
 function showLogin(setup){
@@ -821,6 +923,16 @@ async function renderOverview(){
     '<div class=stat><div class=k>acme.sh</div><div class=v style="font-size:13px">'+(st.acme_installed?'<span class="pill up">installed</span>':'<span class="pill down">missing</span>')+"</div></div>";
   c.appendChild(grid);
 
+  const quick=document.createElement("div");quick.className="card";
+  quick.innerHTML='<div class=hd><h2>Publish a service</h2><div class=sp></div></div>';
+  const qb=document.createElement("div");qb.className="bd";
+  qb.innerHTML='<p class=hint style="margin-bottom:12px">Map a public URL to a server behind it &mdash; '+
+    'the backend pool, condition, rule, listener and certificate are created for you.</p>';
+  qb.appendChild(btn("Publish a service","pri",()=>openWizard()));
+  qb.appendChild(document.createTextNode(" "));
+  qb.appendChild(btn("All services","",()=>{location.hash="#/p:services";}));
+  quick.appendChild(qb);c.appendChild(quick);
+
   const cc=document.createElement("div");cc.className="card";
   cc.innerHTML='<div class=hd><h2>Certificates</h2><div class=sp></div></div>';
   cc.querySelector(".hd").appendChild(btn("Renew all now","sm",async()=>{
@@ -867,30 +979,31 @@ async function renderOverview(){
 
 /* ============================ shell ============================ */
 const NAV=[
+ ["p:services","Services"],
  ["","Overview",null],
- ["grp","HAPROXY"],
- ["haproxy/frontends","Public Services"],
- ["haproxy/backends","Backend Pools"],
- ["haproxy/servers","Real Servers"],
- ["haproxy/conditions","Conditions"],
- ["haproxy/rules","Rules"],
- ["haproxy/healthchecks","Health Monitors"],
- ["s:haproxy-settings","Settings"],
- ["grp","ACME / LET'S ENCRYPT"],
+ ["grp","CERTIFICATES"],
  ["acme/certificates","Certificates"],
- ["acme/accounts","Accounts"],
+ ["acme/accounts","ACME Accounts"],
  ["acme/challenges","Challenge Types"],
- ["acme/automations","Automations"],
- ["s:acme-settings","Settings"],
  ["grp","HIGH AVAILABILITY"],
  ["s:keepalived","Keepalived"],
  ["s:sync","Sync"],
  ["grp","SYSTEM"],
  ["p:backup","Backup & Export"],
  ["p:admin","Administrator login"],
+ ["grp","ADVANCED"],
+ ["haproxy/frontends","Public Services"],
+ ["haproxy/backends","Backend Pools"],
+ ["haproxy/servers","Real Servers"],
+ ["haproxy/conditions","Conditions"],
+ ["haproxy/rules","Rules"],
+ ["haproxy/healthchecks","Health Monitors"],
+ ["s:haproxy-settings","HAProxy Settings"],
+ ["acme/automations","ACME Automations"],
+ ["s:acme-settings","ACME Settings"],
 ];
 /* pages with a hand-written renderer (neither CRUD nor a settings form) */
-const P={backup:renderBackup,admin:renderAdmin};
+const P={services:renderServices,backup:renderBackup,admin:renderAdmin};
 function buildNav(){
   const n=$("#navlinks");
   NAV.forEach(([key,label])=>{
@@ -952,6 +1065,7 @@ function boot(){
   await refreshWho();
   if(who.needs_setup){showLogin(true);return;}      // first run: create an administrator
   if(!who.authenticated){showLogin(false);return;}
+  if(!location.hash)location.hash="#/p:services";   // land on the simple view
   boot();
 })();
 </script>
