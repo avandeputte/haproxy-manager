@@ -95,6 +95,23 @@ pre{font:12px/1.5 var(--mono);background:#0f191e;color:#d5e2e0;padding:14px;bord
 .cklist label{display:flex;gap:8px;align-items:center;padding:3px 0;font-size:13px}
 .cklist .none{color:var(--mist);font-size:12px;padding:2px}
 
+/* ---- sign-in ---- */
+#login{position:fixed;inset:0;background:var(--petrol);display:none;align-items:center;justify-content:center;padding:24px;z-index:30}
+#login.show{display:flex}
+#loginbox{background:var(--card);border-radius:8px;padding:26px 28px;width:100%;max-width:380px;display:flex;flex-direction:column}
+#loginbox h2{font:600 17px var(--sans);margin-bottom:2px}
+#loginbox .hint{margin-bottom:18px}
+#loginbox label{font:600 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--mist);margin-bottom:5px}
+#loginbox input{padding:8px 10px;border:1px solid var(--hair);border-radius:4px;font:14px var(--sans);margin-bottom:14px;background:#fff;color:var(--ink)}
+#loginbox button{margin-top:4px}
+#loginbox .err{margin:12px 0 0;text-align:center}
+
+/* ---- user footer ---- */
+#nav .foot .who{font:12px var(--mono);color:#dfe8e6;overflow:hidden;text-overflow:ellipsis}
+#nav .foot .who small{display:block;color:#7d918f;font-size:10px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:3px}
+#nav .foot .lo{margin-top:9px;width:100%;background:#0f191e;border:1px solid #2c3e44;color:#c8d4d2;padding:5px;border-radius:4px;font-size:12px}
+#nav .foot .lo:hover{border-color:#4a6068;color:#fff}
+
 /* ---- modal ---- */
 #ovl{position:fixed;inset:0;background:rgba(15,25,30,.55);display:none;align-items:flex-start;justify-content:center;padding:6vh 16px;z-index:20}
 #ovl.show{display:flex}
@@ -123,10 +140,7 @@ pre{font:12px/1.5 var(--mono);background:#0f191e;color:#d5e2e0;padding:14px;bord
 <aside id="nav">
   <div class="brand">haproxy-manager<small id="brandhost">&nbsp;</small></div>
   <div id="navlinks"></div>
-  <div class="foot">
-    <label for="apikey">API key</label>
-    <input id="apikey" type="password" placeholder="optional" autocomplete="off">
-  </div>
+  <div class="foot" id="whofoot"></div>
 </aside>
 <div id="main">
   <div id="topbar">
@@ -135,6 +149,23 @@ pre{font:12px/1.5 var(--mono);background:#0f191e;color:#d5e2e0;padding:14px;bord
     <button class="btn pri" id="applybtn" title="Validate and write haproxy.cfg / keepalived.conf, then reload services">Apply</button>
   </div>
   <div id="content"></div>
+</div>
+
+<div id="login">
+  <form id="loginbox" autocomplete="on">
+    <h2 id="logintitle">Sign in</h2>
+    <p class="hint" id="loginintro">haproxy-manager</p>
+    <label for="lu">Username</label>
+    <input id="lu" name="username" autocomplete="username" autofocus>
+    <label for="lp">Password</label>
+    <input id="lp" name="password" type="password" autocomplete="current-password">
+    <div id="lp2wrap" hidden>
+      <label for="lp2">Repeat password</label>
+      <input id="lp2" type="password" autocomplete="new-password">
+    </div>
+    <button class="btn pri" id="lbtn" type="submit">Sign in</button>
+    <div class="err" id="lerr"></div>
+  </form>
 </div>
 
 <div id="ovl"><div id="dlg" role="dialog" aria-modal="true">
@@ -148,16 +179,18 @@ pre{font:12px/1.5 var(--mono);background:#0f191e;color:#d5e2e0;padding:14px;bord
 /* ============================ plumbing ============================ */
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-function getKey(){const m=document.cookie.match(/(?:^|; )ham_key=([^;]*)/);return m?decodeURIComponent(m[1]):"";}
-function setKey(v){document.cookie="ham_key="+encodeURIComponent(v)+"; path=/; max-age=31536000; samesite=strict";}
+/* The session cookie is set by /api/login and travels automatically. */
 async function api(path,method="GET",body){
-  const r=await fetch("/api/"+path,{method,
-    headers:Object.assign({"Content-Type":"application/json"},getKey()?{"X-API-Key":getKey()}:{}),
+  const r=await fetch("/api/"+path,{method,headers:{"Content-Type":"application/json"},
     body:body!==undefined?JSON.stringify(body):undefined});
-  if(r.status===401)throw new Error("Unauthorized -- set the API key in the sidebar.");
   const data=await r.json().catch(()=>({}));
+  if(r.status===401){showLogin();throw new Error(data.error||"Your session has expired -- sign in again.");}
   if(!r.ok)throw new Error(data.error||("HTTP "+r.status));
   return data;
+}
+function download(path){                       // let the browser save the response
+  const a=document.createElement("a");a.href="/api/"+path;a.download="";
+  document.body.appendChild(a);a.click();a.remove();
 }
 const lists={};                     // cache: "haproxy/servers" -> [...]
 async function list(path,fresh){ if(fresh||!lists[path])lists[path]=await api(path); return lists[path]; }
@@ -545,9 +578,11 @@ function apiKeyCard(){
   const card=document.createElement("div");card.className="card";
   card.innerHTML='<div class=hd><h2>This node</h2></div>';
   const bd=document.createElement("div");bd.className="bd";
-  bd.innerHTML='<p class=hint style="margin-bottom:12px">The API key protects this node\'s API and is required before the peer may push configuration here. Set a key on both nodes, then enter each node\'s key on the other under Peer API key.</p>';
+  bd.innerHTML='<p class=hint style="margin-bottom:12px">The API key is for machines, not people: the peer must present it before it may push configuration here, '+
+    'and scripts can use it as an <span class=mono>X-API-Key</span> header instead of signing in. Set a key on both nodes, then enter each node\'s key on the other under Peer API key. '+
+    'People sign in with the administrator login instead.</p>';
   const frm=document.createElement("div");frm.className="frm";
-  const f={k:"api_key",l:"API key",t:"password",h:"After saving, enter the same key in the sidebar field to keep using this UI"};
+  const f={k:"api_key",l:"API key",t:"password",h:"Required for peer sync -- generate a long random value"};
   api("local").then(loc=>{
     fieldRow(f,loc.api_key).forEach(el=>frm.appendChild(el));
     const foot=document.createElement("div");foot.style.marginTop="14px";
@@ -561,6 +596,136 @@ function apiKeyCard(){
   });
   card.appendChild(bd);
   return card;
+}
+
+/* ============================ authentication ============================ */
+let who={authenticated:false,needs_setup:false,username:"",admin_username:"admin"};
+function showLogin(setup){
+  const s=setup!==undefined?setup:who.needs_setup;
+  $("#logintitle").textContent=s?"Create an administrator":"Sign in";
+  $("#loginintro").textContent=s
+    ? "This node has no administrator yet. Choose the credentials you will use to sign in."
+    : "haproxy-manager on "+location.host;
+  $("#lp2wrap").hidden=!s;
+  $("#lp").autocomplete=s?"new-password":"current-password";
+  $("#lbtn").textContent=s?"Create and sign in":"Sign in";
+  $("#lerr").textContent="";
+  if(!s)$("#lu").value=who.admin_username||"admin";
+  $("#login").classList.add("show");
+  setTimeout(()=>{($("#lu").value?$("#lp"):$("#lu")).focus();},30);
+}
+function hideLogin(){$("#login").classList.remove("show");$("#lp").value="";$("#lp2").value="";}
+async function refreshWho(){
+  try{who=await api("whoami");}catch(e){/* whoami is public; ignore */}
+  const f=$("#whofoot");f.innerHTML="";
+  if(who.authenticated){
+    const d=document.createElement("div");d.className="who";
+    d.innerHTML="<small>Signed in as</small>"+esc(who.username);
+    const b=document.createElement("button");b.className="lo";b.textContent="Sign out";
+    b.onclick=async()=>{try{await api("logout","POST",{});}catch(e){}
+      who={authenticated:false,needs_setup:false,username:"",admin_username:who.admin_username};
+      showLogin(false);};
+    f.appendChild(d);f.appendChild(b);
+  }else if(who.needs_setup){
+    const d=document.createElement("div");d.className="who";
+    d.innerHTML="<small>Security</small>no administrator";
+    f.appendChild(d);
+  }
+  return who;
+}
+$("#loginbox").addEventListener("submit",async e=>{
+  e.preventDefault();
+  const err=$("#lerr"),b=$("#lbtn"),setup=!$("#lp2wrap").hidden;
+  const u=$("#lu").value.trim(),p=$("#lp").value;
+  if(setup&&p!==$("#lp2").value){err.textContent="The two passwords do not match.";return;}
+  b.disabled=true;err.textContent="";
+  try{
+    await api(setup?"setup":"login","POST",{username:u,password:p});
+    hideLogin();await refreshWho();boot();
+  }catch(ex){err.textContent=ex.message;}
+  b.disabled=false;
+});
+
+/* ============================ backup / export ============================ */
+async function renderBackup(){
+  const c=$("#content");c.innerHTML="";
+
+  const files=document.createElement("div");files.className="card";
+  files.innerHTML='<div class=hd><h2>Generated configuration files</h2></div>';
+  const fb=document.createElement("div");fb.className="bd";
+  fb.innerHTML='<p class=hint style="margin-bottom:14px">The files this configuration renders to, exactly as Apply would write them. '+
+    'Downloading does not change anything on the node.</p>';
+  const row=document.createElement("div");row.style.display="flex";row.style.gap="10px";row.style.flexWrap="wrap";
+  row.appendChild(btn("Download haproxy.cfg","pri",()=>download("export/haproxy.cfg")));
+  row.appendChild(btn("Download keepalived.conf","",()=>download("export/keepalived.conf")));
+  row.appendChild(btn("View haproxy.cfg","",async()=>{const p=await api("preview");showText("haproxy.cfg (preview)",p.haproxy);}));
+  fb.appendChild(row);files.appendChild(fb);c.appendChild(files);
+
+  const bk=document.createElement("div");bk.className="card";
+  bk.innerHTML='<div class=hd><h2>Configuration backup</h2></div>';
+  const bb=document.createElement("div");bb.className="bd";
+  bb.innerHTML='<p class=hint style="margin-bottom:14px">A JSON backup of everything the UI manages: Real Servers, Backend Pools, '+
+    'Public Services, Conditions, Rules, Health Monitors, HAProxy Settings and all ACME objects. '+
+    'Node-local settings (Keepalived, Sync, the login and the API key) and private keys are <b>not</b> included, '+
+    'so the file is safe to copy between nodes.</p>';
+  const brow=document.createElement("div");brow.style.display="flex";brow.style.gap="10px";brow.style.alignItems="center";brow.style.flexWrap="wrap";
+  brow.appendChild(btn("Download backup","pri",()=>download("export/config")));
+  const file=document.createElement("input");file.type="file";file.accept=".json,application/json";file.style.fontSize="13px";
+  const msg=document.createElement("div");msg.className="hint";msg.style.marginTop="12px";
+  brow.appendChild(file);
+  brow.appendChild(btn("Restore","warn",async()=>{
+    const f=file.files&&file.files[0];
+    if(!f){msg.textContent="Choose a backup file first.";return;}
+    if(!confirm("Restore \""+f.name+"\"?\n\nThis replaces every Real Server, Backend Pool, Public Service, "+
+                "Condition, Rule, Health Monitor and ACME object on this node. "+
+                "Keepalived, Sync and the login are kept.\n\nNothing is applied until you press Apply."))return;
+    msg.textContent="Restoring...";
+    try{
+      const r=await api("import/config","POST",JSON.parse(await f.text()));
+      const parts=[];
+      Object.keys(r.restored||{}).forEach(sec=>{
+        const counts=r.restored[sec];
+        Object.keys(counts).sort().forEach(k=>{if(counts[k])parts.push(counts[k]+" "+k);});
+      });
+      msg.innerHTML="Restored "+(parts.join(", ")||"nothing")+
+        (r.source?" (from "+esc(r.source)+(r.exported?", "+esc(r.exported):"")+")":"")+
+        ". <b>Review the objects, then press Apply.</b>";
+      refreshStatus();
+    }catch(e){msg.textContent="Restore failed: "+e.message;}
+  }));
+  bb.appendChild(brow);bb.appendChild(msg);bk.appendChild(bb);c.appendChild(bk);
+}
+
+/* ============================ admin login page ============================ */
+async function renderAdmin(){
+  const c=$("#content");c.innerHTML="";
+  const card=document.createElement("div");card.className="card";
+  card.innerHTML='<div class=hd><h2>Administrator login</h2></div>';
+  const bd=document.createElement("div");bd.className="bd";
+  bd.innerHTML='<p class=hint style="margin-bottom:14px">The username and password used to sign in to this UI. '+
+    'Node-local: set it separately on each node, it is never synced. The password is stored as a PBKDF2-SHA256 hash.</p>';
+  const frm=document.createElement("div");frm.className="frm";
+  [{k:"username",l:"Username",t:"text"},
+   {k:"current",l:"Current password",t:"password"},
+   {k:"new",l:"New password",t:"password",h:"At least 8 characters"},
+   {k:"new2",l:"Repeat new password",t:"password"}]
+    .forEach(f=>fieldRow(f,f.k==="username"?(who.username||who.admin_username):"").forEach(el=>frm.appendChild(el)));
+  bd.appendChild(frm);
+  const foot=document.createElement("div");foot.style.marginTop="16px";
+  const msg=document.createElement("span");msg.className="hint";msg.style.marginLeft="10px";
+  foot.appendChild(btn("Save","pri",async()=>{
+    const u=document.getElementById("f_username").value.trim();
+    const cur=document.getElementById("f_current").value;
+    const nw=document.getElementById("f_new").value;
+    if(nw!==document.getElementById("f_new2").value){msg.textContent="The two new passwords do not match.";return;}
+    try{
+      await api("password","POST",{username:u,current:cur,new:nw});
+      msg.textContent="Saved. Your session was renewed.";
+      ["current","new","new2"].forEach(k=>{document.getElementById("f_"+k).value="";});
+      await refreshWho();
+    }catch(e){msg.textContent=e.message;}
+  }));
+  foot.appendChild(msg);bd.appendChild(foot);card.appendChild(bd);c.appendChild(card);
 }
 
 /* ============================ certificate status ============================ */
@@ -720,7 +885,12 @@ const NAV=[
  ["grp","HIGH AVAILABILITY"],
  ["s:keepalived","Keepalived"],
  ["s:sync","Sync"],
+ ["grp","SYSTEM"],
+ ["p:backup","Backup & Export"],
+ ["p:admin","Administrator login"],
 ];
+/* pages with a hand-written renderer (neither CRUD nor a settings form) */
+const P={backup:renderBackup,admin:renderAdmin};
 function buildNav(){
   const n=$("#navlinks");
   NAV.forEach(([key,label])=>{
@@ -736,6 +906,7 @@ async function route(){
   $("#pagetitle").textContent=entry[1];
   try{
     if(key.startsWith("s:"))await renderSettings(key.slice(2));
+    else if(key.startsWith("p:"))await P[key.slice(2)]();
     else if(E[key])await renderEntity(key);
     else await renderOverview();
   }catch(e){
@@ -771,11 +942,18 @@ async function doApply(){
 
 buildNav();
 $("#applybtn").onclick=doApply;
-$("#apikey").value=getKey();
-$("#apikey").addEventListener("change",e=>{setKey(e.target.value);refreshStatus();route();});
 window.addEventListener("hashchange",route);
-route();refreshStatus();
-setInterval(refreshStatus,10000);
+let ticking=false;
+function boot(){
+  route();refreshStatus();
+  if(!ticking){ticking=true;setInterval(refreshStatus,10000);}
+}
+(async function start(){
+  await refreshWho();
+  if(who.needs_setup){showLogin(true);return;}      // first run: create an administrator
+  if(!who.authenticated){showLogin(false);return;}
+  boot();
+})();
 </script>
 </body>
 </html>

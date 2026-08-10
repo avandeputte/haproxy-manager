@@ -34,6 +34,10 @@ services:
     environment:
       HAM_LISTEN: "0.0.0.0"
       HAM_PORT: "8080"
+      # Seed the UI login on first start. Without these the UI asks you to
+      # create an administrator on your first visit.
+      # HAM_ADMIN_USER: "admin"
+      # HAM_ADMIN_PASSWORD: "change-me-please"
       # HAM_DRY_RUN: "1"   # skip service reloads -- render/validate only
 
 volumes:

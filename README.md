@@ -70,15 +70,44 @@ UI is modeled on:
 | Real Servers, Backend Pools, Public Services | Keepalived (interface, VRID, priority, VIP) |
 | Conditions, Rules, Health Monitors | Sync peer URL / peer key |
 | HAProxy Settings | API key |
-| ACME accounts, challenges, certificates, automations | |
+| ACME accounts, challenges, certificates, automations | Administrator login |
 | Deployed certificate PEM files | |
+
+## Backup & Export
+
+**System → Backup & Export** covers two different jobs:
+
+- **Generated files** — download the `haproxy.cfg` and `keepalived.conf` this
+  configuration renders to, exactly as Apply would write them. Downloading
+  changes nothing on the node.
+- **Configuration backup** — a JSON file holding everything the UI manages
+  (Real Servers, Backend Pools, Public Services, Conditions, Rules, Health
+  Monitors, HAProxy Settings and every ACME object). Restoring replaces all of
+  those and leaves node-local settings — Keepalived, Sync, the login, the API
+  key — untouched, so the same file can seed a second node. Nothing is applied
+  until you press **Apply**, so you can review the result first.
+
+The backup deliberately contains **no secrets**: no API key, no login, and no
+private keys from the certificate directory. Certificates move between nodes
+over Sync, or are re-issued.
 
 ## Security
 
-- Set an **API key** on each node (High Availability → Sync → *This node*). It's
-  required for every `/api/` call and before a peer may push to this node. The
-  browser stores it in a cookie; enter it in the sidebar field. **Put the UI behind
-  TLS** (or an SSH tunnel / reverse proxy) — the key is a bearer token.
+- **Sign in with a username and password.** The installer creates the
+  administrator and prints the generated password (also written to
+  `/var/lib/haproxy-manager/admin-credentials.txt`, mode 0600); change it under
+  System → Administrator login. Passwords are stored only as a PBKDF2-SHA256
+  hash, the session is an HMAC-signed `HttpOnly` / `SameSite=Strict` cookie that
+  expires after 12 hours, and repeated failures lock that address out briefly.
+  The login is node-local — set it on each node.
+- The **API key** (High Availability → Sync → *This node*) is for machines, not
+  people: the peer must present it before it may push configuration here, and
+  scripts can send it as `X-API-Key` instead of signing in.
+- If no administrator exists yet, the UI asks you to create one on first visit —
+  and until you do, the API is unauthenticated. The installer sets one up, so
+  this only applies to a hand-rolled deployment.
+- **Put the UI behind TLS** (or an SSH tunnel / reverse proxy). Over plain HTTP
+  both the password and the session cookie cross the network in the clear.
 - The service runs as **root** because it writes `/etc/haproxy`, `/etc/keepalived`
   and reloads services. Restrict who can reach port 8080.
 
@@ -116,8 +145,10 @@ What it does:
   its own after a reboot once configured;
 - sets `net.ipv4/ipv6.ip_nonlocal_bind=1` in `/etc/sysctl.d/`, so HAProxy on the
   **passive** node can bind the shared VIP it does not currently hold;
-- generates a random API key on a fresh install, prints it, and stores it in
-  `/var/lib/haproxy-manager/api-key.txt` (mode 0600).
+- creates the administrator login (`admin` with a generated password) and a
+  random API key for peer sync, prints both, and stores them in
+  `/var/lib/haproxy-manager/admin-credentials.txt` and `api-key.txt` (mode 0600).
+  Updating an installation that predates the login creates one for it.
 
 Options — flags, or the equivalent environment variables:
 
@@ -127,6 +158,8 @@ Options — flags, or the equivalent environment variables:
 | `--listen` | `HAM_LISTEN` | `0.0.0.0` |
 | `--dest` | `HAM_DEST` | `/opt/haproxy-manager` |
 | `--repo` / `--ref` | `HAM_REPO` / `HAM_REF` | `avandeputte/haproxy-manager` / `main` |
+| `--admin-user` | `HAM_ADMIN_USER` | `admin` |
+| `--admin-password` | `HAM_ADMIN_PASSWORD` | random |
 | `--api-key` / `--no-api-key` | `HAM_API_KEY` | random |
 | `--skip-acme` | `HAM_SKIP_ACME` | off |
 | `--tarball` | `HAM_TARBALL` | — |
@@ -162,6 +195,9 @@ Then open `http://<node>:8080` and follow the same steps as above.
   the compose file has the block commented out.
 - **Capabilities.** Keepalived needs `NET_ADMIN`, `NET_BROADCAST` and `NET_RAW`
   (already in the compose file). Without them the VIP cannot be claimed.
+- **Login.** Set `HAM_ADMIN_USER` / `HAM_ADMIN_PASSWORD` to seed the
+  administrator on first start; otherwise the UI asks you to create one on your
+  first visit.
 - **State** lives in four volumes: `/var/lib/haproxy-manager` (config.json),
   `/var/lib/acme.sh` (ACME accounts + issued certs), `/etc/haproxy`
   (haproxy.cfg + deployed cert PEMs) and `/etc/keepalived`.
@@ -181,6 +217,14 @@ Build the image on its own with `docker build -t haproxy-manager .`; the
 `HAM_DATA_DIR` · `HAM_CERT_DIR` · `HAM_HAPROXY_CFG` · `HAM_KEEPALIVED_CFG` ·
 `HAM_ACME_HOME` · `HAM_ACME_SH` · `HAM_LISTEN` · `HAM_PORT` · `HAM_DRY_RUN=1`
 (skip `systemctl` calls, for development).
+
+The app also has a small maintenance CLI, used by the installer and the Docker
+entrypoint so neither has to reimplement password hashing:
+
+```bash
+python3 app.py show-admin                      # print the configured username
+printf '%s' "$PW" | python3 app.py set-admin admin -    # set the login (stdin)
+```
 
 ## Note
 

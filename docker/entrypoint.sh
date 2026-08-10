@@ -19,4 +19,12 @@ done
 [ -f "$ACME_HOME/account.conf" ] || cp -a /opt/acme.sh/account.conf "$ACME_HOME/account.conf" 2>/dev/null || true
 chmod 0755 "$ACME_HOME/acme.sh" 2>/dev/null || true
 
+# Optional: seed the UI login from the environment. Without it the first visit
+# to the UI asks for a username and password.
+if [ -n "${HAM_ADMIN_PASSWORD:-}" ] && [ -z "$(python3 /opt/haproxy-manager/app.py show-admin 2>/dev/null)" ]; then
+    printf '%s' "$HAM_ADMIN_PASSWORD" |
+        python3 /opt/haproxy-manager/app.py set-admin "${HAM_ADMIN_USER:-admin}" - >/dev/null &&
+        echo "seeded administrator '${HAM_ADMIN_USER:-admin}' from the environment"
+fi
+
 exec "$@"

@@ -35,6 +35,7 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -111,6 +112,10 @@ DEFAULT_CONFIG = {
     "local": {
         # node-local settings -- never overwritten by sync
         "api_key": "",
+        # UI login. The password is only ever stored as a PBKDF2 hash.
+        "admin": {"username": "admin", "salt": "", "hash": "", "iterations": 0, "updated": ""},
+        "session_secret": "",      # HMAC key for session cookies; rotating it logs everyone out
+        "session_hours": 12,
         "keepalived": {
             "enabled": False,
             "interface": "eth0",
@@ -270,15 +275,200 @@ def parse_domains(cert):
 # auth
 # --------------------------------------------------------------------------
 
+# --------------------------------------------------------------------------
+# authentication: interactive login for people, API key for the peer/scripts
+# --------------------------------------------------------------------------
+
+PBKDF2_ITERATIONS = 240000
+SESSION_COOKIE = "ham_session"
+_login_fails = {}       # remote address -> [failure count, locked-until timestamp]
+LOGIN_MAX_FAILS = 5
+LOGIN_LOCK_SECONDS = 60
+
+
+def hash_password(password, salt=None, iterations=PBKDF2_ITERATIONS):
+    salt = salt or os.urandom(16).hex()
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(salt), iterations)
+    return {"salt": salt, "hash": dk.hex(), "iterations": iterations}
+
+
+def verify_password(password, admin):
+    if not (admin.get("hash") and admin.get("salt")):
+        return False
+    got = hash_password(password, admin["salt"], admin.get("iterations") or PBKDF2_ITERATIONS)
+    return hmac.compare_digest(got["hash"], admin["hash"])
+
+
+def set_admin(cfg, username, password):
+    rec = hash_password(password)
+    rec["username"] = (username or "admin").strip() or "admin"
+    rec["updated"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    cfg["local"]["admin"] = rec
+    return cfg
+
+
+def needs_setup(cfg):
+    """True while no administrator exists -- the UI then offers to create one."""
+    return not (cfg["local"].get("admin") or {}).get("hash")
+
+
+def session_secret(cfg):
+    secret = cfg["local"].get("session_secret") or ""
+    if not secret:
+        secret = os.urandom(32).hex()
+        cfg["local"]["session_secret"] = secret
+        save_config(cfg)
+    return secret
+
+
+def make_session(cfg, username):
+    exp = int(time.time()) + max(1, int(cfg["local"].get("session_hours") or 12)) * 3600
+    payload = "%s|%d" % (username, exp)
+    sig = hmac.new(session_secret(cfg).encode(), payload.encode(), hashlib.sha256).hexdigest()
+    return base64.urlsafe_b64encode(("%s|%s" % (payload, sig)).encode()).decode()
+
+
+def read_session(cfg, token):
+    """Return the username carried by a valid, unexpired token, else None."""
+    try:
+        raw = base64.urlsafe_b64decode(token.encode()).decode()
+        username, exp, sig = raw.rsplit("|", 2)
+    except Exception:
+        return None
+    payload = "%s|%s" % (username, exp)
+    want = hmac.new(session_secret(cfg).encode(), payload.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(want, sig):
+        return None
+    try:
+        if int(exp) < time.time():
+            return None
+    except ValueError:
+        return None
+    return username
+
+
+def current_user(cfg=None):
+    cfg = cfg or load_config()
+    token = request.cookies.get(SESSION_COOKIE, "")
+    return read_session(cfg, token) if token else None
+
+
+PUBLIC_PATHS = {"/api/login", "/api/whoami", "/api/setup"}
+
+
 @app.before_request
 def _auth():
     if not request.path.startswith("/api/"):
         return
+    if request.path in PUBLIC_PATHS:
+        return
     if request.path == "/api/sync/receive":
-        return  # enforced inside the handler (always requires a key)
-    key = load_config()["local"].get("api_key", "")
-    if key and not hmac.compare_digest(key, request.headers.get("X-API-Key", "")):
-        abort(401)
+        return  # enforced inside the handler (always requires the API key)
+
+    cfg = load_config()
+    if needs_setup(cfg) and not cfg["local"].get("api_key"):
+        return  # first run: no administrator yet, nothing to check against
+
+    if current_user(cfg):
+        return
+    key = cfg["local"].get("api_key", "")
+    if key and hmac.compare_digest(key, request.headers.get("X-API-Key", "")):
+        return
+    abort(401)
+
+
+@app.get("/api/whoami")
+def api_whoami():
+    cfg = load_config()
+    return jsonify({
+        "authenticated": bool(current_user(cfg)),
+        "username": current_user(cfg) or "",
+        "needs_setup": needs_setup(cfg),
+        "admin_username": (cfg["local"].get("admin") or {}).get("username", "admin"),
+    })
+
+
+def _login_ok(cfg, username, resp_body):
+    resp = jsonify(resp_body)
+    resp.set_cookie(
+        SESSION_COOKIE, make_session(cfg, username),
+        max_age=max(1, int(cfg["local"].get("session_hours") or 12)) * 3600,
+        httponly=True, samesite="Strict", secure=request.is_secure, path="/",
+    )
+    return resp
+
+
+@app.post("/api/setup")
+def api_setup():
+    """Create the first administrator. Only possible while none exists."""
+    cfg = load_config()
+    if not needs_setup(cfg):
+        return jsonify({"ok": False, "error": "an administrator already exists"}), 409
+    body = request.get_json(force=True) or {}
+    username = (body.get("username") or "").strip()
+    password = body.get("password") or ""
+    if not username:
+        return jsonify({"ok": False, "error": "a username is required"}), 400
+    if len(password) < 8:
+        return jsonify({"ok": False, "error": "the password must be at least 8 characters"}), 400
+    set_admin(cfg, username, password)
+    save_config(cfg)
+    return _login_ok(cfg, username, {"ok": True, "username": username})
+
+
+@app.post("/api/login")
+def api_login():
+    cfg = load_config()
+    ip = request.remote_addr or "?"
+    fails, until = _login_fails.get(ip, [0, 0])
+    if until > time.time():
+        return jsonify({"ok": False, "error": "too many failed attempts -- try again in %d seconds"
+                                              % int(until - time.time())}), 429
+
+    body = request.get_json(force=True) or {}
+    admin = cfg["local"].get("admin") or {}
+    username = (body.get("username") or "").strip()
+    ok = (hmac.compare_digest(username.encode(), admin.get("username", "").encode()) and
+          verify_password(body.get("password") or "", admin))
+    if not ok:
+        fails += 1
+        if fails >= LOGIN_MAX_FAILS:
+            _login_fails[ip] = [0, time.time() + LOGIN_LOCK_SECONDS]   # locked; counter restarts
+        else:
+            _login_fails[ip] = [fails, 0]
+        time.sleep(0.5)  # blunt the rate of online guessing
+        return jsonify({"ok": False, "error": "invalid username or password"}), 401
+
+    _login_fails.pop(ip, None)
+    return _login_ok(cfg, username, {"ok": True, "username": username})
+
+
+@app.post("/api/logout")
+def api_logout():
+    resp = jsonify({"ok": True})
+    resp.delete_cookie(SESSION_COOKIE, path="/")
+    return resp
+
+
+@app.post("/api/password")
+def api_password():
+    """Change the administrator username and/or password (session required)."""
+    cfg = load_config()
+    user = current_user(cfg)
+    if not user:
+        return jsonify({"ok": False, "error": "log in first"}), 401
+    body = request.get_json(force=True) or {}
+    admin = cfg["local"].get("admin") or {}
+    if not verify_password(body.get("current") or "", admin):
+        time.sleep(0.5)
+        return jsonify({"ok": False, "error": "the current password is not correct"}), 401
+    new = body.get("new") or ""
+    if len(new) < 8:
+        return jsonify({"ok": False, "error": "the new password must be at least 8 characters"}), 400
+    username = (body.get("username") or admin.get("username") or "admin").strip()
+    set_admin(cfg, username, new)
+    save_config(cfg)
+    return _login_ok(cfg, username, {"ok": True, "username": username})
 
 
 # --------------------------------------------------------------------------
@@ -1084,6 +1274,105 @@ def api_sync_receive():
 
 
 # --------------------------------------------------------------------------
+# export / import
+# --------------------------------------------------------------------------
+
+BACKUP_FORMAT = 1
+
+
+def _download(text, filename, mime="text/plain"):
+    return app.response_class(text, mimetype=mime, headers={
+        "Content-Disposition": 'attachment; filename="%s"' % filename,
+        "Cache-Control": "no-store",
+    })
+
+
+@app.get("/api/export/haproxy.cfg")
+def api_export_haproxy():
+    """The haproxy.cfg this configuration renders to, as a download."""
+    return _download(render_haproxy(load_config()), "haproxy.cfg")
+
+
+@app.get("/api/export/keepalived.conf")
+def api_export_keepalived():
+    cfg = load_config()
+    if not cfg["local"]["keepalived"].get("enabled"):
+        return _download("# Keepalived is disabled on this node.\n", "keepalived.conf")
+    return _download(render_keepalived(cfg), "keepalived.conf")
+
+
+@app.get("/api/export/config")
+def api_export_config():
+    """Everything the UI manages, as a restorable JSON backup.
+
+    Node-local settings (Keepalived, sync target, API key, login) and the
+    private keys under the certificate directory are deliberately left out: a
+    backup should be safe to copy around, and node-local settings differ per
+    node by design.
+    """
+    cfg = load_config()
+    payload = {
+        "format": BACKUP_FORMAT,
+        "exported": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "source": socket.gethostname(),
+        "config": {"haproxy": cfg["haproxy"], "acme": cfg["acme"]},
+    }
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    return _download(json.dumps(payload, indent=2) + "\n",
+                     "haproxy-manager-%s-%s.json" % (socket.gethostname(), stamp),
+                     "application/json")
+
+
+def _count_objects(section):
+    return {k: len(v) for k, v in section.items() if isinstance(v, list)}
+
+
+@app.post("/api/import/config")
+def api_import_config():
+    """Restore a backup. Replaces the shared objects, keeps node-local settings.
+
+    Nothing is applied: the caller reviews the result and presses Apply.
+    """
+    body = request.get_json(force=True, silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"ok": False, "error": "the file is not valid JSON"}), 400
+
+    incoming = body.get("config") if isinstance(body.get("config"), dict) else body
+    if not isinstance(incoming, dict) or not any(k in incoming for k in ("haproxy", "acme")):
+        return jsonify({"ok": False, "error":
+                        "not a haproxy-manager backup -- expected a \"haproxy\" or \"acme\" section"}), 400
+    fmt = body.get("format", BACKUP_FORMAT)
+    if isinstance(fmt, int) and fmt > BACKUP_FORMAT:
+        return jsonify({"ok": False, "error":
+                        "this backup was written by a newer version (format %s)" % fmt}), 400
+
+    with _lock:
+        cfg = load_config()
+        restored = {}
+        for section in ("haproxy", "acme"):
+            part = incoming.get(section)
+            if not isinstance(part, dict):
+                continue
+            for coll in VALID_COLLECTIONS[section]:
+                if coll in part and not isinstance(part[coll], list):
+                    return jsonify({"ok": False, "error":
+                                    "%s/%s should be a list" % (section, coll)}), 400
+            cfg[section] = _merge_defaults(copy.deepcopy(part), DEFAULT_CONFIG[section])
+            restored[section] = _count_objects(cfg[section])
+        # Anything without an id would be invisible to the CRUD endpoints.
+        for section in ("haproxy", "acme"):
+            for coll in VALID_COLLECTIONS[section]:
+                for item in cfg[section].get(coll, []):
+                    if not item.get("id"):
+                        item["id"] = str(uuid.uuid4())
+        save_config(cfg)
+
+    return jsonify({"ok": True, "restored": restored, "source": body.get("source", ""),
+                    "exported": body.get("exported", ""),
+                    "note": "Review the imported objects, then press Apply."})
+
+
+# --------------------------------------------------------------------------
 # static
 # --------------------------------------------------------------------------
 
@@ -1092,7 +1381,40 @@ def index():
     return send_from_directory(STATIC_DIR, "index.html")
 
 
+def _cli(argv):
+    """Small maintenance CLI so installers do not reimplement the hashing.
+
+        app.py set-admin <username> <password>   create/replace the UI login
+        app.py set-admin <username> -            read the password from stdin
+        app.py show-admin                        print the configured username
+    """
+    cmd = argv[0]
+    if cmd == "set-admin":
+        if len(argv) != 3:
+            print("usage: app.py set-admin <username> <password|->", file=sys.stderr)
+            return 2
+        # "-" keeps the password out of the process list.
+        password = sys.stdin.read().rstrip("\n") if argv[2] == "-" else argv[2]
+        if len(password) < 8:
+            print("the password must be at least 8 characters", file=sys.stderr)
+            return 1
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        cfg = load_config()
+        set_admin(cfg, argv[1], password)
+        save_config(cfg)
+        print("administrator '%s' set" % cfg["local"]["admin"]["username"])
+        return 0
+    if cmd == "show-admin":
+        admin = load_config()["local"].get("admin") or {}
+        print(admin.get("username", "") if admin.get("hash") else "")
+        return 0
+    print("unknown command: %s" % cmd, file=sys.stderr)
+    return 2
+
+
 if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        sys.exit(_cli(sys.argv[1:]))
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     if not CONF_PATH.exists():
         save_config(load_config())

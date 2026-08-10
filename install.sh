@@ -83,8 +83,10 @@ Options (or the equivalent environment variable):
   --port    <port>         HAM_PORT       UI/API port              (8080)
   --listen  <address>      HAM_LISTEN     UI/API bind address      (0.0.0.0)
   --dest    <dir>          HAM_DEST       install directory        (/opt/haproxy-manager)
-  --api-key <key>          HAM_API_KEY    API key for this node (random if unset)
-  --no-api-key                            leave the API unauthenticated
+  --admin-user <name>      HAM_ADMIN_USER      UI login name       (admin)
+  --admin-password <pw>    HAM_ADMIN_PASSWORD  UI password (random if unset)
+  --api-key <key>          HAM_API_KEY    API key for peer sync (random if unset)
+  --no-api-key                            do not set an API key
   --skip-acme              HAM_SKIP_ACME  do not install acme.sh
   --tarball <url|path>     HAM_TARBALL    install from this tarball instead of GitHub
                            GITHUB_TOKEN   token for a private repository
@@ -117,6 +119,8 @@ parse_args() {
             --tarball)    TARBALL="${2:?--tarball needs a value}"; shift 2 ;;
             --api-key)    HAM_API_KEY="${2:?--api-key needs a value}"; shift 2 ;;
             --no-api-key) HAM_API_KEY=""; shift ;;
+            --admin-user) HAM_ADMIN_USER="${2:?--admin-user needs a value}"; shift 2 ;;
+            --admin-password) HAM_ADMIN_PASSWORD="${2:?--admin-password needs a value}"; shift 2 ;;
             --skip-acme)  SKIP_ACME=1; shift ;;
             -h|--help)    usage; exit 0 ;;
             *)            die "unknown option: $1 (try --help)" ;;
@@ -242,7 +246,7 @@ do_uninstall() {
     echo "     - $DEST"
     echo "     - /etc/sysctl.d/60-haproxy-manager.conf"
     if [ "$PURGE" = "1" ]; then
-        echo "     - $DATA  (config.json, API key -- ALL settings)"
+        echo "     - $DATA  (config.json, login, API key -- ALL settings)"
         echo "     - $CERTS (deployed certificate PEMs)"
     else
         echo "   Kept: $DATA and $CERTS (use --purge to delete those too)."
@@ -395,24 +399,22 @@ EOF
     systemctl enable haproxy    >/dev/null 2>&1 || warn "could not enable haproxy.service"
 }
 
-seed_api_key() {
-    # Only ever touched on a fresh install -- an existing config.json is left alone.
-    API_KEY=""
-    HAD_KEY=0
+seed_credentials() {
+    API_KEY=""; HAD_KEY=0; ADMIN_PW=""; ADMIN_USER=""
+
+    # -- API key: for the peer and for scripted API access, not for people.
+    #    Only ever seeded on a fresh install; an existing one is left alone.
     if [ -e "$DATA/config.json" ]; then
         python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1])).get("local",{}).get("api_key") else 1)' \
             "$DATA/config.json" 2>/dev/null && HAD_KEY=1
-        return
-    fi
-
-    if [ "${HAM_API_KEY+set}" = "set" ]; then
-        API_KEY="$HAM_API_KEY"                     # may be empty => leave the API open
     else
-        API_KEY="$(openssl rand -hex 24)"
-    fi
-    [ -n "$API_KEY" ] || return
-
-    python3 - "$DATA/config.json" "$API_KEY" <<'EOF'
+        if [ "${HAM_API_KEY+set}" = "set" ]; then
+            API_KEY="$HAM_API_KEY"                 # may be empty => no API key
+        else
+            API_KEY="$(openssl rand -hex 24)"
+        fi
+        if [ -n "$API_KEY" ]; then
+            python3 - "$DATA/config.json" "$API_KEY" <<'EOF'
 import json, os, sys
 path, key = sys.argv[1], sys.argv[2]
 # app.py merges defaults into whatever it finds, so a partial file is enough.
@@ -420,8 +422,32 @@ with open(path, "w") as f:
     json.dump({"local": {"api_key": key}}, f)
 os.chmod(path, 0o600)
 EOF
-    printf '%s\n' "$API_KEY" > "$DATA/api-key.txt"
-    chmod 0600 "$DATA/api-key.txt"
+            printf '%s\n' "$API_KEY" > "$DATA/api-key.txt"
+            chmod 0600 "$DATA/api-key.txt"
+        fi
+    fi
+
+    # -- UI login. Also covers upgrades from a version that only had an API key.
+    ADMIN_USER="$(HAM_DATA_DIR="$DATA" python3 "$DEST/app.py" show-admin 2>/dev/null || true)"
+    if [ -n "$ADMIN_USER" ]; then
+        return 0                                    # an administrator already exists
+    fi
+    ADMIN_USER="${HAM_ADMIN_USER:-admin}"
+    if [ -n "${HAM_ADMIN_PASSWORD:-}" ]; then
+        ADMIN_PW="$HAM_ADMIN_PASSWORD"
+    else
+        ADMIN_PW="$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | cut -c1-20)"
+    fi
+    # Piped, not passed as an argument: arguments are visible in the process list.
+    if printf '%s' "$ADMIN_PW" | HAM_DATA_DIR="$DATA" python3 "$DEST/app.py" set-admin "$ADMIN_USER" - >/dev/null; then
+        log "Created the administrator login for user '$ADMIN_USER'"
+        { printf 'username: %s\npassword: %s\n' "$ADMIN_USER" "$ADMIN_PW"; } > "$DATA/admin-credentials.txt"
+        chmod 0600 "$DATA/admin-credentials.txt"
+    else
+        ADMIN_PW=""
+        warn "Could not create the administrator login -- the UI will ask you to create one on first visit."
+    fi
+    return 0
 }
 
 install_service() {
@@ -479,13 +505,23 @@ summary() {
     echo
     printf '%s>> haproxy-manager is running at http://%s:%s%s\n' "$C_B" "$ip" "$PORT" "$C_0"
     echo
+    if [ -n "${ADMIN_PW:-}" ]; then
+        printf '   Sign in with   username %s%s%s\n' "$C_B" "${ADMIN_USER:-admin}" "$C_0"
+        printf '                  password %s%s%s\n' "$C_B" "$ADMIN_PW" "$C_0"
+        echo "   Also saved at $DATA/admin-credentials.txt -- change it under System > Administrator login."
+    elif [ -n "${ADMIN_USER:-}" ]; then
+        echo "   Sign in as '$ADMIN_USER' (password unchanged)."
+    else
+        warn "No administrator is configured -- the UI will ask you to create one on first visit."
+    fi
+    echo
     if [ -n "${API_KEY:-}" ]; then
-        printf '   API key for this node: %s%s%s\n' "$C_B" "$API_KEY" "$C_0"
-        echo "   Paste it into the sidebar field to use the UI. Also saved at $DATA/api-key.txt."
+        printf '   API key (peer sync / scripts): %s%s%s\n' "$C_B" "$API_KEY" "$C_0"
+        echo "   Also saved at $DATA/api-key.txt. People sign in with the login above instead."
     elif [ "${HAD_KEY:-0}" = "1" ]; then
         echo "   API key: unchanged (already set on this node)."
     else
-        warn "No API key is set -- anyone who can reach port $PORT controls this node."
+        warn "No API key is set -- the peer cannot push configuration to this node."
         echo "   Set one under High Availability > Sync > This node."
     fi
     [ "$ACME_OK" = "1" ] || warn "acme.sh is missing -- certificate issuance will fail until it is installed."
@@ -517,7 +553,7 @@ main() {
     install_acme
     install_app
     configure_system
-    seed_api_key
+    seed_credentials
     install_service
     wait_for_ui || true
     summary
