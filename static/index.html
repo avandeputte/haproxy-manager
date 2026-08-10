@@ -31,6 +31,12 @@ button{font:inherit;cursor:pointer}
 #nav .brand{padding:18px 16px 14px;font:600 15px/1.3 var(--mono);color:#fff;letter-spacing:.02em;border-bottom:1px solid rgba(255,255,255,.08)}
 #nav .brand small{display:block;font-weight:400;color:#7d918f;font-size:11px;margin-top:2px}
 #nav .grp{font:600 10px/1 var(--mono);letter-spacing:.14em;color:#7d918f;padding:16px 16px 6px;text-transform:uppercase}
+#nav button.grp{display:flex;align-items:center;gap:7px;width:100%;background:none;border:0;text-align:left;
+  padding:14px 16px 8px;cursor:pointer;font:600 10px/1 var(--mono);letter-spacing:.14em;color:#7d918f;text-transform:uppercase}
+#nav button.grp:hover{color:#c8d4d2}
+#nav button.grp .caret{display:inline-block;width:8px;transition:transform .12s ease}
+#nav button.grp[aria-expanded=true] .caret{transform:rotate(90deg)}
+#nav button.grp .count{margin-left:auto;font-size:9px;opacity:.65}
 #nav a.item{display:block;padding:7px 16px;color:#c8d4d2;text-decoration:none;font-size:13px;border-left:3px solid transparent}
 #nav a.item:hover{background:var(--petrol-2)}
 #nav a.item.on{background:var(--petrol-2);color:#fff;border-left-color:var(--line)}
@@ -1503,7 +1509,7 @@ const NAV=[
  ["p:backup","Backup & Export"],
  ["p:admin","Administrator login"],
  ["p:updates","Version & updates"],
- ["grp","ADVANCED · HAPROXY"],
+ ["grp","ADVANCED · HAPROXY","collapse"],
  ["haproxy/frontends","Public Services"],
  ["haproxy/backends","Backend Pools"],
  ["haproxy/servers","Real Servers"],
@@ -1511,10 +1517,10 @@ const NAV=[
  ["haproxy/rules","Rules"],
  ["haproxy/healthchecks","Health Monitors"],
  ["s:haproxy-settings","Settings"],
- ["grp","ADVANCED · ACME"],
+ ["grp","ADVANCED · ACME","collapse"],
  ["acme/automations","Automations"],
  ["s:acme-settings","Settings"],
- ["grp","ADVANCED · KEEPALIVED"],
+ ["grp","ADVANCED · KEEPALIVED","collapse"],
  ["s:keepalived","Keepalived"],
  ["s:sync","Peer sync"],
 ];
@@ -1522,18 +1528,63 @@ const NAV=[
 const P={services:renderServices,stats:renderStats,backup:renderBackup,
          admin:renderAdmin,updates:renderUpdates,webui:renderWebui};
 let pageTimer=null;      // per-page refresh timer, cleared whenever we navigate
+/* Collapsed groups are remembered, so the nav stays how you left it. */
+function openGroups(){
+  try{return JSON.parse(localStorage.getItem("ham_nav_open")||"[]");}catch(e){return [];}
+}
+function setGroupOpen(label,on){
+  const cur=openGroups().filter(x=>x!==label);
+  if(on)cur.push(label);
+  try{localStorage.setItem("ham_nav_open",JSON.stringify(cur));}catch(e){}
+}
+function toggleGroup(head,on){
+  const body=head.nextElementSibling;
+  const open=on!==undefined?on:head.getAttribute("aria-expanded")!=="true";
+  head.setAttribute("aria-expanded",open?"true":"false");
+  body.hidden=!open;
+  setGroupOpen(head.dataset.group,open);
+}
 function buildNav(){
   const n=$("#navlinks");
-  NAV.forEach(([key,label])=>{
-    if(key==="grp"){const g=document.createElement("div");g.className="grp";g.textContent=label;n.appendChild(g);return;}
+  const remembered=openGroups();
+  let bucket=null;                       // where following items go
+  NAV.forEach(([key,label,opt])=>{
+    if(key==="grp"){
+      if(opt!=="collapse"){
+        const g=document.createElement("div");g.className="grp";g.textContent=label;
+        n.appendChild(g);bucket=null;return;
+      }
+      const head=document.createElement("button");
+      head.className="grp";head.type="button";head.dataset.group=label;
+      head.innerHTML='<span class=caret>&#9656;</span><span>'+esc(label)+"</span><span class=count></span>";
+      const body=document.createElement("div");body.className="grp-body";
+      head.setAttribute("aria-expanded","false");body.hidden=true;
+      head.onclick=()=>toggleGroup(head);
+      n.appendChild(head);n.appendChild(body);
+      bucket=body;
+      if(remembered.includes(label))toggleGroup(head,true);
+      return;
+    }
     const a=document.createElement("a");a.className="item";a.href="#/"+key;a.textContent=label;a.dataset.key=key;
-    n.appendChild(a);
+    (bucket||n).appendChild(a);
+    if(bucket){
+      const c=bucket.previousElementSibling.querySelector(".count");
+      c.textContent=bucket.querySelectorAll("a").length;
+    }
   });
 }
 async function route(){
   if(pageTimer){clearTimeout(pageTimer);pageTimer=null;}
   const key=location.hash.replace(/^#\//,"");
-  document.querySelectorAll("#nav a.item").forEach(a=>a.classList.toggle("on",a.dataset.key===key));
+  document.querySelectorAll("#nav a.item").forEach(a=>{
+    const on=a.dataset.key===key;
+    a.classList.toggle("on",on);
+    // a deep link into a collapsed group should not leave it hidden
+    if(on){
+      const body=a.closest(".grp-body");
+      if(body&&body.hidden)toggleGroup(body.previousElementSibling,true);
+    }
+  });
   const entry=NAV.find(x=>x[0]===key)||NAV[0];
   $("#pagetitle").textContent=entry[1];
   try{
