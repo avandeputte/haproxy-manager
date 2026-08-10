@@ -591,9 +591,32 @@ Two things worth knowing:
 
 - **Address peers by IP, not by name.** DNS resolution happens *before* any of
   the timeouts above start counting, so a slow or unavailable resolver stalls a
-  peer query for as long as `/etc/resolv.conf` allows — typically 5 seconds per
-  nameserver, twice. It is also the wrong dependency: the name may be published
-  by the very cluster that is in trouble.
+  peer query for as long as `/etc/resolv.conf` allows. It is also the wrong
+  dependency: the name may be published by the very cluster that is in trouble.
+
+  DNS is **not** cached on a stock Debian or Ubuntu server unless something is
+  installed to do it — `nsswitch.conf` says `hosts: files dns`, and glibc has no
+  cache of its own, so every lookup goes to the network. Measured against a
+  local DNS server: five lookups of one name produced ten queries (an A and an
+  AAAA each), and none was reused. The defaults are `timeout:5 attempts:2`, so a
+  nameserver that does not answer costs **10 seconds per lookup, every time** —
+  which is what `[Errno -3] Temporary failure in name resolution` is. A failure
+  is precisely the thing nothing can cache.
+
+  If you must use names, do one of these:
+
+  ```bash
+  # 1. put the cluster in /etc/hosts -- checked before DNS, always instant
+  printf '10.0.0.1 proxy1\n10.0.0.2 proxy2\n' >> /etc/hosts
+
+  # 2. or fail fast instead of hanging
+  printf 'options timeout:1 attempts:1\n' >> /etc/resolv.conf
+
+  # 3. or install a caching resolver, and check it is being used
+  apt-get install -y systemd-resolved && resolvectl statistics
+  ```
+
+  The Cluster page marks any peer that is addressed by name.
 - **Apply waits for the push.** With auto-sync on, Apply returns only once every
   peer has taken the configuration or timed out, so a wedged node can keep the
   button spinning for `HAM_PUSH_READ_TIMEOUT`. The rest of the UI stays

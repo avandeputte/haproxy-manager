@@ -1230,7 +1230,7 @@ function peersCard(peers,loc){
     const tb=document.createElement("tbody");
     peers.forEach(p=>{
       const tr=document.createElement("tr");
-      tr.innerHTML="<td>"+esc(p.name)+"</td><td class=mono>"+esc(p.url)+"</td>"+
+      tr.innerHTML="<td>"+esc(p.name)+"</td><td class=mono>"+esc(p.url)+byNameHint(p.url)+"</td>"+
         "<td>"+(p.has_key?(p.is_own_key?'<span class="pill down">this node\'s own key</span>'
                                        :'<span class="pill up">set</span>')+
             '<div class=sub>fingerprint <span class=mono>'+esc(p.key_fp)+"</span></div>"
@@ -1301,6 +1301,22 @@ function peersCard(peers,loc){
   foot.appendChild(msg);
   ob.appendChild(foot);opt.appendChild(ob);frag.appendChild(opt);
   return frag;
+}
+
+/* A peer addressed by name costs a DNS lookup on every health check, and
+   nothing caches it: glibc queries the resolver each time, and a resolver that
+   does not answer costs 10s (timeout 5s, 2 attempts) per query -- with DNS
+   often served by the very cluster being checked. */
+function isIpLiteral(host){
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(host)||host.includes(":");
+}
+function byNameHint(url){
+  let host="";
+  try{host=new URL(url).hostname;}catch(e){return "";}
+  if(!host||isIpLiteral(host.replace(/^\[|\]$/g,"")))return "";
+  return '<div class=sub title="DNS is not cached: every health check resolves this name again, '+
+         'and an unresponsive resolver costs about 10 seconds each time.">addressed by name &mdash; '+
+         'an IP address is steadier here</div>';
 }
 
 /* Health of every node, as seen from this one. */
