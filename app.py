@@ -523,6 +523,8 @@ def _auth():
 def api_whoami():
     cfg = load_config()
     return jsonify({
+        "version": VERSION,
+        "hostname": socket.gethostname(),
         "authenticated": bool(current_user(cfg)),
         "username": current_user(cfg) or "",
         "needs_setup": needs_setup(cfg),
@@ -1843,18 +1845,46 @@ def api_peer_test(pid):
         return jsonify({"ok": False, "error": "cannot reach %s: %s" % (url, e)})
 
     if r.status_code == 401:
+        # Identify it anyway: /api/whoami needs no key, so we can at least name
+        # the version, and the trimming fix only helps once THAT node has it.
+        detail = ""
+        try:
+            w = _requests.get(url + "/api/whoami", timeout=10,
+                              verify=bool(peer.get("verify_tls"))).json()
+            remote_v = w.get("version", "")
+            if not remote_v:
+                detail = (" That node does not report its version, so it predates 1.15 -- and it is "
+                          "the RECEIVING node that checks the key, so updating only this one changes "
+                          "nothing. Update it, or re-save its key there with no stray whitespace.")
+                raise StopIteration
+            detail = " That node is %s running %s." % (w.get("hostname", "?"), remote_v)
+            if version_tuple(remote_v) < version_tuple("1.14"):
+                detail += (" Keys are only trimmed of stray whitespace from 1.14 onwards, and it is "
+                           "the receiving node that checks the key -- update it, or re-save its key "
+                           "there with no leading or trailing spaces.")
+        except StopIteration:
+            pass
+        except Exception:
+            pass
         return jsonify({"ok": False, "error":
-                        "%s rejected this key. Open Cluster > This node on that node, press Show "
-                        "next to its API key, and paste it here -- they must match exactly." % url})
+                        "%s rejected this key. This entry must hold the key shown under "
+                        "Cluster > This node ON THAT NODE -- not this node's own key.%s"
+                        % (url, detail)})
+
     if r.status_code != 200:
         return jsonify({"ok": False, "error": "%s answered HTTP %s" % (url, r.status_code)})
     st = r.json()
-    note = ""
+    notes = []
     if stored != stored.strip():
-        note = "The stored key had surrounding whitespace; it was ignored for this test and is " \
-               "trimmed when saved."
+        notes.append("The stored key had surrounding whitespace; it is trimmed when saved.")
+    if st.get("hostname") == socket.gethostname():
+        notes.append("This entry points back at THIS node -- a node should not be its own peer.")
+    vips = [v.strip().split("/")[0] for v in (cfg["cluster"].get("vips") or "").splitlines() if v.strip()]
+    if (urlsplit(url).hostname or "") in vips:
+        notes.append("This URL is the virtual IP, so it reaches whichever node currently holds it "
+                     "-- possibly this one. Use the node's own address instead.")
     return jsonify({"ok": True, "hostname": st.get("hostname"), "version": st.get("version"),
-                    "role": st.get("role"), "peers": st.get("peers"), "note": note})
+                    "role": st.get("role"), "peers": st.get("peers"), "note": " ".join(notes)})
 
 
 def _query_peer(peer, timeout=6):
