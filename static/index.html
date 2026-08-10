@@ -1296,23 +1296,46 @@ async function loadKeepalivedDiag(){
   }catch(e){kaDiag=null;kaIfaceOptions=[];}
   return kaDiag;
 }
-/* Typing every other node's address on every node is the tedious part. */
+/* Unicast VRRP needs each node's real address. A DNS name is not enough: it
+   often points at the virtual IP, which moves between nodes. */
 function keepalivedFormExtra(frm){
   const ta=frm.querySelector("#f_unicast_peer");
   if(!ta)return;
   const wrap=document.createElement("div");wrap.style.marginTop="8px";
-  const msg=document.createElement("span");msg.className="hint";msg.style.marginLeft="10px";
+  const msg=document.createElement("div");msg.className="hint";msg.style.marginTop="6px";
   wrap.appendChild(btn("Fill from the peer list","sm",async()=>{
+    msg.textContent="Asking each node for the address on its VRRP interface...";
     try{
-      const peers=await api("peers");
-      const addrs=peers.filter(p=>p.enabled!==false)
-        .map(p=>{try{return new URL(p.url).hostname;}catch(e){return "";}}).filter(Boolean);
-      if(!addrs.length){msg.textContent="No peers are configured yet -- add them under Peer sync.";return;}
+      const r=await api("cluster/unicast");
+      const others=r.nodes.filter(n=>!n.self);
+      const addrs=others.filter(n=>n.address).map(n=>n.address);
+      if(!addrs.length){
+        msg.innerHTML="No usable addresses. "+
+          others.map(n=>esc(n.name)+": "+esc(n.warning||"no address")).join("<br>");
+        return;
+      }
       const have=ta.value.split("\n").map(l=>l.trim()).filter(Boolean);
       const add=addrs.filter(a=>!have.includes(a));
       ta.value=have.concat(add).join("\n")+"\n";
-      msg.textContent=add.length?("Added "+add.join(", ")+". Check they are addresses VRRP can reach.")
-                                :"Already listed.";
+      ta.dispatchEvent(new Event("input"));
+      msg.innerHTML=others.filter(n=>n.address)
+          .map(n=>"<span class=mono>"+esc(n.address)+"</span> &mdash; "+esc(n.name)+
+                  " <span class=sub>("+esc(n.how)+")</span>").join("<br>")+
+        others.filter(n=>n.warning).map(n=>'<div style="margin-top:6px">! '+esc(n.warning)+"</div>").join("");
+    }catch(e){msg.textContent=e.message;}
+  }));
+  wrap.appendChild(document.createTextNode(" "));
+  wrap.appendChild(btn("Set unicast on every node","warn",async()=>{
+    if(!confirm("Give every node its own unicast source address and the list of the others?\n\n"+
+                "Each node's address is asked of that node directly. Their existing unicast "+
+                "settings are replaced. Press Apply on each node afterwards."))return;
+    msg.textContent="Configuring every node...";
+    try{
+      const r=await api("cluster/unicast/apply","POST",{});
+      msg.innerHTML=(r.steps||[]).map(x=>"&#10003; "+esc(x)).join("<br>")+
+        (r.warnings||[]).map(w=>'<div style="margin-top:6px">! '+esc(w)+"</div>").join("")+
+        (r.note?'<div style="margin-top:6px">'+esc(r.note)+"</div>":"");
+      route();
     }catch(e){msg.textContent=e.message;}
   }));
   wrap.appendChild(msg);

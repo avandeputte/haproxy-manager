@@ -1748,6 +1748,15 @@ def api_setup_join():
     steps.append("reached %s (version %s, role %s)"
                  % (remote.get("hostname", target), remote.get("version", "?"), remote.get("role", "?")))
 
+    # The URL this node advertises must reach THIS node. A name pointing at the
+    # virtual IP sends everything to whichever node holds it instead.
+    my_url = (body.get("node_url") or "").strip().rstrip("/")
+    level, why = check_node_url(my_url, remote.get("vips") or [])
+    if level == "error":
+        return jsonify({"ok": False, "steps": steps, "error": why}), 400
+    if level == "warn":
+        steps.append("note: " + why)
+
     # 2. Give ourselves an identity the others can use, before it pushes here.
     with _lock:
         cfg = load_config()
@@ -1799,6 +1808,18 @@ def api_setup_join():
     except Exception as e:
         steps.append("push failed: %s" % e)
 
+    # Unicast addresses are node-local, so the push could not carry them: give
+    # this node and every other one their own source and peer list now.
+    if iface:
+        try:
+            res = apply_unicast_plan()
+            for line in res.get("steps", []) + res.get("warnings", []):
+                steps.append("unicast: " + line)
+            if not res.get("ok") and res.get("error"):
+                steps.append("unicast: " + res["error"])
+        except Exception as e:
+            steps.append("could not set the unicast peers automatically: %s" % e)
+
     with _lock:
         cfg = load_config()
         cfg["_meta"]["setup_complete"] = True
@@ -1840,6 +1861,9 @@ def api_peers():
         return jsonify({"error": "the peer's URL is required, e.g. http://10.0.0.2:8080"}), 400
     if "://" not in url:
         url = "http://" + url
+    level, why = check_node_url(url, cluster_vips(cfg))
+    if level == "error":
+        return jsonify({"error": why}), 400
     peer = {"id": str(uuid.uuid4()),
             "name": (body.get("name") or "").strip() or (urlsplit(url).hostname or "peer"),
             "url": url, "api_key": (body.get("api_key") or "").strip(),
@@ -1993,6 +2017,185 @@ def _node_summary(st):
         "certs_total": len(certs),
         "certs_bad": sum(1 for c in certs if c.get("status") in ("expired", "expiring", "placeholder", "missing")),
     }
+
+
+# --------------------------------------------------------------------------
+# unicast VRRP addresses: every node needs the others' real IPs
+# --------------------------------------------------------------------------
+
+def cluster_vips(cfg):
+    return [v.strip().split("/")[0] for v in (cfg["cluster"].get("vips") or "").splitlines() if v.strip()]
+
+
+def resolve_host(host):
+    """Every IPv4 address a name resolves to, in a stable order."""
+    if not host:
+        return []
+    try:
+        return sorted({ai[4][0] for ai in socket.getaddrinfo(host, None, socket.AF_INET)})
+    except OSError:
+        return []
+
+
+def own_addresses():
+    return {a.split("/")[0] for i in node_interfaces() for a in i["addresses"]}
+
+
+def check_node_url(url, vips):
+    """A node's URL must reach that node, not the address that moves."""
+    host = urlsplit(url).hostname or ""
+    ips = resolve_host(host)
+    if not ips:
+        return "warn", "%s does not resolve here; the other nodes may still be able to reach it." % host
+    hit = [ip for ip in ips if ip in (vips or [])]
+    if hit:
+        return "error", ("%s resolves to the virtual IP (%s). That address moves between nodes, so "
+                         "the others would reach whichever node currently holds it -- and this node "
+                         "would never receive anything. Use this node's own address or a name that "
+                         "resolves to it." % (host, ", ".join(hit)))
+    mine = own_addresses()
+    if not (set(ips) & mine):
+        return "warn", ("%s resolves to %s, which is not an address on this node. Make sure it "
+                        "reaches this node and not another." % (host, ", ".join(ips)))
+    return "ok", ""
+
+
+def local_vrrp_address(cfg):
+    """This node's own address on the interface that carries the virtual IP."""
+    iface = cfg["local"]["keepalived"].get("interface") or ""
+    vips = cluster_vips(cfg)
+    for i in node_interfaces():
+        if i["name"] != iface:
+            continue
+        for a in i["addresses"]:
+            ip = a.split("/")[0]
+            if ip not in vips:               # never advertise from the shared address
+                return ip
+    return ""
+
+
+def peer_vrrp_address(peer, vips, verify=None):
+    """The address to send this peer's VRRP to: (address, how, warning)."""
+    url = (peer.get("url") or "").rstrip("/")
+    host = urlsplit(url).hostname or ""
+
+    # Best source is the node itself: it knows which address its own VRRP
+    # interface carries. A name can point at the virtual IP, which moves.
+    if _requests is not None and peer.get("api_key"):
+        try:
+            r = _requests.get(url + "/api/keepalived/status",
+                              headers={"X-API-Key": (peer.get("api_key") or "").strip()},
+                              timeout=6, verify=bool(peer.get("verify_tls")))
+            if r.status_code == 200:
+                d = r.json()
+                for i in d.get("interfaces", []):
+                    if i.get("name") != d.get("interface"):
+                        continue
+                    for a in i.get("addresses", []):
+                        ip = a.split("/")[0]
+                        if ip not in vips:
+                            return ip, "%s reports it on %s" % (peer.get("name"), i["name"]), ""
+        except Exception:
+            pass
+
+    ips = resolve_host(host)
+    usable = [ip for ip in ips if ip not in vips]
+    if usable:
+        warn = ""
+        if len(ips) != len(usable):
+            warn = ("%s also resolves to the virtual IP, which moves between nodes -- "
+                    "using %s instead." % (host, usable[0]))
+        return usable[0], "%s resolves to it" % host, warn
+    if ips:
+        return "", "", ("%s resolves only to the virtual IP (%s), which cannot be a unicast peer. "
+                        "Give this node's own address." % (host, ", ".join(ips)))
+    return "", "", "could not resolve %s" % (host or url)
+
+
+def unicast_plan(cfg):
+    """Which address every node should use, and who each should talk to."""
+    vips = cluster_vips(cfg)
+    nodes = []
+    me = local_vrrp_address(cfg)
+    nodes.append({"self": True, "name": socket.gethostname(), "address": me,
+                  "how": "this node's %s" % (cfg["local"]["keepalived"].get("interface") or "?"),
+                  "warning": "" if me else
+                             "this node has no usable address on %s"
+                             % (cfg["local"]["keepalived"].get("interface") or "(no interface set)"),
+                  "peer": None})
+    for p in cfg["local"]["sync"].get("peers") or []:
+        if not p.get("enabled", True):
+            continue
+        addr, how, warn = peer_vrrp_address(p, vips)
+        nodes.append({"self": False, "name": p.get("name"), "address": addr,
+                      "how": how, "warning": warn, "peer": p})
+    return nodes
+
+
+@app.get("/api/cluster/unicast")
+def api_cluster_unicast():
+    nodes = unicast_plan(load_config())
+    return jsonify({"ok": True,
+                    "nodes": [{k: v for k, v in n.items() if k != "peer"} for n in nodes],
+                    "addresses": [n["address"] for n in nodes if n["address"] and not n["self"]]})
+
+
+def apply_unicast_plan():
+    """Give every node its own source address and the list of the others.
+
+    Unicast addresses are node-local, so they cannot ride along with a
+    configuration push -- each node has to be told its own.
+    """
+    cfg = load_config()
+    nodes = unicast_plan(cfg)
+    steps, warnings = [], [n["warning"] for n in nodes if n["warning"]]
+    known = {n["name"]: n["address"] for n in nodes if n["address"]}
+    if len(known) < 2:
+        return {"ok": False, "error":
+                "at least two nodes need a usable address; found %s"
+                % (", ".join("%s=%s" % kv for kv in known.items()) or "none"),
+                "warnings": warnings, "steps": []}
+
+    def others(name):
+        return "\n".join(a for n, a in known.items() if n != name)
+
+    with _lock:
+        cur = load_config()
+        mine = next((n for n in nodes if n["self"]), None)
+        if mine and mine["address"]:
+            cur["local"]["keepalived"]["unicast_src"] = mine["address"]
+            cur["local"]["keepalived"]["unicast_peer"] = others(mine["name"])
+            save_config(cur)
+            steps.append("this node: source %s, peers %s"
+                         % (mine["address"], others(mine["name"]).replace("\n", ", ") or "(none)"))
+
+    for n in nodes:
+        if n["self"] or not n["address"]:
+            continue
+        p = n["peer"]
+        try:
+            r = _requests.put((p["url"].rstrip("/")) + "/api/local",
+                              json={"keepalived": {"unicast_src": n["address"],
+                                                   "unicast_peer": others(n["name"])}},
+                              headers={"X-API-Key": (p.get("api_key") or "").strip()},
+                              timeout=15, verify=bool(p.get("verify_tls")))
+            if r.status_code == 200:
+                steps.append("%s: source %s, peers %s"
+                             % (n["name"], n["address"], others(n["name"]).replace("\n", ", ")))
+            else:
+                warnings.append("%s did not accept its unicast settings (HTTP %s)"
+                                % (n["name"], r.status_code))
+        except Exception as e:
+            warnings.append("%s could not be updated: %s" % (n["name"], e))
+
+    return {"ok": True, "steps": steps, "warnings": warnings,
+            "note": "Press Apply on each node to write keepalived.conf."}
+
+
+@app.post("/api/cluster/unicast/apply")
+def api_cluster_unicast_apply():
+    res = apply_unicast_plan()
+    return jsonify(res), (200 if res.get("ok") else 400)
 
 
 @app.get("/api/cluster")
