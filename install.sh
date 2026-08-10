@@ -300,6 +300,63 @@ install_packages() {
         openssl ca-certificates curl socat iproute2 procps tar
 }
 
+# curl, but patient: retry a few times, and try IPv4 on a second pass. A
+# transient DNS failure should not end an installation -- glibc caches nothing,
+# so the next attempt is a genuinely fresh try.
+fetch() {
+    local url="$1" out="$2"
+    local -a auth=()
+    [ -n "${GITHUB_TOKEN:-}" ] && auth=(-H "Authorization: Bearer $GITHUB_TOKEN")
+    local -a base=(-fsSL --connect-timeout 15 --max-time 300
+                   --retry 3 --retry-delay 2 --retry-connrefused)
+    # --retry-all-errors is curl >= 7.71; older curl fails on the unknown flag
+    if curl --help all 2>/dev/null | grep -q -- --retry-all-errors; then
+        base+=(--retry-all-errors)
+    fi
+    curl "${base[@]}" "${auth[@]}" "$url" -o "$out" && return 0
+    warn "retrying over IPv4 only"
+    curl -4 "${base[@]}" "${auth[@]}" "$url" -o "$out" && return 0
+    return 1
+}
+
+# The install needs three files. Fetching them one by one from the raw host
+# avoids codeload.github.com entirely, which is a separate name to resolve.
+fetch_individual_files() {
+    local raw="https://raw.githubusercontent.com/$REPO/$REF"
+    log "Falling back to fetching the individual files from raw.githubusercontent.com"
+    mkdir -p "$TMPDIR_/src/static"
+    fetch "$raw/app.py" "$TMPDIR_/src/app.py" || return 1
+    fetch "$raw/static/index.html" "$TMPDIR_/src/static/index.html" || return 1
+    fetch "$raw/VERSION" "$TMPDIR_/src/VERSION" || true   # optional
+    [ -s "$TMPDIR_/src/app.py" ] && [ -s "$TMPDIR_/src/static/index.html" ] || return 1
+    SRC="$TMPDIR_/src"
+    return 0
+}
+
+# Printed when every route failed: what to check, in the order worth checking.
+download_hint() {
+    local host="codeload.github.com"
+    local dns="" res=""
+    if getent hosts "$host" >/dev/null 2>&1; then
+        dns="resolves now (so this was probably a passing failure -- try again)"
+    else
+        dns="does not resolve from this node"
+    fi
+    res="$(awk '/^nameserver/ {print $2}' /etc/resolv.conf 2>/dev/null | head -3 | tr '\n' ' ')"
+    cat <<EOF
+$host $dns
+   nameservers: ${res:-none in /etc/resolv.conf}
+   Check:  getent hosts $host
+           cat /etc/resolv.conf
+   DNS answers are not cached by the C library, so a resolver that is briefly
+   unavailable fails every lookup for as long as it is down. If this node is
+   also a cluster member, check the Logs page for a Keepalived restart at the
+   same moment -- a VIP moving can interrupt the route to the resolver.
+   Offline install:  git clone the repository and run ./install.sh from it,
+                     or pass --tarball /path/to/archive.tar.gz
+EOF
+}
+
 fetch_source() {
     # A checkout next to this script wins, so `sudo ./install.sh` stays offline.
     local self_dir=""
@@ -322,10 +379,18 @@ fetch_source() {
     else
         local url="${TARBALL:-https://codeload.github.com/$REPO/tar.gz/$REF}"
         log "Downloading $REPO@$REF"
-        local -a auth=()
-        [ -n "${GITHUB_TOKEN:-}" ] && auth=(-H "Authorization: Bearer $GITHUB_TOKEN")
-        curl -fsSL "${auth[@]}" "$url" -o "$tgz" \
-            || die "download failed: $url (private repo? set GITHUB_TOKEN, or check --repo/--ref)"
+        if ! fetch "$url" "$tgz"; then
+            # The tarball host is a second name to resolve, and resolution
+            # failures are not cached or retried by the C library: one bad
+            # moment and the whole install stops. Fall back to fetching the
+            # handful of files we actually need, from a different host.
+            warn "could not download the archive from ${url#https://}"
+            if fetch_individual_files; then
+                return 0
+            fi
+            die "download failed: $url
+   $(download_hint)"
+        fi
     fi
 
     mkdir -p "$TMPDIR_/src"
