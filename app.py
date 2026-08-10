@@ -475,6 +475,7 @@ PUBLIC_PATHS = {"/api/login", "/api/whoami", "/api/setup"}   # /api/setup create
 LOCAL_WRITE_PREFIXES = (
     "/api/local", "/api/password", "/api/logout", "/api/peers",
     "/api/update", "/api/version", "/api/apply", "/api/sync/receive", "/api/setup",
+    "/api/webui",          # this node's own UI address, not shared
 )
 
 
@@ -672,6 +673,11 @@ def collection_item(sec, col, iid):
     items = cfg[sec][col]
     for i, x in enumerate(items):
         if x.get("id") == iid:
+            if x.get(LOCAL_ONLY):
+                return jsonify({"error":
+                                "\"%s\" is part of this node's web UI service and is managed from "
+                                "System > Web UI access. Change it there, or turn it off."
+                                % x.get("name", iid)}), 409
             if request.method == "PUT":
                 data = request.get_json(force=True) or {}
                 data["id"] = iid
@@ -1531,7 +1537,9 @@ def shared_payload(cfg):
         for p in sorted(CERT_DIR.glob("*.pem")):
             certs[p.name] = base64.b64encode(p.read_bytes()).decode()
     return {
-        "config": {"haproxy": cfg["haproxy"], "acme": cfg["acme"], "cluster": cfg["cluster"]},
+        "config": {"haproxy": strip_local_only(cfg["haproxy"]),
+                   "acme": strip_local_only(cfg["acme"]),
+                   "cluster": cfg["cluster"]},
         "certs": certs,
         "source": socket.gethostname(),
         "ts": time.time(),
@@ -2399,9 +2407,11 @@ def api_sync_receive():
     data = request.get_json(force=True) or {}
     conf = data.get("config") or {}
     if "haproxy" in conf:
-        cfg["haproxy"] = _merge_defaults(conf["haproxy"], DEFAULT_CONFIG["haproxy"])
+        cfg["haproxy"] = keep_local_only(cfg["haproxy"],
+                                         _merge_defaults(conf["haproxy"], DEFAULT_CONFIG["haproxy"]))
     if "acme" in conf:
-        cfg["acme"] = _merge_defaults(conf["acme"], DEFAULT_CONFIG["acme"])
+        cfg["acme"] = keep_local_only(cfg["acme"],
+                                      _merge_defaults(conf["acme"], DEFAULT_CONFIG["acme"]))
     if isinstance(conf.get("cluster"), dict):
         # Cluster-wide VRRP settings. Anything per node -- interface, priority,
         # unicast addresses -- lives in local and is deliberately untouched.
@@ -2445,6 +2455,13 @@ def api_sync_receive():
         p = CERT_DIR / name
         p.write_bytes(base64.b64decode(b64))
         os.chmod(p, 0o600)
+    # The listener this node's UI hangs off may have been replaced wholesale by
+    # the incoming configuration. Rebuilding is idempotent and re-attaches it.
+    if (cfg["local"].get("web_ui") or {}).get("enabled"):
+        try:
+            rebuild_webui(cfg)
+        except Exception:
+            pass
     save_config(cfg)
     res = do_apply(cfg, allow_push=False)  # never re-push: avoids sync loops
     return jsonify({"ok": res.get("ok", False), "node": socket.gethostname(), "applied": res})
@@ -3320,6 +3337,106 @@ def wizard_publish(cfg, pub, tgts, name=None, want_cert=True, account=None,
 # --------------------------------------------------------------------------
 
 WEBUI_NAME = "haproxy-manager-ui"
+LOCAL_ONLY = "local_only"       # this object belongs to this node alone
+
+
+def build_webui(cfg, pub, mode="auto", http_redirect=True):
+    """Create (or re-attach) this node's own UI service and mark it node-local."""
+    target = {"scheme": "http", "host": "127.0.0.1", "port": PORT, "path": "", "label": WEBUI_NAME}
+    acts, warns = wizard_publish(cfg, pub, [target], name=WEBUI_NAME,
+                                 want_cert=(mode != "none"), new_certificate=(mode == "new"),
+                                 http_redirect=http_redirect,
+                                 health={"type": "http", "interval": "5s", "uri": "/", "status": "200"})
+    hp = cfg["haproxy"]
+    pool = _find(hp["backends"], lambda b: b.get("name") == WEBUI_NAME)
+    rule = _find(hp["rules"], lambda r: r.get("backend") == (pool or {}).get("id"))
+    ids = {(pool or {}).get("id"), (rule or {}).get("id"), (pool or {}).get("healthcheck")}
+    ids |= set((pool or {}).get("servers") or [])
+    ids |= set((rule or {}).get("conditions") or [])
+    _tag_local(hp, {i for i in ids if i})
+    return acts, warns
+
+
+def rebuild_webui(cfg):
+    """Re-run the build from the stored setting, after a configuration arrives."""
+    s = cfg["local"].get("web_ui") or {}
+    if not (s.get("enabled") and s.get("url")):
+        return
+    pub, err = _split_url(s["url"], "The web UI address", default_scheme="https",
+                          allow=("http", "https"))
+    if err:
+        return
+    build_webui(cfg, pub, s.get("certificate", "auto"), True)
+
+
+def _tag_local(hp, ids):
+    """Mark the objects the web UI service is made of as node-local."""
+    for coll in ("servers", "backends", "conditions", "rules", "healthchecks"):
+        for item in hp.get(coll) or []:
+            if item.get("id") in ids:
+                item[LOCAL_ONLY] = True
+
+
+def keep_local_only(mine, incoming):
+    """Put this node's own objects back after adopting a shared configuration."""
+    for coll, items in mine.items():
+        if not isinstance(items, list):
+            continue
+        local = [i for i in items if i.get(LOCAL_ONLY)]
+        if not local:
+            continue
+        have = {i.get("id") for i in incoming.get(coll) or []}
+        incoming.setdefault(coll, []).extend(i for i in local if i.get("id") not in have)
+    # re-attach them to whatever they were bound to
+    # Match on name as well as id: each node created its own https-443, so the
+    # same listener has a different id everywhere and an id-only match found
+    # nothing -- which quietly dropped this node's UI rule from the listener.
+    by_id = {f.get("id"): f for f in mine.get("frontends") or []}
+    by_name = {f.get("name"): f for f in mine.get("frontends") or []}
+    for fe in incoming.get("frontends") or []:
+        was = by_id.get(fe.get("id")) or by_name.get(fe.get("name"))
+        if not was:
+            continue
+        local_ids = {i.get("id") for coll in ("rules", "certificates")
+                     for i in (mine.get("rules") or []) + (mine.get("certificates") or [])
+                     if i.get(LOCAL_ONLY)}
+        for key in ("rules", "certificates"):
+            extra = [x for x in (was.get(key) or []) if x in local_ids and x not in (fe.get(key) or [])]
+            if extra:
+                fe[key] = (fe.get(key) or []) + extra
+    return incoming
+
+
+def strip_local_only(section):
+    """A copy of a config section with this node's own objects removed.
+
+    The UI service points at 127.0.0.1, so sending it to the other nodes would
+    make each of them answer for this node's host name -- which is what
+    happened: every node inherited node1's address.
+    """
+    out = copy.deepcopy(section)
+    dropped = set()
+    for coll, items in list(out.items()):
+        if not isinstance(items, list):
+            continue
+        keep = []
+        for item in items:
+            if item.get(LOCAL_ONLY):
+                dropped.add(item.get("id"))
+            else:
+                keep.append(item)
+        out[coll] = keep
+    # drop references to anything removed
+    for fe in out.get("frontends") or []:
+        for key in ("rules", "certificates"):
+            if isinstance(fe.get(key), list):
+                fe[key] = [x for x in fe[key] if x not in dropped]
+        if fe.get("default_backend") in dropped:
+            fe["default_backend"] = ""
+    for be in out.get("backends") or []:
+        if isinstance(be.get("servers"), list):
+            be["servers"] = [x for x in be["servers"] if x not in dropped]
+    return out
 
 
 def _webui_setting(cfg):
@@ -3387,14 +3504,8 @@ def api_webui_set():
 
         draft = copy.deepcopy(cfg)
         mode = body.get("certificate", "auto")
-        target = {"scheme": "http", "host": "127.0.0.1", "port": PORT, "path": "", "label": WEBUI_NAME}
         try:
-            acts, warns = wizard_publish(
-                draft, pub, [target], name=WEBUI_NAME,
-                want_cert=(mode != "none"), new_certificate=(mode == "new"),
-                http_redirect=bool(body.get("http_redirect", True)),
-                health={"type": "http", "interval": "5s", "uri": "/", "status": "200"},
-            )
+            acts, warns = build_webui(draft, pub, mode, bool(body.get("http_redirect", True)))
         except ValueError as e:
             return jsonify({"ok": False, "error": str(e)}), 400
 
@@ -3518,6 +3629,7 @@ def api_services():
 
             out.append(dict(pool_settings(pool), **{
                 "id": rule["id"],
+                "managed": "web-ui" if rule.get(LOCAL_ONLY) else "",
                 "url": "%s://%s%s%s" % (scheme, host, shown_port, path),
                 "host": host, "path": path, "scheme": scheme,
                 "port": ports[0] if ports else None,
@@ -3602,8 +3714,13 @@ def api_service_delete(rid):
             save_config(cfg)
             return jsonify({"ok": True, "removed": removed, "note": "Press Apply."})
 
-        if not _by_id(hp["rules"]).get(rid):
+        target = _by_id(hp["rules"]).get(rid)
+        if not target:
             abort(404)
+        if target.get(LOCAL_ONLY):
+            return jsonify({"ok": False, "error":
+                            "This is the node's own web UI service. Turn it off under "
+                            "System > Web UI access instead."}), 409
         removed = _remove_service_objects(hp, rid)
         save_config(cfg)
     return jsonify({"ok": True, "removed": removed,

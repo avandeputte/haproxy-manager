@@ -840,6 +840,8 @@ async function servicesCard(){
       const cls=CERT_STATUS[cs]?CERT_STATUS[cs][0]:"off";
       const lbl=CERT_STATUS[cs]?CERT_STATUS[cs][1]:(s.scheme==="https"?"none":"not needed");
       tr.innerHTML="<td><span class=mono>"+esc(s.url)+"</span>"+
+          (s.managed==="web-ui"?'<div class=sub>this node\'s own web UI &mdash; managed under '+
+             'System &rsaquo; Web UI access, and never synced to the other nodes</div>':"")+
           (s.enabled?"":"<div class=sub>disabled</div>")+"</td>"+
         "<td class=mono>"+(s.targets.length?s.targets.map(esc).join("<br>"):"<span class=sub>no server</span>")+
           "<div class=sub>pool "+esc(s.pool||"—")+"</div></td>"+
@@ -848,7 +850,7 @@ async function servicesCard(){
              (s.certificate_match==="wildcard"?" (wildcard)":"")+"</div>":"")+
           (s.days_left!==null&&s.days_left!==undefined?"<div class=sub>"+(s.days_left<0?"expired":"in "+s.days_left+" days")+"</div>":"")+"</td>";
       const act=document.createElement("td");act.style.textAlign="right";act.style.whiteSpace="nowrap";
-      if(!readOnly){
+      if(!readOnly&&s.managed!=="web-ui"){
       act.appendChild(btn("Edit","sm",()=>openWizard({
         url:s.url,
         target:s.targets.map(t=>s.scheme==="tcp"?t.replace(/^tcp:\/\//,""):t).join(", "),

@@ -234,6 +234,12 @@ certificate — and reuses a wildcard that already covers the name. Turning it o
 removes them again. A host name already used by another service is refused
 rather than quietly stolen from it.
 
+**Set it on each node, with that node's own name.** The setting and everything it
+creates are node-local: they are stripped from what a node sends its peers and
+preserved when a configuration arrives, so `proxy1` never turns up on the other
+nodes. The service appears in the Services list marked as managed, with no Edit
+or Delete — change it from this page, or turn it off.
+
 Once it works, set `HAM_LISTEN=127.0.0.1` in the service unit and restart, so the
 plain-HTTP port is no longer reachable from anywhere but HAProxy. The page says
 so while the UI is still listening on all addresses.
