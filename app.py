@@ -1182,6 +1182,8 @@ def do_apply(cfg=None, allow_push=True):
                 result.setdefault("warnings", []).append(
                     "This node applied its own configuration, but syncing it to the other "
                     "nodes failed: %s" % r.get("error"))
+            if r.get("warning"):
+                result.setdefault("warnings", []).append(r["warning"])
         return result
 
 
@@ -1516,8 +1518,13 @@ def mesh_for(cfg, target):
     return out
 
 
-def sync_push(cfg, only=None, include_peers=False):
-    """Push to every enabled peer (or just one), in parallel."""
+def sync_push(cfg, only=None, include_peers=True):
+    """Push to every enabled peer (or just one), in parallel.
+
+    The membership list travels with every push, not just an explicit one from
+    the Cluster page: otherwise the everyday path -- press Apply on the active
+    node with auto-sync on -- never tells the other nodes about each other.
+    """
     if _requests is None:
         return {"ok": False, "error": "python3-requests is not installed on this node"}
     peers = enabled_peers(cfg)
@@ -1540,8 +1547,10 @@ def sync_push(cfg, only=None, include_peers=False):
     out = {"ok": not failed, "results": results,
            "error": "; ".join("%s: %s" % (r["name"], r["error"]) for r in failed) or None}
     if include_peers and not (cfg["local"].get("node_url") or "").strip():
-        out["warning"] = ("This node has no URL set, so the others were told about each other "
-                          "but not about this node. Set it under Cluster > This node.")
+        out["warning"] = ("This node has no URL set, so the other nodes were told about each "
+                          "other but not about this node -- they cannot sync back to it, and it "
+                          "will not appear in their cluster view. Set \"This node's URL\" under "
+                          "Cluster > This node.")
     return out
 
 
@@ -1549,7 +1558,7 @@ def sync_push(cfg, only=None, include_peers=False):
 def api_sync_push():
     body = request.get_json(silent=True) or {}
     return jsonify(sync_push(load_config(), only=body.get("peer"),
-                             include_peers=bool(body.get("include_peers"))))
+                             include_peers=bool(body.get("include_peers", True))))
 
 
 # --------------------------------------------------------------------------
@@ -1910,12 +1919,16 @@ def api_sync_receive():
     mesh = data.get("peers")
     if isinstance(mesh, list) and mesh:
         mine = (cfg["local"].get("node_url") or "").rstrip("/").lower()
+        my_key = cfg["local"].get("api_key", "")
         kept = []
         for p in mesh:
             if not isinstance(p, dict) or not p.get("url"):
                 continue
+            # Never list ourselves: by URL, or by our own key when no URL is set.
             if mine and p["url"].rstrip("/").lower() == mine:
-                continue                      # never list ourselves
+                continue
+            if my_key and p.get("api_key") == my_key:
+                continue
             kept.append({"id": p.get("id") or str(uuid.uuid4()),
                          "name": p.get("name") or urlsplit(p["url"]).hostname or "peer",
                          "url": p["url"].rstrip("/"), "api_key": p.get("api_key", ""),
