@@ -27,7 +27,7 @@ The normal way to use this is **Services → Publish a service**: give it the UR
 people will visit and the server behind it.
 
 ```
-Public URL    https://ps2.iothing.net
+Public URL    https://app.example.com
 Forward to    http://192.168.1.100:1781
 ```
 
@@ -37,11 +37,11 @@ redirects to HTTPS — then applies. **Preview** shows exactly what it will crea
 and the resulting `haproxy.cfg`, before anything is written.
 
 - **Wildcard certificates are reused, not duplicated.** If a certificate already
-  covers the host — `*.iothing.net` for `ps2.iothing.net`, or an exact name —
+  covers the host — `*.example.com` for `app.example.com`, or an exact name —
   the wizard attaches it instead of requesting another one, and says so before
   you commit. An exact name wins over a wildcard that would also match, and
-  `*.iothing.net` correctly does **not** cover `iothing.net` or
-  `a.b.iothing.net`. Set Certificate to *always request a new certificate* to
+  `*.example.com` correctly does **not** cover `example.com` or
+  `a.b.example.com`. Set Certificate to *always request a new certificate* to
   override, or *no certificate* to terminate TLS elsewhere.
 - **Several public URLs** on one service: put one per line and every name reaches
   the same servers, as a single rule (`use_backend be_app if acl_host-app or
@@ -109,7 +109,7 @@ and the resulting `haproxy.cfg`, before anything is written.
       server postgresql2 192.168.1.112:5432 check inter 3000 port 8008
       server postgresql3 192.168.1.113:5432 check inter 3000 port 8008
   ```
-- **A path** works too: `https://ps2.iothing.net/api` routes only that prefix.
+- **A path** works too: `https://app.example.com/api` routes only that prefix.
   More specific rules are placed ahead of broader ones, so a host+path rule is
   never swallowed by the host-only rule for the same name.
 - **Publishing the same URL again edits it** — repointing a service replaces its
@@ -285,7 +285,7 @@ so it answers at a name you choose:
 
 ```
 Serve the UI through HAProxy   [x]
-Address                        https://proxy.iothing.net
+Address                        https://proxy.example.com
 ```
 
 It builds the same objects the publish wizard would — a pool pointing at

@@ -858,7 +858,7 @@ async function servicesCard(){
   const bd=document.createElement("div");
   if(!svcs.length){
     bd.innerHTML='<div class=empty>Nothing published yet.<br><br>'+
-      '"Publish a service" maps a public URL such as <span class=mono>https://ps2.iothing.net</span> to a server '+
+      '"Publish a service" maps a public URL such as <span class=mono>https://app.example.com</span> to a server '+
       'such as <span class=mono>http://192.168.1.100:1781</span> and creates everything HAProxy needs for it.</div>';
   }else{
     const t=document.createElement("table");
@@ -1433,7 +1433,7 @@ function keepalivedDiagCard(){
 /* ============================ certificate wizard ============================ */
 const NEWOPT="__new__";
 const CERT_WIZ=[
- {k:"domains",l:"Domain names",t:"textarea",h:"One per line. The first is the certificate's primary name. A wildcard such as *.iothing.net needs DNS-01."},
+ {k:"domains",l:"Domain names",t:"textarea",h:"One per line. The first is the certificate's primary name. A wildcard such as *.example.com needs DNS-01."},
  {k:"name",l:"Certificate name",t:"text",h:"Optional -- taken from the first domain when left empty"},
  {k:"account_id",l:"ACME account",t:"select",o:[]},
  {k:"acc_name",l:"New account name",t:"text"},
@@ -1610,7 +1610,7 @@ async function renderStats(){
 /* ============================ HTTPS for this UI ============================ */
 const WEBUI_FIELDS=[
  {k:"enabled",l:"Serve the UI through HAProxy",t:"bool"},
- {k:"url",l:"Address",t:"text",h:"e.g. https://proxy.iothing.net -- the name you want to reach this UI at"},
+ {k:"url",l:"Address",t:"text",h:"e.g. https://proxy.example.com -- the name you want to reach this UI at"},
  {k:"certificate",l:"Certificate",t:"select",d:"auto",o:["auto","new","none"]},
  {k:"http_redirect",l:"Redirect HTTP to HTTPS",t:"bool",d:true},
  {k:"apply",l:"Apply immediately",t:"bool",d:true},
