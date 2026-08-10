@@ -834,14 +834,21 @@ def render_haproxy(cfg):
         A("    option httplog" if mode == "http" else "    option tcplog")
         if mode == "http" and fe.get("forwardfor", True):
             A("    option forwardfor")
+        # HAProxy runs every http-request rule before any use_backend, whatever
+        # order they appear in, and warns on each reload when the file does not
+        # say so. Group them the way it will actually evaluate them: ACLs, then
+        # request rules, then routing.
+        acls, requests, routes = [], [], []
+
         if mode == "http" and fe.get("ssl_enabled"):
-            A("    http-request set-header X-Forwarded-Proto https if { ssl_fc }")
+            requests.append("http-request set-header X-Forwarded-Proto https if { ssl_fc }")
         if acme_on and mode == "http":
-            A("    acl acme_challenge path_beg /.well-known/acme-challenge/")
-            A("    use_backend bk_acme_challenge if acme_challenge")
+            acls.append("acl acme_challenge path_beg /.well-known/acme-challenge/")
+            routes.append("use_backend bk_acme_challenge if acme_challenge")
         if mode == "http" and fe.get("http_to_https") and not fe.get("ssl_enabled"):
             excl = " if !acme_challenge !{ ssl_fc }" if acme_on else " unless { ssl_fc }"
-            A("    http-request redirect scheme https code 301" + excl)
+            requests.append("http-request redirect scheme https code 301" + excl)
+
         # named ACLs for every condition referenced by this frontend's rules
         used = []
         for rid in fe.get("rules") or []:
@@ -853,18 +860,27 @@ def render_haproxy(cfg):
         for cid in used:
             c = conds[cid]
             expr = COND_MAP.get(c.get("type", "custom"), COND_MAP["custom"])(c)
-            A("    acl acl_%s %s" % (_sec(c["name"]), expr))
+            acls.append("acl acl_%s %s" % (_sec(c["name"]), expr))
             if mode == "tcp" and c.get("type") == "ssl_sni":
                 need_inspect = True
         if need_inspect:
-            A("    tcp-request inspect-delay 5s")
-            A("    tcp-request content accept if { req_ssl_hello_type 1 }")
+            requests.append("tcp-request inspect-delay 5s")
+            requests.append("tcp-request content accept if { req_ssl_hello_type 1 }")
+
         for rid in fe.get("rules") or []:
             r = rules.get(rid)
-            if r:
-                ln = _rule_line(r, conds, backends)
-                if ln:
-                    A("    " + ln)
+            if not r:
+                continue
+            ln = _rule_line(r, conds, backends)
+            if not ln:
+                continue
+            # Relative order is preserved inside each group, so first-match
+            # routing and rule precedence are unchanged.
+            (routes if ln.startswith("use_backend") else requests).append(ln)
+
+        for ln in acls + requests + routes:
+            A("    " + ln)
+
         db = backends.get(fe.get("default_backend"))
         if db:
             A("    default_backend be_%s" % _sec(db["name"]))
