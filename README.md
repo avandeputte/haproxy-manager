@@ -359,16 +359,18 @@ because HAProxy still routes to it.
 
 ## Notifications
 
-**Notifications** sends when something needs a person. Email and Pushover are
-built in and need nothing beyond what is already installed; a webhook posts JSON
-anywhere; Apprise is optional and adds a hundred more services.
+**Notifications** sends when something needs a person. Nothing extra is
+installed for any of it: the whole feature uses the standard library and the
+`requests` package that is already there.
 
-| Destination | Needs | Notes |
-| --- | --- | --- |
-| **Email (SMTP)** | nothing | STARTTLS, SSL or plain; authentication optional |
-| **Pushover** | nothing | severity maps to Pushover priority (quiet / normal / high) |
-| **Webhook** | nothing | `POST {subject, message, severity, event, node, time}`, custom headers |
-| **Apprise** | `--with-apprise` | Telegram, Slack, Discord, Matrix, ntfy, Gotify, SMS, … |
+| Destination | Notes |
+| --- | --- |
+| **Email (SMTP)** | STARTTLS, SSL or plain; authentication optional |
+| **Pushover** | severity maps to Pushover priority (quiet / normal / high) |
+| **Webhook** | `POST {subject, message, severity, event, node, time}`, custom headers |
+
+The webhook is the escape hatch: it posts JSON, so a few lines of script can
+forward an alert to anything not listed above.
 
 Test each destination from the page: it sends a real message, so it is proven
 before it is needed.
@@ -399,25 +401,6 @@ Pushover tokens travel in the sync payload: run peer sync over HTTPS, or keep it
 on a trusted network. Because every node watches every other one, a node that
 vanishes is reported by each of its peers — which also tells you who lost sight
 of it.
-
-### Apprise, and why it is optional
-
-Apprise is not packaged for Debian bookworm or trixie, or Ubuntu 22.04 or 24.04,
-and bookworm refuses system-wide `pip install` (PEP 668). Rather than break that
-rule on a machine that routes traffic, `install.sh --with-apprise` puts it in a
-virtual environment beside the app:
-
-```bash
-python3 -m venv /opt/haproxy-manager/venv
-/opt/haproxy-manager/venv/bin/pip install apprise
-systemctl restart haproxy-manager
-```
-
-The app appends that directory to its own path when it exists — appends, so a
-system module is never shadowed — and the Notifications page reports whether it
-found it. `HAM_VENV` overrides the location. The base install stays free of pip:
-everything it requires comes from apt and keeps getting security updates with
-the rest of the system.
 
 ## Watchdog
 
@@ -757,7 +740,7 @@ Environment=HAM_THREADS=24
 `HAM_ACME_HOME` · `HAM_ACME_SH` · `HAM_LISTEN` · `HAM_PORT` · `HAM_THREADS` ·
 `HAM_LOG_FILE` · `HAM_DEBUG=1` (verbose logging) · `HAM_STATS_SOCK` ·
 `HAM_PEER_CONNECT_TIMEOUT` · `HAM_PEER_READ_TIMEOUT` · `HAM_PUSH_READ_TIMEOUT` ·
-`HAM_VENV` · `HAM_CLUSTER_POLL` · `HAM_CLUSTER_MAX_AGE` · `HAM_WATCHDOG_PROBE_TIMEOUT` ·
+`HAM_CLUSTER_POLL` · `HAM_CLUSTER_MAX_AGE` · `HAM_WATCHDOG_PROBE_TIMEOUT` ·
 `HAM_WATCHDOG_SELF_TIMEOUT` ·
 `HAM_VERSION_URL` · `HAM_INSTALL_URL` · `HAM_DRY_RUN=1` (skip `systemctl` calls,
 for development).

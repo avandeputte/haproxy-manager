@@ -87,24 +87,6 @@ def _read_version():
 
 VERSION = _read_version()
 
-# Optional extras live in a virtual environment beside the app, and the system
-# interpreter cannot see them on its own. Adding it to the path here keeps the
-# base install free of pip -- everything it needs comes from apt -- while
-# letting anyone who wants the long tail of notification services have it:
-#
-#   python3 -m venv /opt/haproxy-manager/venv && /opt/haproxy-manager/venv/bin/pip install apprise
-#
-# install.sh --with-apprise does exactly that.
-def _add_venv_to_path():
-    root = Path(os.environ.get("HAM_VENV", str(Path(__file__).resolve().parent / "venv")))
-    for site in sorted(root.glob("lib/python3*/site-packages")):
-        if site.is_dir() and str(site) not in sys.path:
-            sys.path.append(str(site))       # append: never shadow a system module
-            return str(site)
-    return ""
-
-
-VENV_PATH = _add_venv_to_path()
 
 # --------------------------------------------------------------------------
 # logging
@@ -1956,10 +1938,8 @@ def renewal_runs_here(cfg):
 # notifications
 #
 # SMTP and Pushover are built in and need nothing beyond the standard library
-# and requests, which are already here. A generic webhook covers the long tail,
-# and an Apprise URL works if that library happens to be installed -- it is not
-# packaged for any Debian or Ubuntu release this installer supports, so it is
-# never a requirement.
+# and requests, which are already here. A generic webhook covers anything else:
+# it posts JSON, so a small script can forward it wherever it is wanted.
 #
 # The hard part is not sending: it is not sending too much. The watchdog runs
 # every twenty seconds, so anything that reports a *condition* would arrive
@@ -2048,26 +2028,6 @@ def send_webhook(d, subject, body, severity, event):
         raise RuntimeError("the endpoint replied HTTP %s: %s" % (r.status_code, r.text[:200]))
 
 
-def send_apprise(d, subject, body):
-    try:
-        import apprise                      # optional: not packaged for Debian
-    except ImportError:
-        raise RuntimeError(
-            "the apprise library is not installed on this node. It is not "
-            "packaged for Debian or Ubuntu, so install it beside the app:\n\n"
-            "  python3 -m venv /opt/haproxy-manager/venv\n"
-            "  /opt/haproxy-manager/venv/bin/pip install apprise\n"
-            "  systemctl restart haproxy-manager\n\n"
-            "or re-run install.sh with --with-apprise. Email, Pushover and "
-            "webhook destinations need none of this.")
-    ap = apprise.Apprise()
-    for url in [u.strip() for u in (d.get("urls") or "").splitlines() if u.strip()]:
-        if not ap.add(url):
-            raise ValueError("apprise did not accept the URL %r" % url[:60])
-    if not ap.notify(title=subject, body=body):
-        raise RuntimeError("apprise reported that it could not deliver the message")
-
-
 def send_to(dest, subject, body, severity="warning", event=""):
     """Deliver to one destination. Raises with a readable reason."""
     kind = (dest.get("type") or "").lower()
@@ -2077,10 +2037,9 @@ def send_to(dest, subject, body, severity="warning", event=""):
         send_pushover(dest, subject, body, severity)
     elif kind == "webhook":
         send_webhook(dest, subject, body, severity, event)
-    elif kind == "apprise":
-        send_apprise(dest, subject, body)
     else:
-        raise ValueError("unknown destination type %r" % kind)
+        raise ValueError("unknown destination type %r -- expected smtp, pushover "
+                         "or webhook" % kind)
 
 
 def notify(event, subject, body, severity="warning", cfg=None):
@@ -2149,16 +2108,7 @@ def api_notify_get():
                 d.pop(secret)
     with _notify_lock:
         recent = list(_notify_log)
-    return jsonify({"ok": True, "settings": n, "recent": recent,
-                    "apprise_available": _apprise_available(), "venv": VENV_PATH})
-
-
-def _apprise_available():
-    try:
-        import apprise           # noqa: F401
-        return True
-    except ImportError:
-        return False
+    return jsonify({"ok": True, "settings": n, "recent": recent})
 
 
 @app.put("/api/notify")

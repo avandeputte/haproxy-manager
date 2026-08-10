@@ -2093,8 +2093,6 @@ const NOTIFY_TYPES={
     {k:"url",l:"URL",t:"text",h:"receives {subject, message, severity, event, node, time}"},
     {k:"headers",l:"Extra headers",t:"textarea",h:"one per line, e.g. Authorization: Bearer xyz"},
     {k:"verify_tls",l:"Verify TLS",t:"bool",d:true}]},
-  apprise:{label:"Apprise URLs",fields:[
-    {k:"urls",l:"Apprise URLs",t:"textarea",h:"one per line, e.g. tgram://bottoken/ChatID"}]},
 };
 async function renderNotify(){
   const c=$("#content");c.innerHTML="";
@@ -2174,7 +2172,6 @@ async function renderNotify(){
       const tr=document.createElement("tr");
       const where=d.type==="smtp"?(d.to||"")+" via "+(d.host||"")
         :d.type==="webhook"?(d.url||"")
-        :d.type==="apprise"?((d.urls||"").split("\n")[0]||"")+"..."
         :(d.has_token?"token set":"no token")+", "+(d.has_user?"user key set":"no user key");
       tr.innerHTML="<td>"+esc(d.name||"—")+"</td><td>"+esc((NOTIFY_TYPES[d.type]||{}).label||d.type)+"</td>"+
         "<td class=mono style=font-size:12px>"+esc(where)+"</td>"+
@@ -2212,12 +2209,6 @@ async function renderNotify(){
     const paint=(type)=>{
       holder.innerHTML="";
       (NOTIFY_TYPES[type]||{fields:[]}).fields.forEach(f=>holder.appendChild(fieldRow(f,d[f.k])));
-      if(type==="apprise"&&!n.apprise_available){
-        holder.insertAdjacentHTML("beforeend",
-          '<div class=hint style="color:var(--drift);margin-top:6px">The apprise library is not '+
-          "installed on this node, and it is not packaged for Debian or Ubuntu. These URLs will "+
-          "not send until it is installed. Email, Pushover and webhooks need nothing extra.</div>");
-      }
     };
     paint(d.type);
     fieldEl("type").onchange=e=>paint(e.target.value);
