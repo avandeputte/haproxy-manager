@@ -202,8 +202,27 @@ CLUSTER_KEYS = ("vrid", "vips", "auth_pass", "advert_int", "state",
                 "nopreempt", "track_haproxy", "custom")
 
 
+def _looks_configured(cfg):
+    """Has this node been set up already, by any route?
+
+    The setup wizard records a flag, but every install that predates it has
+    none -- and a node that was configured by hand, or that received its
+    configuration from a peer, must not be greeted as if it were brand new.
+    """
+    hp = cfg["haproxy"]
+    return bool(
+        cfg["local"]["sync"].get("peers")
+        or (cfg["cluster"].get("vips") or "").strip()
+        or cfg["local"]["keepalived"].get("enabled")
+        or hp["frontends"] or hp["backends"] or hp["servers"]
+        or cfg["acme"]["certificates"] or cfg["acme"]["accounts"]
+    )
+
+
 def _migrate(cfg):
     """Bring an older config forward. Idempotent; persisted on the next save."""
+    if not cfg["_meta"].get("setup_complete") and _looks_configured(cfg):
+        cfg["_meta"]["setup_complete"] = True
     # VRRP settings that must match across nodes moved from local.keepalived
     # into the shared cluster section.
     k, cl = cfg["local"]["keepalived"], cfg["cluster"]
