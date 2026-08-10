@@ -87,6 +87,8 @@ td .sub{color:var(--mist);font-size:12px}
 .pill.off{background:#eceff0;color:var(--mist)}
 .pill.warn{background:#f6ecdd;color:var(--drift)}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px}
+.grid.row5{grid-template-columns:repeat(5,1fr)}
+@media (max-width:1000px){.grid.row5{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}}
 .stat{border:1px solid var(--hair);border-radius:6px;padding:12px 14px;background:var(--card)}
 .stat .k{font:600 10px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--mist)}
 .stat .v{font:600 16px/1.3 var(--mono);margin-top:6px}
@@ -1955,12 +1957,11 @@ async function renderOverview(){
   let st;
   try{st=await api("status");}catch(e){c.innerHTML='<div class="card"><div class="bd">'+esc(e.message)+"</div></div>";return;}
   c.innerHTML="";
-  const grid=document.createElement("div");grid.className="grid";grid.style.marginBottom="18px";
+  const grid=document.createElement("div");grid.className="grid row5";grid.style.marginBottom="18px";
   const pill=(v,goodVals)=>'<span class="pill '+(goodVals.includes(v)?"up":v==="disabled"?"off":"down")+'">'+esc(v)+"</span>";
   grid.innerHTML=
     '<div class=stat><div class=k>HAProxy</div><div class=v>'+pill(st.haproxy,["active"])+"</div></div>"+
     '<div class=stat><div class=k>Keepalived</div><div class=v>'+pill(st.keepalived,["active"])+"</div></div>"+
-    '<div class=stat><div class=k>Node role</div><div class=v>'+esc(st.role)+"</div></div>"+
     '<div class=stat><div class=k>Virtual IPs</div><div class=v style="font-size:13px">'+
       (st.vips.length?st.vips.map(v=>esc(v)+(st.vip_held.includes(v)?" ●":"")).join("<br>"):"—")+"</div></div>"+
     '<div class=stat><div class=k>Configuration</div><div class=v style="font-size:13px">'+
