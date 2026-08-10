@@ -135,9 +135,22 @@ DEFAULT_CONFIG = {
         "certificates": [],
         "automations": [],
     },
+    # Cluster-wide VRRP settings: identical on every node, so they sync.
+    "cluster": {
+        "vrid": 51,
+        "vips": "",            # one address/prefix per line
+        "auth_pass": "",
+        "advert_int": 1,
+        "state": "BACKUP",
+        "nopreempt": True,
+        "track_haproxy": True,
+        "custom": "",
+    },
     "local": {
         # node-local settings -- never overwritten by sync
         "api_key": "",
+        "node_url": "",        # how the OTHER nodes should reach this one
+        "allow_edit_when_passive": False,   # escape hatch when no node holds the VIP
         # UI login. The password is only ever stored as a PBKDF2 hash.
         "admin": {"username": "admin", "salt": "", "hash": "", "iterations": 0, "updated": ""},
         "session_secret": "",      # HMAC key for session cookies; rotating it logs everyone out
@@ -185,8 +198,20 @@ def _merge_defaults(dst, src):
     return dst
 
 
+CLUSTER_KEYS = ("vrid", "vips", "auth_pass", "advert_int", "state",
+                "nopreempt", "track_haproxy", "custom")
+
+
 def _migrate(cfg):
     """Bring an older config forward. Idempotent; persisted on the next save."""
+    # VRRP settings that must match across nodes moved from local.keepalived
+    # into the shared cluster section.
+    k, cl = cfg["local"]["keepalived"], cfg["cluster"]
+    if not cl.get("vips") and k.get("vips"):
+        for key in CLUSTER_KEYS:
+            if key in k:
+                cl[key] = k[key]
+
     s = cfg["local"]["sync"]
     if s.get("peer_url") and not s.get("peers"):
         s["peers"] = [{
@@ -221,7 +246,8 @@ def save_config(cfg):
 
 def config_hash(cfg):
     payload = json.dumps(
-        {"haproxy": cfg["haproxy"], "acme": cfg["acme"], "keepalived": cfg["local"]["keepalived"]},
+        {"haproxy": cfg["haproxy"], "acme": cfg["acme"], "cluster": cfg["cluster"],
+         "keepalived": cfg["local"]["keepalived"]},
         sort_keys=True,
     )
     return hashlib.sha256(payload.encode()).hexdigest()
@@ -399,6 +425,37 @@ def current_user(cfg=None):
 
 PUBLIC_PATHS = {"/api/login", "/api/whoami", "/api/setup"}
 
+# Shared configuration is edited on the node that holds the virtual IP and
+# pushed out from there. Everything a passive node needs to fix ITSELF -- its
+# interface, priority, login, API key, peer list, updates -- stays editable,
+# otherwise a node that cannot take the VIP could never be repaired.
+LOCAL_WRITE_PREFIXES = (
+    "/api/local", "/api/password", "/api/logout", "/api/peers",
+    "/api/update", "/api/version", "/api/apply", "/api/sync/receive",
+)
+
+
+def node_role(cfg):
+    k = cfg["local"]["keepalived"]
+    vips = [v.strip().split("/")[0] for v in (cfg["cluster"].get("vips") or "").splitlines() if v.strip()]
+    if not (k.get("enabled") and vips):
+        return "standalone", []
+    rc, out = run(["ip", "-o", "addr"])
+    held = [v for v in vips if rc == 0 and re.search(r"\binet6? %s/" % re.escape(v), out)]
+    return ("active" if held else "passive"), held
+
+
+def readonly_state(cfg):
+    """(read_only, reason). Only a passive node is read-only, and only if asked."""
+    if cfg["local"].get("allow_edit_when_passive"):
+        return False, ""
+    role, _ = node_role(cfg)
+    if role != "passive":
+        return False, ""
+    return True, ("This node is passive: another node holds the virtual IP and serves traffic. "
+                  "Change the shared configuration there and push it here, so the two cannot "
+                  "diverge. This node's own settings stay editable.")
+
 
 @app.before_request
 def _auth():
@@ -413,12 +470,18 @@ def _auth():
     if needs_setup(cfg) and not cfg["local"].get("api_key"):
         return  # first run: no administrator yet, nothing to check against
 
-    if current_user(cfg):
-        return
-    key = cfg["local"].get("api_key", "")
-    if key and hmac.compare_digest(key, request.headers.get("X-API-Key", "")):
-        return
-    abort(401)
+    authorised = bool(current_user(cfg))
+    if not authorised:
+        key = cfg["local"].get("api_key", "")
+        authorised = bool(key) and hmac.compare_digest(key, request.headers.get("X-API-Key", ""))
+    if not authorised:
+        abort(401)
+
+    if request.method in ("POST", "PUT", "DELETE", "PATCH") and \
+            not request.path.startswith(LOCAL_WRITE_PREFIXES):
+        ro, why = readonly_state(cfg)
+        if ro:
+            return jsonify({"ok": False, "error": why, "read_only": True}), 409
 
 
 @app.get("/api/whoami")
@@ -574,8 +637,9 @@ def local_settings():
     for key in ("keepalived", "sync"):
         if isinstance(body.get(key), dict):
             cfg["local"][key].update(body[key])
-    if "api_key" in body:
-        cfg["local"]["api_key"] = body["api_key"]
+    for key in ("api_key", "node_url", "allow_edit_when_passive"):
+        if key in body:
+            cfg["local"][key] = body[key]
     save_config(cfg)
     return jsonify(cfg["local"])
 
@@ -829,13 +893,15 @@ def render_haproxy(cfg):
 # --------------------------------------------------------------------------
 
 def render_keepalived(cfg):
+    """Cluster-wide VRRP settings come from cfg["cluster"]; the rest is per node."""
     k = cfg["local"]["keepalived"]
+    cl = cfg["cluster"]
     L = []
     A = L.append
     A("# Generated by haproxy-manager at %s" % datetime.now(timezone.utc).isoformat(timespec="seconds"))
-    A("# Node-local file -- not synchronized between nodes.")
+    A("# Generated from the cluster settings plus this node's own.")
     A("")
-    if k.get("track_haproxy", True):
+    if cl.get("track_haproxy", True):
         # keepalived >= 2.0 refuses to load a config with tracking scripts
         # unless script security is enabled explicitly.
         A("global_defs {")
@@ -852,35 +918,38 @@ def render_keepalived(cfg):
         A("}")
         A("")
     A("vrrp_instance HAPROXY_VIP {")
-    A("    state %s" % k.get("state", "BACKUP"))
+    A("    state %s" % cl.get("state", "BACKUP"))
     A("    interface %s" % k.get("interface", "eth0"))
-    A("    virtual_router_id %s" % k.get("vrid", 51))
+    A("    virtual_router_id %s" % cl.get("vrid", 51))
     A("    priority %s" % k.get("priority", 100))
-    A("    advert_int %s" % k.get("advert_int", 1))
-    if k.get("nopreempt"):
+    A("    advert_int %s" % cl.get("advert_int", 1))
+    if cl.get("nopreempt"):
         A("    nopreempt")
-    if k.get("auth_pass"):
+    if cl.get("auth_pass"):
         A("    authentication {")
         A("        auth_type PASS")
-        A("        auth_pass %s" % k["auth_pass"][:8])  # keepalived uses max 8 chars
+        A("        auth_pass %s" % cl["auth_pass"][:8])  # keepalived uses max 8 chars
         A("    }")
-    if k.get("unicast_src") and k.get("unicast_peer"):
-        A("    unicast_src_ip %s" % k["unicast_src"])
+    # Unicast VRRP: list every OTHER node. The source address is optional --
+    # keepalived falls back to the interface's own address.
+    peers = [p.strip() for p in re.split(r"[\s,]+", k.get("unicast_peer") or "") if p.strip()]
+    if peers:
+        if k.get("unicast_src"):
+            A("    unicast_src_ip %s" % k["unicast_src"].strip())
         A("    unicast_peer {")
-        for p in k["unicast_peer"].replace(",", "\n").splitlines():
-            if p.strip():
-                A("        " + p.strip())
+        for p in peers:
+            A("        " + p)
         A("    }")
     A("    virtual_ipaddress {")
-    for v in (k.get("vips") or "").splitlines():
+    for v in (cl.get("vips") or "").splitlines():
         if v.strip():
             A("        " + v.strip())
     A("    }")
-    if k.get("track_haproxy", True):
+    if cl.get("track_haproxy", True):
         A("    track_script {")
         A("        chk_haproxy")
         A("    }")
-    for ln in (k.get("custom") or "").splitlines():
+    for ln in (cl.get("custom") or "").splitlines():
         if ln.strip():
             A("    " + ln.strip())
     A("}")
@@ -968,11 +1037,12 @@ def api_keepalived_status():
     """Why this node does or does not hold the virtual IP."""
     cfg = load_config()
     k = cfg["local"]["keepalived"]
+    cl = cfg["cluster"]
     ifaces = node_interfaces()
     names = [i["name"] for i in ifaces]
     configured = k.get("interface", "")
 
-    vips = [v.strip().split("/")[0] for v in (k.get("vips") or "").splitlines() if v.strip()]
+    vips = [v.strip().split("/")[0] for v in (cl.get("vips") or "").splitlines() if v.strip()]
     held = []
     rc, out = run(["ip", "-o", "addr"])
     if rc == 0:
@@ -1013,7 +1083,7 @@ def api_keepalived_status():
         "interface": configured,
         "interface_exists": configured in names,
         "interfaces": ifaces,
-        "vrid": k.get("vrid"), "priority": k.get("priority"), "state_setting": k.get("state"),
+        "vrid": cl.get("vrid"), "priority": k.get("priority"), "state_setting": cl.get("state"),
         "vips": vips, "vip_held": held,
         "vrrp_state": state,
         "validation": validation,
@@ -1118,7 +1188,7 @@ def api_status():
         return out.splitlines()[0] if out else "unknown"
 
     k = cfg["local"]["keepalived"]
-    vips = [v.strip().split("/")[0] for v in (k.get("vips") or "").splitlines() if v.strip()]
+    vips = [v.strip().split("/")[0] for v in (cfg["cluster"].get("vips") or "").splitlines() if v.strip()]
     held = []
     if vips:
         rc, out = run(["ip", "-o", "addr"])
@@ -1143,7 +1213,10 @@ def api_status():
         certs.append(info)
 
     upd = cfg["_meta"].get("update") or {}
+    ro, ro_why = readonly_state(cfg)
     return jsonify({
+        "read_only": ro,
+        "read_only_reason": ro_why,
         "hostname": socket.gethostname(),
         "version": VERSION,
         "update_available": bool(upd.get("latest")) and is_newer(upd["latest"], VERSION),
@@ -1376,7 +1449,7 @@ def shared_payload(cfg):
         for p in sorted(CERT_DIR.glob("*.pem")):
             certs[p.name] = base64.b64encode(p.read_bytes()).decode()
     return {
-        "config": {"haproxy": cfg["haproxy"], "acme": cfg["acme"]},
+        "config": {"haproxy": cfg["haproxy"], "acme": cfg["acme"], "cluster": cfg["cluster"]},
         "certs": certs,
         "source": socket.gethostname(),
         "ts": time.time(),
@@ -1402,7 +1475,29 @@ def push_to_peer(peer, payload):
         return {"ok": False, "name": peer.get("name") or url, "error": str(e)}
 
 
-def sync_push(cfg, only=None):
+def mesh_for(cfg, target):
+    """The membership list to hand one node: everyone except itself, plus us.
+
+    Only this node knows its own API key, so it is the only one that can give
+    the others a working way back to it.
+    """
+    me = (cfg["local"].get("node_url") or "").rstrip("/")
+    out = []
+    for p in cfg["local"]["sync"].get("peers") or []:
+        if p.get("id") == target.get("id") or not p.get("url"):
+            continue
+        out.append({"id": p.get("id"), "name": p.get("name"), "url": p["url"],
+                    "api_key": p.get("api_key", ""), "verify_tls": p.get("verify_tls"),
+                    "enabled": p.get("enabled", True)})
+    if me:
+        out.append({"id": "self-" + hashlib.sha256(me.encode()).hexdigest()[:12],
+                    "name": socket.gethostname(), "url": me,
+                    "api_key": cfg["local"].get("api_key", ""),
+                    "verify_tls": False, "enabled": True})
+    return out
+
+
+def sync_push(cfg, only=None, include_peers=False):
     """Push to every enabled peer (or just one), in parallel."""
     if _requests is None:
         return {"ok": False, "error": "python3-requests is not installed on this node"}
@@ -1414,23 +1509,45 @@ def sync_push(cfg, only=None):
     if not peers:
         return {"ok": False, "error": "no peers configured (Advanced > Keepalived > Peer sync)"}
 
-    payload = shared_payload(cfg)
+    base = shared_payload(cfg)
+
+    def send(p):
+        payload = dict(base, peers=mesh_for(cfg, p)) if include_peers else base
+        return push_to_peer(p, payload)
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(peers))) as ex:
-        results = list(ex.map(lambda p: push_to_peer(p, payload), peers))
+        results = list(ex.map(send, peers))
     failed = [r for r in results if not r["ok"]]
-    return {"ok": not failed, "results": results,
-            "error": "; ".join("%s: %s" % (r["name"], r["error"]) for r in failed) or None}
+    out = {"ok": not failed, "results": results,
+           "error": "; ".join("%s: %s" % (r["name"], r["error"]) for r in failed) or None}
+    if include_peers and not (cfg["local"].get("node_url") or "").strip():
+        out["warning"] = ("This node has no URL set, so the others were told about each other "
+                          "but not about this node. Set it under Cluster > This node.")
+    return out
 
 
 @app.post("/api/sync/push")
 def api_sync_push():
     body = request.get_json(silent=True) or {}
-    return jsonify(sync_push(load_config(), only=body.get("peer")))
+    return jsonify(sync_push(load_config(), only=body.get("peer"),
+                             include_peers=bool(body.get("include_peers"))))
 
 
 # --------------------------------------------------------------------------
 # peers: the other nodes in the cluster
 # --------------------------------------------------------------------------
+
+@app.route("/api/cluster/settings", methods=["GET", "PUT"])
+def api_cluster_settings():
+    """VRRP settings every node shares. Pushed to the others like any config."""
+    cfg = load_config()
+    if request.method == "GET":
+        return jsonify(cfg["cluster"])
+    body = request.get_json(force=True) or {}
+    cfg["cluster"].update({k: v for k, v in body.items() if k in CLUSTER_KEYS})
+    save_config(cfg)
+    return jsonify(cfg["cluster"])
+
 
 @app.route("/api/peers", methods=["GET", "POST"])
 def api_peers():
@@ -1583,6 +1700,29 @@ def api_sync_receive():
         cfg["haproxy"] = _merge_defaults(conf["haproxy"], DEFAULT_CONFIG["haproxy"])
     if "acme" in conf:
         cfg["acme"] = _merge_defaults(conf["acme"], DEFAULT_CONFIG["acme"])
+    if isinstance(conf.get("cluster"), dict):
+        # Cluster-wide VRRP settings. Anything per node -- interface, priority,
+        # unicast addresses -- lives in local and is deliberately untouched.
+        cfg["cluster"] = _merge_defaults(conf["cluster"], DEFAULT_CONFIG["cluster"])
+
+    # An optional membership list: every other node as seen by the sender.
+    mesh = data.get("peers")
+    if isinstance(mesh, list) and mesh:
+        mine = (cfg["local"].get("node_url") or "").rstrip("/").lower()
+        kept = []
+        for p in mesh:
+            if not isinstance(p, dict) or not p.get("url"):
+                continue
+            if mine and p["url"].rstrip("/").lower() == mine:
+                continue                      # never list ourselves
+            kept.append({"id": p.get("id") or str(uuid.uuid4()),
+                         "name": p.get("name") or urlsplit(p["url"]).hostname or "peer",
+                         "url": p["url"].rstrip("/"), "api_key": p.get("api_key", ""),
+                         "verify_tls": bool(p.get("verify_tls")),
+                         "enabled": bool(p.get("enabled", True))})
+        if kept:
+            cfg["local"]["sync"]["peers"] = kept
+
     CERT_DIR.mkdir(parents=True, exist_ok=True)
     for name, b64 in (data.get("certs") or {}).items():
         if "/" in name or ".." in name or not name.endswith(".pem"):

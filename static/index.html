@@ -55,6 +55,9 @@ button{font:inherit;cursor:pointer}
 .chip.role-standalone{border-color:var(--hair);color:var(--mist)}
 .chip.drift{border-color:var(--drift);color:var(--drift)}
 #content{padding:22px 24px;max-width:1140px;width:100%}
+#banner{padding:12px 24px 0;max-width:1140px;width:100%}
+#banner .ro{background:#f6ecdd;border:1px solid #e3cfa8;color:#7a4d00;border-radius:6px;padding:11px 14px;font-size:13px;display:flex;gap:12px;align-items:flex-start}
+#banner .ro b{display:block;margin-bottom:2px}
 
 /* ---- generic ---- */
 .card{background:var(--card);border:1px solid var(--hair);border-radius:6px;margin-bottom:18px}
@@ -154,6 +157,7 @@ pre{font:12px/1.5 var(--mono);background:#0f191e;color:#d5e2e0;padding:14px;bord
     <div id="nodestrip"></div>
     <button class="btn pri" id="applybtn" title="Validate and write haproxy.cfg / keepalived.conf, then reload services">Apply</button>
   </div>
+  <div id="banner"></div>
   <div id="content"></div>
 </div>
 
@@ -417,23 +421,6 @@ const S={
    {k:"renew_hours",l:"Renewal check interval (hours)",t:"number"},
    {k:"challenge_port",l:"HTTP-01 challenge port",t:"number",h:"Local port acme.sh listens on during HTTP-01 validation"},
    {k:"haproxy_integration",l:"HAProxy integration",t:"bool",d:true,h:"Route /.well-known/acme-challenge/ on all HTTP services to the local challenge listener"}]},
- "keepalived":{title:"Keepalived",ep:"local",sub:"keepalived",pre:loadKeepalivedDiag,extra:keepalivedDiagCard,
-  intro:"Node-local VRRP settings for the active-passive pair. These are never overwritten by sync -- configure them on each node. For non-preempting failover, set state BACKUP on both nodes with different priorities and enable nopreempt.",
-  fields:[
-   {k:"enabled",l:"Enabled",t:"bool"},
-   {k:"interface",l:"Interface",t:"combo",o:()=>kaIfaceOptions,
-    h:"The interface on THIS node that carries the virtual IP. It is node-local -- the two nodes often differ."},
-   {k:"vrid",l:"Virtual router ID",t:"number",h:"Same on both nodes (1-255)"},
-   {k:"state",l:"Initial state",t:"select",o:["MASTER","BACKUP"],d:"BACKUP"},
-   {k:"priority",l:"Priority",t:"number",h:"Higher wins; e.g. 150 on the preferred node, 100 on the other"},
-   {k:"nopreempt",l:"No preempt",t:"bool",d:true,h:"A recovered node does not take the VIP back"},
-   {k:"advert_int",l:"Advertisement interval (s)",t:"number"},
-   {k:"auth_pass",l:"VRRP password",t:"password",h:"Same on both nodes; only the first 8 characters are used"},
-   {k:"unicast_src",l:"Unicast source IP",t:"text",h:"This node's own address; leave empty for multicast VRRP"},
-   {k:"unicast_peer",l:"Unicast peer IP",t:"text",h:"The other node's address"},
-   {k:"vips",l:"Virtual IP addresses",t:"textarea",h:"One per line with prefix, e.g. 192.0.2.10/24"},
-   {k:"track_haproxy",l:"Track HAProxy process",t:"bool",d:true,h:"Fail over when HAProxy dies on this node"},
-   {k:"custom",l:"Custom options",t:"textarea"}]},
 };
 
 /* ============================ form rendering ============================ */
@@ -520,12 +507,14 @@ async function renderEntity(key){
   const card=document.createElement("div");card.className="card";
   const hd=document.createElement("div");hd.className="hd";
   hd.innerHTML="<h2>"+esc(def.title)+"</h2><div class=sp></div>";
-  if(key==="acme/certificates"){
-    hd.appendChild(btn("Request a certificate","pri sm",()=>openCertWizard()));
-    hd.appendChild(document.createTextNode(" "));
-    hd.appendChild(btn(def.add,"sm",()=>openEditor(key)));
-  }else{
-    hd.appendChild(btn(def.add,"pri sm",()=>openEditor(key)));
+  if(!readOnly){
+    if(key==="acme/certificates"){
+      hd.appendChild(btn("Request a certificate","pri sm",()=>openCertWizard()));
+      hd.appendChild(document.createTextNode(" "));
+      hd.appendChild(btn(def.add,"sm",()=>openEditor(key)));
+    }else{
+      hd.appendChild(btn(def.add,"pri sm",()=>openEditor(key)));
+    }
   }
   card.appendChild(hd);
   const bd=document.createElement("div");
@@ -543,18 +532,19 @@ async function renderEntity(key){
         tr.appendChild(td);
       });
       const act=document.createElement("td");act.style.textAlign="right";act.style.whiteSpace="nowrap";
-      (def.rowActions||[]).forEach(a=>{
+      (readOnly?[]:(def.rowActions||[])).forEach(a=>{
         const b=btn(a.label,"sm "+(a.cls||""),()=>a.fn(row));
         if(a.title)b.title=a.title;
         act.appendChild(b);act.appendChild(document.createTextNode(" "));
       });
-      act.appendChild(btn("Edit","sm",()=>openEditor(key,row)));
+      act.appendChild(btn(readOnly?"View":"Edit","sm",()=>openEditor(key,row)));
+      if(!readOnly){
       act.appendChild(document.createTextNode(" "));
       act.appendChild(btn("Delete","sm dngr",async()=>{
         if(!confirm("Delete \""+row.name+"\"?"))return;
         try{await api(key+"/"+row.id,"DELETE");await renderEntity(key);refreshStatus();}
         catch(e){alert(e.message);}
-      }));
+      }));}
       tr.appendChild(act);tb.appendChild(tr);
     });
     t.appendChild(tb);bd.appendChild(t);
@@ -595,42 +585,23 @@ async function renderSettings(key){
   bd.appendChild(intro);
   const frm=document.createElement("div");frm.className="frm";
   def.fields.forEach(f=>fieldRow(f,cur[f.k]).forEach(el=>frm.appendChild(el)));
+  if(def.formExtra)def.formExtra(frm);
   bd.appendChild(frm);
   const foot=document.createElement("div");foot.style.marginTop="16px";
   const msg=document.createElement("span");msg.className="hint";msg.style.marginLeft="10px";
-  foot.appendChild(btn("Save","pri",async()=>{
+  const shared=!def.sub;          // sub-keyed pages write to local settings
+  const save=btn("Save","pri",async()=>{
     const data=readForm(def.fields);
     try{
       await api(def.ep,"PUT",def.sub?{[def.sub]:data}:data);
       msg.textContent="Saved.";refreshStatus();
     }catch(e){msg.textContent=e.message;}
-  }));
+  });
+  if(readOnly&&shared){save.disabled=true;msg.textContent="Read-only on a passive node.";}
+  foot.appendChild(save);
   foot.appendChild(msg);
   bd.appendChild(foot);card.appendChild(bd);c.appendChild(card);
   if(def.extra)c.appendChild(def.extra());
-}
-function apiKeyCard(){
-  const card=document.createElement("div");card.className="card";
-  card.innerHTML='<div class=hd><h2>This node</h2></div>';
-  const bd=document.createElement("div");bd.className="bd";
-  bd.innerHTML='<p class=hint style="margin-bottom:12px">The API key is for machines, not people: the peer must present it before it may push configuration here, '+
-    'and scripts can use it as an <span class=mono>X-API-Key</span> header instead of signing in. Set a key on both nodes, then enter each node\'s key on the other under Peer API key. '+
-    'People sign in with the administrator login instead.</p>';
-  const frm=document.createElement("div");frm.className="frm";
-  const f={k:"api_key",l:"API key",t:"password",h:"Required for peer sync -- generate a long random value"};
-  api("local").then(loc=>{
-    fieldRow(f,loc.api_key).forEach(el=>frm.appendChild(el));
-    const foot=document.createElement("div");foot.style.marginTop="14px";
-    const msg=document.createElement("span");msg.className="hint";msg.style.marginLeft="10px";
-    foot.appendChild(btn("Save key","pri",async()=>{
-      try{await api("local","PUT",{api_key:document.getElementById("f_api_key").value});
-        msg.textContent="Saved. Update the sidebar key if you changed it.";}
-      catch(e){msg.textContent=e.message;}
-    }));
-    foot.appendChild(msg);bd.appendChild(frm);bd.appendChild(foot);
-  });
-  card.appendChild(bd);
-  return card;
 }
 
 /* ============================ services (the simple view) ============================ */
@@ -794,7 +765,7 @@ async function servicesCard(){
   const card=document.createElement("div");card.className="card";
   const hd=document.createElement("div");hd.className="hd";
   hd.innerHTML="<h2>Services</h2><div class=sp></div>";
-  hd.appendChild(btn("Publish a service","pri sm",()=>openWizard()));
+  if(!readOnly)hd.appendChild(btn("Publish a service","pri sm",()=>openWizard()));
   card.appendChild(hd);
   const bd=document.createElement("div");
   if(!svcs.length){
@@ -819,6 +790,7 @@ async function servicesCard(){
              (s.certificate_match==="wildcard"?" (wildcard)":"")+"</div>":"")+
           (s.days_left!==null&&s.days_left!==undefined?"<div class=sub>"+(s.days_left<0?"expired":"in "+s.days_left+" days")+"</div>":"")+"</td>";
       const act=document.createElement("td");act.style.textAlign="right";act.style.whiteSpace="nowrap";
+      if(!readOnly){
       act.appendChild(btn("Edit","sm",()=>openWizard({
         url:s.url,
         target:s.targets.map(t=>s.scheme==="tcp"?t.replace(/^tcp:\/\//,""):t).join(", "),
@@ -840,7 +812,7 @@ async function servicesCard(){
           showText("Removed "+s.url,(r.removed||[]).map(x=>"- "+x.type+" "+x.name).join("\n")+"\n\n"+r.note);
           await route();refreshStatus();
         }catch(e){alert(e.message);}
-      }));
+      }));}
       tr.appendChild(act);tb.appendChild(tr);
     });
     t.appendChild(tb);bd.appendChild(t);
@@ -917,10 +889,87 @@ function peerEditor(peer,after){
       }catch(e){err.textContent=e.message;}
     })]);
 }
-async function renderPeers(){
+/* Everything about the cluster on one page: what all nodes share, what is
+   particular to this one, who the others are, and how this node is doing. */
+const CLUSTER_SHARED=[
+ {k:"vips",l:"Virtual IP addresses",t:"textarea",h:"One per line with prefix, e.g. 192.0.2.10/24. Bind your Public Services to these."},
+ {k:"vrid",l:"Virtual router ID",t:"number",h:"1-255. Must be identical on every node, and unique among other VRRP groups on the same network."},
+ {k:"auth_pass",l:"VRRP password",t:"password",h:"Same on every node; only the first 8 characters are used"},
+ {k:"state",l:"Initial state",t:"select",o:["MASTER","BACKUP"],d:"BACKUP"},
+ {k:"nopreempt",l:"No preempt",t:"bool",d:true,h:"A recovered node does not take the virtual IP back"},
+ {k:"advert_int",l:"Advertisement interval (s)",t:"number"},
+ {k:"track_haproxy",l:"Track HAProxy process",t:"bool",d:true,h:"Fail over when HAProxy dies on a node"},
+ {k:"custom",l:"Custom options",t:"textarea"},
+];
+const CLUSTER_LOCAL=[
+ {k:"enabled",l:"Run Keepalived here",t:"bool"},
+ {k:"interface",l:"Interface",t:"combo",o:()=>kaIfaceOptions,
+  h:"The interface on THIS node that carries the virtual IP"},
+ {k:"priority",l:"Priority",t:"number",h:"Higher wins. Give each node a different value, e.g. 150 / 140 / 130."},
+ {k:"unicast_peer",l:"Unicast peers",t:"textarea",
+  h:"One address per line: every OTHER node. Leave empty to use multicast VRRP."},
+ {k:"unicast_src",l:"Unicast source address",t:"text",h:"Optional: this node's own address to send VRRP from"},
+];
+async function renderCluster(){
   const c=$("#content");c.innerHTML="";
-  const [peers,loc]=await Promise.all([api("peers"),api("local")]);
+  await loadKeepalivedDiag();
+  const [shared,loc,peers]=await Promise.all([api("cluster/settings"),api("local"),api("peers")]);
 
+  /* --- what every node shares --- */
+  const s1=document.createElement("div");s1.className="card";
+  s1.innerHTML='<div class=hd><h2>Cluster settings</h2><div class=sp></div><span class=hint>shared by every node</span></div>';
+  const b1=document.createElement("div");b1.className="bd";
+  b1.innerHTML='<p class=hint style="margin-bottom:14px">These must match on every node. Pushing the configuration '+
+    'sends them to the others, so set them here and sync.</p>';
+  const f1=document.createElement("div");f1.className="frm";
+  CLUSTER_SHARED.forEach(f=>fieldRow(f,shared[f.k]).forEach(el=>f1.appendChild(el)));
+  b1.appendChild(f1);
+  const m1=document.createElement("span");m1.className="hint";m1.style.marginLeft="10px";
+  const ft1=document.createElement("div");ft1.style.marginTop="16px";
+  const saveShared=btn("Save","pri",async()=>{
+    try{await api("cluster/settings","PUT",readForm(CLUSTER_SHARED));
+      m1.textContent="Saved. Apply on this node, then push to the others.";refreshStatus();}
+    catch(e){m1.textContent=e.message;}
+  });
+  if(readOnly){saveShared.disabled=true;m1.textContent="Read-only on a passive node -- change these on the active node and push.";}
+  ft1.appendChild(saveShared);
+  ft1.appendChild(m1);b1.appendChild(ft1);s1.appendChild(b1);c.appendChild(s1);
+
+  /* --- what is particular to this node --- */
+  const s2=document.createElement("div");s2.className="card";
+  s2.innerHTML='<div class=hd><h2>This node</h2><div class=sp></div><span class=hint>never synced</span></div>';
+  const b2=document.createElement("div");b2.className="bd";
+  const f2=document.createElement("div");f2.className="frm";
+  const localFields=CLUSTER_LOCAL.concat([
+    {k:"node_url",l:"This node's URL",t:"text",h:"How the other nodes reach this one, e.g. http://10.0.0.1:8080. Needed to hand them a way back."},
+    {k:"api_key",l:"API key",t:"password",h:"Machines only: the others present this to sync here, and scripts can send it as X-API-Key."},
+  ]);
+  localFields.forEach(f=>{
+    const v=f.k==="node_url"?loc.node_url:f.k==="api_key"?loc.api_key:(loc.keepalived||{})[f.k];
+    fieldRow(f,v).forEach(el=>f2.appendChild(el));
+  });
+  b2.appendChild(f2);
+  keepalivedFormExtra(f2);
+  const m2=document.createElement("span");m2.className="hint";m2.style.marginLeft="10px";
+  const ft2=document.createElement("div");ft2.style.marginTop="16px";
+  ft2.appendChild(btn("Save","pri",async()=>{
+    const d=readForm(localFields);
+    try{
+      await api("local","PUT",{keepalived:readForm(CLUSTER_LOCAL),
+                               node_url:d.node_url,api_key:d.api_key});
+      m2.textContent="Saved. Press Apply to write keepalived.conf.";
+      await loadKeepalivedDiag();refreshStatus();
+    }catch(e){m2.textContent=e.message;}
+  }));
+  ft2.appendChild(m2);b2.appendChild(ft2);s2.appendChild(b2);c.appendChild(s2);
+
+  /* --- the other nodes --- */
+  c.appendChild(peersCard(peers,loc));
+  c.appendChild(keepalivedDiagCard());
+}
+
+function peersCard(peers,loc){
+  const frag=document.createDocumentFragment();
   const card=document.createElement("div");card.className="card";
   const hd=document.createElement("div");hd.className="hd";
   hd.innerHTML="<h2>Other nodes</h2><div class=sp></div>";
@@ -928,9 +977,9 @@ async function renderPeers(){
   card.appendChild(hd);
   const bd=document.createElement("div");
   if(!peers.length){
-    bd.innerHTML='<div class=empty>No other nodes yet.<br><br>Add every other node in the cluster here, '+
-      'each with the API key configured on it. Configuration and certificates are pushed to all of them, '+
-      'and the Overview shows their health.</div>';
+    bd.innerHTML='<div class=empty>No other nodes yet.<br><br>Add every other node, each with the API key '+
+      'configured on it. Configuration, cluster settings and certificates are pushed to all of them, and the '+
+      'Overview shows their health.</div>';
   }else{
     const t=document.createElement("table");
     t.innerHTML="<thead><tr><th>Name</th><th>URL</th><th>API key</th><th>Enabled</th><th></th></tr></thead>";
@@ -945,7 +994,7 @@ async function renderPeers(){
       act.appendChild(out);
       act.appendChild(btn("Sync","sm",async()=>{
         out.textContent="pushing...";
-        try{const r=await api("sync/push","POST",{peer:p.id});
+        try{const r=await api("sync/push","POST",{peer:p.id,include_peers:true});
           out.textContent=r.ok?"synced":("failed: "+(r.error||""));}
         catch(e){out.textContent=e.message;}
       }));
@@ -960,34 +1009,40 @@ async function renderPeers(){
     });
     t.appendChild(tb);bd.appendChild(t);
   }
-  card.appendChild(bd);c.appendChild(card);
+  card.appendChild(bd);frag.appendChild(card);
 
   const opt=document.createElement("div");opt.className="card";
   opt.innerHTML='<div class=hd><h2>Sync</h2></div>';
   const ob=document.createElement("div");ob.className="bd";
-  ob.innerHTML='<p class=hint style="margin-bottom:12px">A push sends the shared configuration (HAProxy + ACME) '+
-    'and the deployed certificates to every enabled node. Each one validates, applies and reloads. Their node-local '+
-    'settings -- Keepalived, this peer list, login and API key -- are never touched, so there is no sync loop.</p>';
-  const frm=document.createElement("div");frm.className="frm";
+  ob.innerHTML='<p class=hint style="margin-bottom:12px">A push sends the shared configuration (HAProxy, ACME and '+
+    'the cluster settings above) and the deployed certificates to every enabled node, which validates, applies and '+
+    'reloads. Their own interface, priority, unicast addresses, login and API key are never touched, so there is no '+
+    'sync loop. It also hands each node the membership list, including a way back to this one, so you only maintain '+
+    'the list here.</p>';
   const f={k:"auto_sync",l:"Sync after every Apply",t:"bool"};
+  const frm=document.createElement("div");frm.className="frm";
   fieldRow(f,(loc.sync||{}).auto_sync).forEach(el=>frm.appendChild(el));
   ob.appendChild(frm);
-  const msg=document.createElement("span");msg.className="hint";msg.style.marginLeft="10px";
+  const msg=document.createElement("div");msg.className="hint";msg.style.marginTop="12px";
   const foot=document.createElement("div");foot.style.marginTop="14px";
   foot.appendChild(btn("Save","pri",async()=>{
     try{await api("local","PUT",{sync:readForm([f])});msg.textContent="Saved.";}
     catch(e){msg.textContent=e.message;}
   }));
   foot.appendChild(document.createTextNode(" "));
-  foot.appendChild(btn("Sync to all now","warn",async()=>{
+  foot.appendChild(btn("Sync to all nodes now","warn",async()=>{
     msg.textContent="Pushing to every node...";
-    try{const r=await api("sync/push","POST",{});
-      msg.textContent=(r.results||[]).map(x=>x.name+": "+(x.ok?"ok":x.error)).join(" | ")||(r.error||"done");}
-    catch(e){msg.textContent=e.message;}
+    try{
+      const r=await api("sync/push","POST",{include_peers:true});
+      msg.innerHTML=(r.results||[]).map(x=>esc(x.name)+": "+(x.ok?'<span class="pill up">ok</span>'
+                                                              :'<span class="pill down">'+esc(x.error||"failed")+"</span>")).join("<br>")
+                    ||esc(r.error||"done");
+      if(r.warning)msg.innerHTML+='<div style="margin-top:8px">! '+esc(r.warning)+"</div>";
+    }catch(e){msg.textContent=e.message;}
   }));
   foot.appendChild(msg);
-  ob.appendChild(foot);opt.appendChild(ob);c.appendChild(opt);
-  c.appendChild(apiKeyCard());
+  ob.appendChild(foot);opt.appendChild(ob);frag.appendChild(opt);
+  return frag;
 }
 
 /* Health of every node, as seen from this one. */
@@ -1045,6 +1100,29 @@ async function loadKeepalivedDiag(){
   }catch(e){kaDiag=null;kaIfaceOptions=[];}
   return kaDiag;
 }
+/* Typing every other node's address on every node is the tedious part. */
+function keepalivedFormExtra(frm){
+  const ta=frm.querySelector("#f_unicast_peer");
+  if(!ta)return;
+  const wrap=document.createElement("div");wrap.style.marginTop="8px";
+  const msg=document.createElement("span");msg.className="hint";msg.style.marginLeft="10px";
+  wrap.appendChild(btn("Fill from the peer list","sm",async()=>{
+    try{
+      const peers=await api("peers");
+      const addrs=peers.filter(p=>p.enabled!==false)
+        .map(p=>{try{return new URL(p.url).hostname;}catch(e){return "";}}).filter(Boolean);
+      if(!addrs.length){msg.textContent="No peers are configured yet -- add them under Peer sync.";return;}
+      const have=ta.value.split("\n").map(l=>l.trim()).filter(Boolean);
+      const add=addrs.filter(a=>!have.includes(a));
+      ta.value=have.concat(add).join("\n")+"\n";
+      msg.textContent=add.length?("Added "+add.join(", ")+". Check they are addresses VRRP can reach.")
+                                :"Already listed.";
+    }catch(e){msg.textContent=e.message;}
+  }));
+  wrap.appendChild(msg);
+  ta.parentNode.appendChild(wrap);
+}
+
 function keepalivedDiagCard(){
   const card=document.createElement("div");card.className="card";
   card.innerHTML='<div class=hd><h2>This node right now</h2></div>';
@@ -1702,6 +1780,7 @@ const NAV=[
  ["","Overview",null],
  ["p:services","Services"],
  ["p:stats","Statistics"],
+ ["p:cluster","Cluster"],
  ["grp","CERTIFICATES"],
  ["acme/certificates","Certificates"],
  ["acme/accounts","ACME Accounts"],
@@ -1722,13 +1801,10 @@ const NAV=[
  ["grp","ADVANCED · ACME","collapse"],
  ["acme/automations","Automations"],
  ["s:acme-settings","Settings"],
- ["grp","ADVANCED · KEEPALIVED","collapse"],
- ["s:keepalived","Keepalived"],
- ["p:peers","Peer sync"],
 ];
 /* pages with a hand-written renderer (neither CRUD nor a settings form) */
 const P={services:renderServices,stats:renderStats,backup:renderBackup,admin:renderAdmin,
-         updates:renderUpdates,webui:renderWebui,peers:renderPeers};
+         updates:renderUpdates,webui:renderWebui,cluster:renderCluster};
 let pageTimer=null;      // per-page refresh timer, cleared whenever we navigate
 /* Collapsed groups are remembered, so the nav stays how you left it. */
 function openGroups(){
@@ -1812,6 +1888,7 @@ async function refreshStatus(){
       u.style.textDecoration="none";u.textContent="v"+st.latest_version+" available";
       ns.appendChild(u);
     }
+    renderBanner(st);
     $("#applybtn").classList.toggle("warn",st.dirty);
     $("#applybtn").classList.toggle("pri",!st.dirty);
   }catch(e){/* not fatal */}
@@ -1839,6 +1916,27 @@ async function doApply(){
 buildNav();
 $("#applybtn").onclick=doApply;
 window.addEventListener("hashchange",route);
+let readOnly=false;
+function renderBanner(st){
+  const b=$("#banner");
+  readOnly=!!(st&&st.read_only);
+  if(!readOnly){b.innerHTML="";return;}
+  b.innerHTML="";
+  const box=document.createElement("div");box.className="ro";
+  const txt=document.createElement("div");
+  txt.innerHTML="<b>Read-only: this node is passive</b>"+esc(st.read_only_reason||"");
+  box.appendChild(txt);
+  const act=btn("Edit here anyway","sm",async()=>{
+    if(!confirm("Allow editing the shared configuration on this passive node?\n\n"+
+                "Use this when no node holds the virtual IP, or when you are deliberately "+
+                "working here. Whatever you change must still be pushed to the others, and "+
+                "the active node's copy will overwrite this one if it pushes first."))return;
+    try{await api("local","PUT",{allow_edit_when_passive:true});refreshStatus();route();}
+    catch(e){alert(e.message);}
+  });
+  act.style.marginLeft="auto";act.style.whiteSpace="nowrap";
+  box.appendChild(act);b.appendChild(box);
+}
 let ticking=false;
 function boot(){
   route();refreshStatus();

@@ -141,17 +141,37 @@ It calls out the conditions that are otherwise invisible until traffic stops:
   nodes that **did not answer** (with the reason: unreachable, or the API key
   this node holds for it was rejected).
 
-### Peers
+### The Cluster page
 
-**Advanced → Keepalived → Peer sync** lists the other nodes, each with its URL
-and the API key configured *on that node*. A push sends the shared configuration
-and the deployed certificates to all of them in parallel and reports per node;
-"Sync after every Apply" does it automatically. Their node-local settings —
-Keepalived, their own peer list, login and API key — are never touched, so there
-is no sync loop. Keys are stored per peer and never sent back to the browser.
+Everything about the cluster lives on one page, split by what it applies to:
 
-An existing two-node setup is migrated automatically: the old single peer
-becomes the first entry in the list.
+- **Cluster settings** — the virtual IPs, virtual router ID, VRRP password,
+  advertisement interval, initial state, `nopreempt` and HAProxy tracking. These
+  must be identical everywhere, so they are part of the shared configuration and
+  travel with a push.
+- **This node** — whether Keepalived runs here, the interface, this node's
+  priority, its unicast addresses, the URL the others should use to reach it, and
+  its API key. Never synced: these are meant to differ.
+- **Other nodes** — one entry per node with its URL and the API key configured
+  *on that node*. A push also hands each node the membership list, including a
+  way back to this one, so you maintain the list in one place. Keys are stored
+  per peer and never sent back to the browser.
+- **This node right now** — the diagnostics described under Keepalived below.
+
+An existing two-node setup is migrated automatically: the old single peer becomes
+the first entry, and the shared VRRP settings move out of the node-local section.
+
+### Only the active node is editable
+
+The node holding the virtual IP is where the shared configuration is edited; the
+others are **read-only** and show a banner saying so. This stops two nodes from
+diverging and then overwriting each other on the next push.
+
+A passive node can still fix **itself** — interface, priority, unicast addresses,
+peer list, login, API key, updates, and Apply — because a node that cannot take
+the VIP has to be repairable. And when *no* node holds the VIP, the banner's
+**Edit here anyway** unlocks that node, so a broken cluster is never a lockout.
+The lock is enforced by the API, not just hidden in the UI.
 
 ### Keepalived
 
