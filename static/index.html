@@ -603,21 +603,71 @@ const WIZ_FIELDS=[
  {k:"url",l:"Public URL",t:"text",h:"What users type, e.g. https://ps2.iothing.net (a path like /api is allowed)"},
  {k:"target",l:"Forward to",t:"text",h:"The server behind it, e.g. http://192.168.1.100:1781. Several (comma separated) are load balanced."},
  {k:"name",l:"Name",t:"text",h:"Optional -- derived from the host name when left empty"},
- {k:"certificate",l:"Get a Let's Encrypt certificate",t:"bool",d:true,h:"HTTPS only. Until it is issued, a self-signed placeholder keeps HAProxy running."},
- {k:"account",l:"ACME account",t:"ref",ref:"acme/accounts",h:"Only needed when you have more than one"},
+ {k:"cert_mode",l:"Certificate",t:"select",d:"auto",
+  o:["auto","new","none"],
+  h:"HTTPS only. \"auto\" reuses an existing certificate that already covers this host -- including a wildcard -- and only requests a new one when nothing does."},
+ {k:"account",l:"ACME account",t:"ref",ref:"acme/accounts",h:"For a new certificate; only needed when you have more than one"},
  {k:"challenge",l:"Challenge type",t:"ref",ref:"acme/challenges"},
  {k:"http_redirect",l:"Redirect HTTP to HTTPS",t:"bool",d:true,h:"Also listens on port 80 and sends visitors to HTTPS"},
  {k:"apply",l:"Apply immediately",t:"bool",d:true,h:"Write haproxy.cfg and reload once the objects are created"},
 ];
+const CERT_MODE_LABEL={auto:"auto -- reuse one that covers this host",
+                       new:"always request a new certificate",
+                       none:"no certificate"};
+
+/* Tell the user which certificate a host will end up using, before they commit. */
+async function updateCertNote(note){
+  const raw=(document.getElementById("f_url")||{}).value||"";
+  const mode=(document.getElementById("f_cert_mode")||{}).value||"auto";
+  let host="";
+  try{host=new URL(raw.includes("://")?raw:"https://"+raw).hostname;}catch(e){}
+  if(!host||!raw.trim().toLowerCase().startsWith("https")){note.innerHTML="";return;}
+  if(mode==="none"){note.innerHTML='<span class=sub>No certificate will be attached -- the listener still needs one to start TLS.</span>';return;}
+  if(mode==="new"){note.innerHTML='<span class=sub>A new certificate will be requested for '+esc(host)+".</span>";return;}
+  note.innerHTML='<span class=sub>Checking for an existing certificate...</span>';
+  try{
+    const r=await api("acme/cover?host="+encodeURIComponent(host));
+    if(r.covered){
+      const cls=CERT_STATUS[r.status]?CERT_STATUS[r.status][0]:"off";
+      note.innerHTML='<span class="pill '+cls+'">'+esc(r.how==="wildcard"?"wildcard match":"exact match")+"</span> "+
+        "Will reuse <b>"+esc(r.name)+"</b> <span class=mono>("+esc(r.domains.join(", "))+")</span>"+
+        (r.days_left!==null&&r.days_left!==undefined?" &mdash; expires in "+esc(r.days_left)+" days":"")+
+        ". No new certificate will be requested.";
+    }else{
+      note.innerHTML='<span class=sub>No existing certificate covers '+esc(host)+
+        " &mdash; a new one will be requested. Tip: a wildcard certificate for <span class=mono>*."+
+        esc(host.split('.').slice(1).join('.'))+"</span> would cover every subdomain at once.</span>";
+    }
+  }catch(e){note.innerHTML='<span class=sub>'+esc(e.message)+"</span>";}
+}
+
 function openWizard(prefill){
   const wrap=document.createElement("div");
   const frm=document.createElement("div");frm.className="frm";
   WIZ_FIELDS.forEach(f=>fieldRow(f,prefill?prefill[f.k]:undefined).forEach(el=>frm.appendChild(el)));
   wrap.appendChild(frm);
+  // friendlier labels than the raw option values
+  const sel=frm.querySelector("#f_cert_mode");
+  if(sel)[...sel.options].forEach(o=>{o.textContent=CERT_MODE_LABEL[o.value]||o.value;});
+  const note=document.createElement("div");note.className="hint";note.style.margin="2px 0 0";
+  const noteRow=document.createElement("div");noteRow.appendChild(note);
+  frm.appendChild(document.createElement("div"));frm.appendChild(noteRow);
+  ["f_url","f_cert_mode"].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el){el.addEventListener("change",()=>updateCertNote(note));el.addEventListener("blur",()=>updateCertNote(note));}
+  });
+  updateCertNote(note);
   const out=document.createElement("div");out.style.marginTop="16px";wrap.appendChild(out);
   const err=document.createElement("div");err.className="err";
 
-  const read=()=>{const d=readForm(WIZ_FIELDS);d.certificate=!!d.certificate;return d;};
+  const read=()=>{
+    const d=readForm(WIZ_FIELDS);
+    d.certificate=d.cert_mode!=="none";        // "none" attaches nothing
+    d.new_certificate=d.cert_mode==="new";     // otherwise reuse whatever covers the host
+    if(prefill&&prefill.certificate_id&&d.cert_mode==="auto")d.certificate_id=prefill.certificate_id;
+    delete d.cert_mode;
+    return d;
+  };
   const show=(r,saved)=>{
     out.innerHTML="";
     const box=document.createElement("div");box.className="card";box.style.margin="0";
@@ -677,6 +727,8 @@ async function renderServices(){
         "<td class=mono>"+(s.targets.length?s.targets.map(esc).join("<br>"):"<span class=sub>no server</span>")+
           "<div class=sub>pool "+esc(s.pool||"—")+"</div></td>"+
         "<td><span class='pill "+cls+"'>"+esc(lbl)+"</span>"+
+          (s.certificate?"<div class=sub>"+esc(s.certificate)+
+             (s.certificate_match==="wildcard"?" (wildcard)":"")+"</div>":"")+
           (s.days_left!==null&&s.days_left!==undefined?"<div class=sub>"+(s.days_left<0?"expired":"in "+s.days_left+" days")+"</div>":"")+"</td>";
       const act=document.createElement("td");act.style.textAlign="right";act.style.whiteSpace="nowrap";
       act.appendChild(btn("Edit","sm",()=>openWizard({url:s.url,target:s.targets[0]||"",name:s.pool||""})));

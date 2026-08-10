@@ -20,6 +20,13 @@ routing Rule, the HTTPS listener, an ACME certificate, and an HTTP listener that
 redirects to HTTPS — then applies. **Preview** shows exactly what it will create,
 and the resulting `haproxy.cfg`, before anything is written.
 
+- **Wildcard certificates are reused, not duplicated.** If a certificate already
+  covers the host — `*.iothing.net` for `ps2.iothing.net`, or an exact name —
+  the wizard attaches it instead of requesting another one, and says so before
+  you commit. An exact name wins over a wildcard that would also match, and
+  `*.iothing.net` correctly does **not** cover `iothing.net` or
+  `a.b.iothing.net`. Set Certificate to *always request a new certificate* to
+  override, or *no certificate* to terminate TLS elsewhere.
 - **Several targets**, comma separated, are load balanced across.
 - **A path** works too: `https://ps2.iothing.net/api` routes only that prefix.
   More specific rules are placed ahead of broader ones, so a host+path rule is

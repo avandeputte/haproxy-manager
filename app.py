@@ -1334,6 +1334,60 @@ def _bind_ports(fe):
 WIZARD_MARK = "created by the publish wizard"
 
 
+def domain_covers(pattern, host):
+    """Does a certificate domain entry cover this host name?
+
+    Wildcards follow what browsers accept (RFC 6125): the wildcard is only the
+    leftmost label and matches exactly one label, so *.example.com covers
+    a.example.com but neither example.com nor a.b.example.com.
+    """
+    pattern = (pattern or "").strip().strip(".").lower()
+    host = (host or "").strip().strip(".").lower()
+    if not pattern or not host:
+        return False
+    if pattern == host:
+        return True
+    if pattern.startswith("*."):
+        suffix = pattern[2:]
+        if not suffix or not host.endswith("." + suffix):
+            return False
+        label = host[:-(len(suffix) + 1)]
+        return bool(label) and "." not in label
+    return False
+
+
+def cert_for_host(certificates, host):
+    """The best existing certificate for a host: (cert, "exact"|"wildcard") or (None, None).
+
+    An exact name wins over a wildcard that would also cover it.
+    """
+    wildcard = None
+    for c in certificates:
+        for d in parse_domains(c):
+            if d.strip().lower() == (host or "").strip().lower():
+                return c, "exact"
+            if d.strip().startswith("*.") and domain_covers(d, host) and wildcard is None:
+                wildcard = c
+    return (wildcard, "wildcard") if wildcard else (None, None)
+
+
+@app.get("/api/acme/cover")
+def api_acme_cover():
+    """Which configured certificate, if any, already covers this host name."""
+    host = (request.args.get("host") or "").strip()
+    if not host:
+        return jsonify({"ok": False, "error": "host is required"}), 400
+    cfg = load_config()
+    cert, how = cert_for_host(cfg["acme"]["certificates"], host)
+    if not cert:
+        return jsonify({"ok": True, "host": host, "covered": False})
+    info = cert_details(cert_path(cert))
+    return jsonify({"ok": True, "host": host, "covered": True, "how": how,
+                    "id": cert["id"], "name": cert["name"],
+                    "domains": parse_domains(cert), "status": info["status"],
+                    "expires_iso": info["expires_iso"], "days_left": info["days_left"]})
+
+
 def _drop_orphan_wizard_servers(hp, candidate_ids, acts):
     """Remove wizard-made Real Servers that no pool references any more.
 
@@ -1368,7 +1422,8 @@ def _place_rule(hp, rule_ids, rule):
 
 
 def wizard_publish(cfg, pub, tgts, name=None, want_cert=True, account=None,
-                   challenge=None, http_redirect=True, healthcheck=None):
+                   challenge=None, http_redirect=True, healthcheck=None,
+                   certificate_id=None, new_certificate=False):
     """Create (or update) everything needed to serve `pub` from `tgts`.
 
     Re-running for the same public host updates that mapping instead of adding
@@ -1466,9 +1521,17 @@ def wizard_publish(cfg, pub, tgts, name=None, want_cert=True, account=None,
     # -- Certificate (https only; the object also gives Apply a placeholder)
     cert = None
     if pub["scheme"] == "https" and want_cert:
-        cert = _find(ac["certificates"], lambda c: pub["host"] in parse_domains(c))
+        how = None
+        if certificate_id:
+            cert = _by_id(ac["certificates"]).get(certificate_id)
+            how = "chosen" if cert else None
+        if not cert and not new_certificate:
+            cert, how = cert_for_host(ac["certificates"], pub["host"])
         if cert:
-            act("reused", "Certificate", cert["name"])
+            act("reused", "Certificate", cert["name"] +
+                (" (wildcard %s covers %s)" % (next((d for d in parse_domains(cert)
+                                                     if domain_covers(d, pub["host"]) and d.startswith("*.")), ""),
+                                               pub["host"]) if how == "wildcard" else ""))
         else:
             accounts, challenges = ac["accounts"], ac["challenges"]
             acc_id = account or (accounts[0]["id"] if len(accounts) == 1 else "")
@@ -1572,12 +1635,8 @@ def api_services():
             default_port = 443 if scheme == "https" else 80
             shown_port = "" if (not ports or ports[0] == default_port) else ":%d" % ports[0]
 
-            cert = None
-            for cid in fe.get("certificates") or []:
-                c = certs.get(cid)
-                if c and host in parse_domains(c):
-                    cert = c
-                    break
+            attached = [certs[cid] for cid in (fe.get("certificates") or []) if cid in certs]
+            cert, match = cert_for_host(attached, host)
             info = cert_details(cert_path(cert)) if cert else None
 
             out.append({
@@ -1591,6 +1650,7 @@ def api_services():
                 "enabled": fe.get("enabled", True) and (pool.get("enabled", True) if pool else False),
                 "certificate": cert["name"] if cert else None,
                 "certificate_id": cert["id"] if cert else None,
+                "certificate_match": match,          # "exact" or "wildcard"
                 "certificate_status": info["status"] if info else None,
                 "expires_iso": info["expires_iso"] if info else None,
                 "days_left": info["days_left"] if info else None,
@@ -1676,6 +1736,8 @@ def api_wizard_publish():
                 challenge=body.get("challenge") or None,
                 http_redirect=body.get("http_redirect", True),
                 healthcheck=body.get("healthcheck") or None,
+                certificate_id=body.get("certificate_id") or None,
+                new_certificate=bool(body.get("new_certificate")),
             )
         except Exception as e:                      # a malformed draft must not corrupt the store
             return jsonify({"ok": False, "error": "could not build the configuration: %s" % e}), 400
