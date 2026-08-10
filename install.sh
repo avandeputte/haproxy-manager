@@ -480,6 +480,13 @@ Environment=HAM_PORT=$PORT
 ExecStart=/usr/bin/python3 $DEST/app.py
 Restart=on-failure
 RestartSec=3
+# Hang detection. The app pings systemd only when a real request to its own
+# listener succeeds, so a process whose worker threads are all blocked -- alive,
+# but answering nothing -- stops pinging and gets restarted. NotifyAccess must
+# be set explicitly: for Type=simple it defaults to none, and the pings would
+# be discarded.
+NotifyAccess=main
+WatchdogSec=90
 
 [Install]
 WantedBy=multi-user.target

@@ -1320,16 +1320,29 @@ function byNameHint(url){
 }
 
 /* Health of every node, as seen from this one. */
-async function clusterCard(){
+async function clusterCard(fresh){
   const card=document.createElement("div");card.className="card";
   card.innerHTML='<div class=hd><h2>Cluster</h2><div class=sp></div></div>';
   const bd=document.createElement("div");
   let cl;
-  try{cl=await api("cluster");}
+  try{cl=await api("cluster"+(fresh?"?fresh=1":""));}
   catch(e){bd.innerHTML='<div class="bd">'+esc(e.message)+"</div>";card.appendChild(bd);return card;}
 
   const s=cl.summary;
-  card.querySelector(".hd").insertAdjacentHTML("beforeend",
+  const hd=card.querySelector(".hd");
+  /* Health is collected in the background, so say how old it is rather than
+     let it look live. Asking each node on page load put the slowest node's
+     timeout in front of the user. */
+  hd.insertAdjacentHTML("beforeend",
+    '<span class=hint style="margin-right:10px">'+
+      (cl.live?"just now":"as of "+esc(cl.age_seconds)+"s ago")+"</span>");
+  const rb=btn("Refresh","sm ghost",async()=>{
+    rb.disabled=true;rb.textContent="asking each node...";
+    const fresh=await clusterCard(true);
+    card.replaceWith(fresh);
+  });
+  hd.appendChild(rb);
+  hd.insertAdjacentHTML("beforeend",
     '<span class="pill '+(s.reachable===s.total?"up":"down")+'">'+s.reachable+"/"+s.total+" reachable</span>");
   if(cl.nodes.length===1&&!s.warnings.length){
     bd.innerHTML='<div class=empty>This is the only node. Add the others under '+
@@ -2062,6 +2075,96 @@ async function renderOverview(){
 
 }
 
+/* ============================ watchdog ============================ */
+const WD_STATE={ok:["up","is answering"],down:["down","is not running"],
+  hung:["down","is not responding"],starting:["warn","is starting"],
+  idle:["off","nothing to supervise yet"],disabled:["off","not run on this node"],
+  unwatched:["off","not supervised"],unknown:["warn","could not be determined"]};
+async function renderWatchdog(){
+  const c=$("#content");c.innerHTML="";
+  let wd;
+  try{wd=await api("watchdog");}
+  catch(e){c.innerHTML='<div class="card"><div class="bd">'+esc(e.message)+"</div></div>";return;}
+
+  /* --- what it sees right now --- */
+  const card=document.createElement("div");card.className="card";
+  card.innerHTML='<div class=hd><h2>Watchdog</h2><div class=sp></div>'+
+    '<span class="pill '+(wd.settings.enabled?"up":"off")+'">'+
+    (wd.settings.enabled?"on":"off")+"</span></div>";
+  const rows=Object.keys(wd.services||{}).map(u=>{
+    const s=wd.services[u],m=WD_STATE[s.state]||["warn",s.state];
+    return "<tr><td class=mono>"+esc(u)+"</td>"+
+      '<td><span class="pill '+m[0]+'">'+esc(s.state)+"</span></td>"+
+      "<td>"+esc(s.detail||m[1])+
+        (s.blocked?'<div class=sub style="color:var(--down)">not restarted: '+esc(s.blocked)+"</div>":"")+
+        (s.restart_error?'<div class=sub style="color:var(--down)">'+esc(s.restart_error)+"</div>":"")+
+      "</td>"+
+      "<td>"+esc(s.action||"—")+"</td></tr>";
+  }).join("");
+  card.innerHTML+=(rows?"<table><thead><tr><th>Service</th><th>State</th><th>Detail</th>"+
+      "<th>Last action</th></tr></thead><tbody>"+rows+"</tbody></table>"
+    :'<div class=empty>No round has run yet. It runs every '+
+      esc(wd.settings.interval||20)+"s.</div>");
+
+  const self=document.createElement("div");self.className="bd";
+  self.innerHTML='<div class=hint><b>This process:</b> '+
+    (wd.self.ok?'the UI answered its own request in '+esc(wd.self.ms)+" ms."
+              :'<span style="color:var(--down)">'+esc(wd.self.detail)+"</span>")+
+    " "+(wd.systemd
+      ? "systemd is watching: if this stops answering, it is restarted."
+      : "systemd is not watching this process (no WatchdogSec in the unit), so a hang here "+
+        "is reported but not repaired.")+"</div>"+
+    (wd.last_run?'<div class=hint style="margin-top:4px">Last round '+esc(wd.last_run)+".</div>":"");
+  card.appendChild(self);
+  c.appendChild(card);
+
+  /* --- settings --- */
+  const sc=document.createElement("div");sc.className="card";
+  sc.innerHTML='<div class=hd><h2>Settings</h2></div>';
+  const sb=document.createElement("div");sb.className="bd";
+  const FIELDS=[
+   {k:"enabled",l:"Run the watchdog on this node",t:"bool"},
+   {k:"haproxy",l:"Supervise HAProxy",t:"bool"},
+   {k:"keepalived",l:"Supervise Keepalived",t:"bool"},
+   {k:"interval",l:"Check every (seconds)",t:"text",h:"minimum 5"},
+   {k:"max_restarts",l:"Restarts allowed per window",t:"text",
+    h:"after this many it stops trying, so a broken service stays visible instead of flapping"},
+   {k:"window",l:"Window (seconds)",t:"text",h:"e.g. 900 for fifteen minutes"},
+  ];
+  FIELDS.forEach(f=>sb.appendChild(fieldRow(f,wd.settings[f.k])));
+  sc.appendChild(sb);
+  const foot=document.createElement("div");foot.className="bd";
+  foot.style.cssText="display:flex;gap:8px;align-items:center;border-top:1px solid var(--hair)";
+  const note=document.createElement("span");note.className="hint";
+  foot.appendChild(btn("Save","primary",async()=>{
+    note.textContent="saving...";
+    try{await api("watchdog","PUT",readForm(FIELDS));note.textContent="Saved.";renderWatchdog();}
+    catch(e){note.textContent=e.message;}
+  }));
+  foot.appendChild(btn("Check now","",async()=>{
+    note.textContent="checking...";
+    try{await api("watchdog/check","POST",{});renderWatchdog();}
+    catch(e){note.textContent=e.message;}
+  }));
+  foot.appendChild(note);
+  sc.appendChild(foot);
+  c.appendChild(sc);
+
+  /* --- what it has done --- */
+  const ev=document.createElement("div");ev.className="card";
+  ev.innerHTML='<div class=hd><h2>Recent actions</h2></div>'+
+    ((wd.events||[]).length
+      ? "<table><thead><tr><th>When</th><th>Service</th><th>What happened</th></tr></thead><tbody>"+
+        wd.events.map(e=>"<tr><td class=mono style=white-space:nowrap>"+esc(e.time)+"</td>"+
+          "<td class=mono>"+esc(e.unit)+"</td><td"+
+          (e.level==="error"?' style="color:var(--down)"':e.level==="warning"?' style="color:var(--drift)"':"")+
+          ">"+esc(e.message)+"</td></tr>").join("")+"</tbody></table>"
+      : '<div class=empty>It has not had to do anything.</div>');
+  c.appendChild(ev);
+
+  pageTimer=setTimeout(()=>{if(location.hash==="#/p:watchdog")renderWatchdog();},10000);
+}
+
 /* ============================ logs ============================ */
 /* Filters live outside the render so a refresh does not wipe what you typed. */
 const logState={sources:{manager:true,haproxy:true,acme:true,keepalived:true},
@@ -2169,6 +2272,7 @@ const NAV=[
  ["p:webui","Web UI access"],
  ["p:backup","Backup & Export"],
  ["p:admin","Administrator login"],
+ ["p:watchdog","Watchdog"],
  ["p:logs","Logs"],
  ["p:updates","Version & updates"],
  ["grp","ADVANCED · HAPROXY","collapse"],
@@ -2184,7 +2288,8 @@ const NAV=[
 ];
 /* pages with a hand-written renderer (neither CRUD nor a settings form) */
 const P={services:renderServices,stats:renderStats,backup:renderBackup,admin:renderAdmin,
-         updates:renderUpdates,webui:renderWebui,cluster:renderCluster,logs:renderLogs};
+         updates:renderUpdates,webui:renderWebui,cluster:renderCluster,logs:renderLogs,
+         watchdog:renderWatchdog};
 let pageTimer=null;      // per-page refresh timer, cleared whenever we navigate
 /* Collapsed groups are remembered, so the nav stays how you left it. */
 function openGroups(){

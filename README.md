@@ -357,6 +357,64 @@ five seconds:
 A server with health checking switched off reports `no check` and counts as up,
 because HAProxy still routes to it.
 
+## Watchdog
+
+Each node supervises its own services. **Watchdog** shows what it sees and what
+it has done.
+
+The point is the distinction between *stopped* and *hung*. `systemctl is-active`
+answers "is the process there", which a wedged process passes while serving
+nothing — so each service gets a probe that makes it *do* something:
+
+| Service | Liveness probe | Restarted when |
+| --- | --- | --- |
+| **HAProxy** | `show info` on its stats socket | the service is stopped or failed, or it does not answer within 5s |
+| **Keepalived** | the service is running when the cluster wants it | it is stopped or failed while this node should be running it |
+| **This app** | a real HTTP request to its own listener | see below |
+
+It restarts deliberately, not reflexively:
+
+- **Never against a configuration that cannot work.** If `haproxy -c` rejects
+  the file, restarting is a loop that hides the fault, so it stops and says
+  which line is wrong.
+- **Never a service you disabled.** A masked or disabled unit is taken as "leave
+  this alone" — a node in maintenance stays in maintenance.
+- **Never endlessly.** Three restarts per fifteen minutes by default; after that
+  it stops and reports, so a failing service stays visible instead of flapping.
+- Everything it does is logged, so the **Logs** page carries the history.
+
+### Watching the app itself
+
+A watchdog inside a process cannot restart that process, so systemd does it. The
+unit sets `WatchdogSec=90`, and the app pings systemd **only when a real request
+to its own listener succeeds**. That catches the failure that matters: every
+worker thread blocked, process healthy, UI answering nothing. Pinging from a
+timer would report health from inside a process that serves none.
+
+Verified by stopping the process with `SIGSTOP` — `systemctl is-active` still
+said `active`, and systemd restarted it on the deadline:
+
+```
+systemd[1]: haproxy-manager.service: Watchdog timeout (limit 1min 30s)!
+systemd[1]: haproxy-manager.service: Failed with result 'watchdog'.
+systemd[1]: haproxy-manager.service: Scheduled restart job, restart counter is at 1.
+```
+
+In Docker there is no systemd: supervisord restarts the app if it *exits*, and
+the image's `HEALTHCHECK` reports whether the UI answers, but nothing restarts a
+hung container unless your orchestrator acts on that health status.
+
+### Node health is collected here too
+
+The watchdog polls every node on a schedule and keeps the result, so the UI
+reads a snapshot instead of asking each node while you wait. The Cluster panel
+shows the snapshot's age and has a **Refresh** button for a live round. With one
+unresponsive node: **5.1s** to collect, **3ms** to read.
+
+`HAM_CLUSTER_POLL` (15s) sets the collection interval; `HAM_CLUSTER_MAX_AGE`
+(60s) is the age beyond which a request collects it inline rather than show
+something stale.
+
 ## Logs
 
 **Logs** merges four sources into one timeline, newest at the bottom:
@@ -584,7 +642,8 @@ one has to time out.
 | `HAM_PEER_CONNECT_TIMEOUT` | `3` | how long to wait for a node to accept a connection |
 | `HAM_PEER_READ_TIMEOUT` | `5` | how long to wait for it to answer a health query |
 | `HAM_PUSH_READ_TIMEOUT` | `90` | how long to wait for it to accept and apply a pushed configuration |
-| `HAM_CLUSTER_CACHE` | `2.5` | seconds the cluster health fan-out is reused, so tabs and nodes share one round of queries |
+| `HAM_CLUSTER_POLL` | `15` | how often the watchdog collects every node's health in the background |
+| `HAM_CLUSTER_MAX_AGE` | `60` | age at which a stale snapshot is collected inline instead |
 | `HAM_THREADS` | `16` | waitress worker threads |
 
 Two things worth knowing:
@@ -636,7 +695,8 @@ Environment=HAM_THREADS=24
 `HAM_ACME_HOME` · `HAM_ACME_SH` · `HAM_LISTEN` · `HAM_PORT` · `HAM_THREADS` ·
 `HAM_LOG_FILE` · `HAM_DEBUG=1` (verbose logging) · `HAM_STATS_SOCK` ·
 `HAM_PEER_CONNECT_TIMEOUT` · `HAM_PEER_READ_TIMEOUT` · `HAM_PUSH_READ_TIMEOUT` ·
-`HAM_CLUSTER_CACHE` ·
+`HAM_CLUSTER_POLL` · `HAM_CLUSTER_MAX_AGE` · `HAM_WATCHDOG_PROBE_TIMEOUT` ·
+`HAM_WATCHDOG_SELF_TIMEOUT` ·
 `HAM_VERSION_URL` · `HAM_INSTALL_URL` · `HAM_DRY_RUN=1` (skip `systemctl` calls,
 for development).
 

@@ -52,6 +52,12 @@ COPY docker/supervisord.conf /etc/supervisor/supervisord.conf
 RUN chmod 0755 /usr/local/bin/systemctl /usr/local/bin/haproxy-run \
                /usr/local/bin/entrypoint.sh /usr/local/bin/ham-syslogd
 
+# Reports whether the UI actually answers, not merely whether the process is
+# alive -- the same distinction the in-app watchdog makes.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+    CMD python3 -c "import urllib.request,sys,os; \
+sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:'+os.environ.get('HAM_PORT','8080')+'/api/whoami', timeout=8).status==200 else 1)"
+
 ENV HAM_DATA_DIR=/var/lib/haproxy-manager \
     HAM_CERT_DIR=/etc/haproxy/certs \
     HAM_HAPROXY_CFG=/etc/haproxy/haproxy.cfg \
