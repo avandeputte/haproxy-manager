@@ -1,0 +1,43 @@
+services:
+  haproxy-manager:
+    build: .
+    image: haproxy-manager:latest
+    container_name: haproxy-manager
+    restart: unless-stopped
+
+    # Host networking is the intended deployment: HAProxy binds whatever ports
+    # your Public Services define, and Keepalived's VRRP + virtual IP only work
+    # on a real interface. Run one container per node.
+    network_mode: host
+
+    # Swap the two lines above for this to run in bridge mode instead (no
+    # Keepalived / no VIP -- fine for a single standalone node). Publish every
+    # port your Public Services bind to.
+    # ports:
+    #   - "8080:8080"   # UI + API
+    #   - "80:80"
+    #   - "443:443"
+    #   - "9080:9080"   # acme.sh HTTP-01 standalone listener
+
+    cap_add:
+      - NET_ADMIN       # Keepalived: add/remove the VIP
+      - NET_BROADCAST   # Keepalived: VRRP advertisements
+      - NET_RAW         # Keepalived: raw VRRP sockets
+    # HAProxy binds privileged ports (80/443) as root inside the container.
+
+    volumes:
+      - ham-data:/var/lib/haproxy-manager   # config.json (all UI state)
+      - ham-acme:/var/lib/acme.sh           # ACME account keys + issued certs
+      - ham-haproxy:/etc/haproxy            # haproxy.cfg + deployed cert PEMs
+      - ham-keepalived:/etc/keepalived      # keepalived.conf
+
+    environment:
+      HAM_LISTEN: "0.0.0.0"
+      HAM_PORT: "8080"
+      # HAM_DRY_RUN: "1"   # skip service reloads -- render/validate only
+
+volumes:
+  ham-data:
+  ham-acme:
+  ham-haproxy:
+  ham-keepalived:

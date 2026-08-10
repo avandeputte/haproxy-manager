@@ -1,0 +1,686 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HAProxy Manager</title>
+<style>
+:root{
+  --petrol:#17242a;      /* sidebar */
+  --petrol-2:#1f3038;    /* sidebar hover */
+  --paper:#f2f4f3;       /* content background */
+  --card:#ffffff;
+  --ink:#1e2a2b;
+  --mist:#647576;
+  --hair:#d9e0de;
+  --line:#0e7c6b;        /* primary action */
+  --line-2:#0a5f52;
+  --drift:#b26a00;       /* unapplied changes */
+  --down:#b3402e;
+  --up:#2e7d4f;
+  --mono:ui-monospace,"SF Mono","Cascadia Code",Consolas,Menlo,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+*{box-sizing:border-box;margin:0}
+body{font:14px/1.5 var(--sans);color:var(--ink);background:var(--paper);display:flex;min-height:100vh}
+a{color:var(--line)}
+button{font:inherit;cursor:pointer}
+
+/* ---- sidebar ---- */
+#nav{width:232px;flex:0 0 232px;background:var(--petrol);color:#c8d4d2;display:flex;flex-direction:column}
+#nav .brand{padding:18px 16px 14px;font:600 15px/1.3 var(--mono);color:#fff;letter-spacing:.02em;border-bottom:1px solid rgba(255,255,255,.08)}
+#nav .brand small{display:block;font-weight:400;color:#7d918f;font-size:11px;margin-top:2px}
+#nav .grp{font:600 10px/1 var(--mono);letter-spacing:.14em;color:#7d918f;padding:16px 16px 6px;text-transform:uppercase}
+#nav a.item{display:block;padding:7px 16px;color:#c8d4d2;text-decoration:none;font-size:13px;border-left:3px solid transparent}
+#nav a.item:hover{background:var(--petrol-2)}
+#nav a.item.on{background:var(--petrol-2);color:#fff;border-left-color:var(--line)}
+#nav .foot{margin-top:auto;padding:12px 16px;border-top:1px solid rgba(255,255,255,.08)}
+#nav .foot input{width:100%;background:#0f191e;border:1px solid #2c3e44;color:#dfe8e6;font:12px var(--mono);padding:6px 8px;border-radius:4px}
+#nav .foot label{font:10px var(--mono);letter-spacing:.1em;color:#7d918f;text-transform:uppercase;display:block;margin-bottom:4px}
+
+/* ---- main ---- */
+#main{flex:1;min-width:0;display:flex;flex-direction:column}
+#topbar{display:flex;align-items:center;gap:12px;padding:14px 24px;background:var(--card);border-bottom:1px solid var(--hair)}
+#topbar h1{font:600 16px/1.2 var(--sans)}
+#nodestrip{margin-left:auto;display:flex;align-items:center;gap:8px;font:12px var(--mono)}
+.chip{padding:3px 9px;border-radius:4px;border:1px solid var(--hair);background:var(--paper)}
+.chip.role-active{border-color:var(--up);color:var(--up)}
+.chip.role-passive{border-color:var(--mist);color:var(--mist)}
+.chip.role-standalone{border-color:var(--hair);color:var(--mist)}
+.chip.drift{border-color:var(--drift);color:var(--drift)}
+#content{padding:22px 24px;max-width:1140px;width:100%}
+
+/* ---- generic ---- */
+.card{background:var(--card);border:1px solid var(--hair);border-radius:6px;margin-bottom:18px}
+.card>.hd{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--hair)}
+.card>.hd h2{font:600 12px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--mist)}
+.card>.hd .sp{flex:1}
+.card>.bd{padding:16px}
+.hint{color:var(--mist);font-size:12px;margin-top:4px}
+table{width:100%;border-collapse:collapse}
+th{font:600 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--mist);text-align:left;padding:8px 12px;border-bottom:1px solid var(--hair)}
+td{padding:9px 12px;border-bottom:1px solid var(--hair);vertical-align:top}
+tr:last-child td{border-bottom:0}
+td .sub{color:var(--mist);font-size:12px}
+.mono{font-family:var(--mono);font-size:12.5px}
+.empty{padding:26px 16px;color:var(--mist);text-align:center}
+.btn{border:1px solid var(--hair);background:var(--card);color:var(--ink);padding:6px 12px;border-radius:4px;font-size:13px}
+.btn:hover{border-color:var(--mist)}
+.btn.pri{background:var(--line);border-color:var(--line);color:#fff}
+.btn.pri:hover{background:var(--line-2)}
+.btn.warn{background:var(--drift);border-color:var(--drift);color:#fff}
+.btn.dngr{color:var(--down);border-color:var(--hair)}
+.btn.sm{padding:3px 8px;font-size:12px}
+.btn[disabled]{opacity:.5;cursor:default}
+.pill{display:inline-block;padding:2px 8px;border-radius:10px;font:12px var(--mono)}
+.pill.up{background:#e4f1e9;color:var(--up)}
+.pill.down{background:#f7e6e2;color:var(--down)}
+.pill.off{background:#eceff0;color:var(--mist)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px}
+.stat{border:1px solid var(--hair);border-radius:6px;padding:12px 14px;background:var(--card)}
+.stat .k{font:600 10px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--mist)}
+.stat .v{font:600 16px/1.3 var(--mono);margin-top:6px}
+pre{font:12px/1.5 var(--mono);background:#0f191e;color:#d5e2e0;padding:14px;border-radius:6px;overflow:auto;max-height:60vh;white-space:pre-wrap}
+
+/* ---- forms ---- */
+.frm{display:grid;grid-template-columns:190px 1fr;gap:12px 16px;align-items:start}
+.frm label.fl{font:600 12px var(--mono);color:var(--mist);padding-top:7px;text-align:right}
+.frm input[type=text],.frm input[type=number],.frm input[type=password],.frm select,.frm textarea{
+  width:100%;max-width:460px;padding:7px 9px;border:1px solid var(--hair);border-radius:4px;font:13px var(--sans);background:#fff;color:var(--ink)}
+.frm textarea{font-family:var(--mono);font-size:12.5px;min-height:74px}
+.frm input:focus,.frm select:focus,.frm textarea:focus,button:focus-visible{outline:2px solid var(--line);outline-offset:1px}
+.ckbox{display:flex;align-items:center;gap:8px;padding-top:7px}
+.cklist{border:1px solid var(--hair);border-radius:4px;max-width:460px;max-height:170px;overflow:auto;padding:6px 8px;background:#fff}
+.cklist label{display:flex;gap:8px;align-items:center;padding:3px 0;font-size:13px}
+.cklist .none{color:var(--mist);font-size:12px;padding:2px}
+
+/* ---- modal ---- */
+#ovl{position:fixed;inset:0;background:rgba(15,25,30,.55);display:none;align-items:flex-start;justify-content:center;padding:6vh 16px;z-index:20}
+#ovl.show{display:flex}
+#dlg{background:var(--card);border-radius:8px;width:100%;max-width:760px;max-height:86vh;display:flex;flex-direction:column}
+#dlg .hd{display:flex;align-items:center;padding:14px 18px;border-bottom:1px solid var(--hair)}
+#dlg .hd h3{font:600 14px var(--sans)}
+#dlg .hd button{margin-left:auto;border:0;background:none;font-size:18px;color:var(--mist)}
+#dlg .bd{padding:18px;overflow:auto}
+#dlg .ft{padding:12px 18px;border-top:1px solid var(--hair);display:flex;gap:10px;justify-content:flex-end}
+.err{color:var(--down);font-size:13px;margin-right:auto;align-self:center}
+
+@media (max-width:840px){
+  body{flex-direction:column}
+  #nav{width:100%;flex:none}
+  .frm{grid-template-columns:1fr}
+  .frm label.fl{text-align:left;padding-top:0}
+  #nodestrip{display:none}
+}
+@media (prefers-reduced-motion:no-preference){
+  #dlg{animation:pop .12s ease-out}
+  @keyframes pop{from{transform:translateY(6px);opacity:.6}to{transform:none;opacity:1}}
+}
+</style>
+</head>
+<body>
+<aside id="nav">
+  <div class="brand">haproxy-manager<small id="brandhost">&nbsp;</small></div>
+  <div id="navlinks"></div>
+  <div class="foot">
+    <label for="apikey">API key</label>
+    <input id="apikey" type="password" placeholder="optional" autocomplete="off">
+  </div>
+</aside>
+<div id="main">
+  <div id="topbar">
+    <h1 id="pagetitle">Overview</h1>
+    <div id="nodestrip"></div>
+    <button class="btn pri" id="applybtn" title="Validate and write haproxy.cfg / keepalived.conf, then reload services">Apply</button>
+  </div>
+  <div id="content"></div>
+</div>
+
+<div id="ovl"><div id="dlg" role="dialog" aria-modal="true">
+  <div class="hd"><h3 id="dlgtitle"></h3><button onclick="closeDlg()" aria-label="Close">&times;</button></div>
+  <div class="bd" id="dlgbody"></div>
+  <div class="ft" id="dlgfoot"></div>
+</div></div>
+
+<script>
+"use strict";
+/* ============================ plumbing ============================ */
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function getKey(){const m=document.cookie.match(/(?:^|; )ham_key=([^;]*)/);return m?decodeURIComponent(m[1]):"";}
+function setKey(v){document.cookie="ham_key="+encodeURIComponent(v)+"; path=/; max-age=31536000; samesite=strict";}
+async function api(path,method="GET",body){
+  const r=await fetch("/api/"+path,{method,
+    headers:Object.assign({"Content-Type":"application/json"},getKey()?{"X-API-Key":getKey()}:{}),
+    body:body!==undefined?JSON.stringify(body):undefined});
+  if(r.status===401)throw new Error("Unauthorized -- set the API key in the sidebar.");
+  const data=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error(data.error||("HTTP "+r.status));
+  return data;
+}
+const lists={};                     // cache: "haproxy/servers" -> [...]
+async function list(path,fresh){ if(fresh||!lists[path])lists[path]=await api(path); return lists[path]; }
+function nameOf(path,id){const it=(lists[path]||[]).find(x=>x.id===id);return it?it.name:"?";}
+
+/* ============================ modal ============================ */
+function openDlg(title,bodyEl,buttons){
+  $("#dlgtitle").textContent=title;
+  const b=$("#dlgbody");b.innerHTML="";b.appendChild(bodyEl);
+  const f=$("#dlgfoot");f.innerHTML="";
+  (buttons||[]).forEach(x=>f.appendChild(x));
+  $("#ovl").classList.add("show");
+}
+function closeDlg(){$("#ovl").classList.remove("show");}
+$("#ovl").addEventListener("click",e=>{if(e.target.id==="ovl")closeDlg();});
+document.addEventListener("keydown",e=>{if(e.key==="Escape")closeDlg();});
+function btn(label,cls,fn){const b=document.createElement("button");b.className="btn "+(cls||"");b.textContent=label;b.onclick=fn;return b;}
+function showText(title,text){const p=document.createElement("pre");p.textContent=text;openDlg(title,p,[btn("Close","",closeDlg)]);}
+
+/* ============================ entity registry ============================ */
+/* Field types: text number bool select ref refmulti textarea password */
+const E={
+ "haproxy/servers":{title:"Real Servers",add:"Add server",
+  intro:"The upstream hosts traffic is forwarded to. Attach them to Backend Pools.",
+  cols:[["name","Name"],["address","Address",r=>esc(r.address)+":"+esc(r.port)],
+        ["opts","Options",r=>[r.ssl?"ssl":"",r.backup?"backup":""].filter(Boolean).join(", ")||"—"],
+        ["enabled","Enabled",r=>r.enabled!==false?"yes":"no"]],
+  fields:[
+   {k:"name",l:"Name",t:"text"},
+   {k:"enabled",l:"Enabled",t:"bool",d:true},
+   {k:"address",l:"Address",t:"text",h:"IP address or hostname of the real server"},
+   {k:"port",l:"Port",t:"number"},
+   {k:"weight",l:"Weight",t:"number",h:"Optional load-balancing weight (1-256)"},
+   {k:"ssl",l:"Encrypt to server (SSL)",t:"bool"},
+   {k:"ssl_verify",l:"Verify server certificate",t:"bool"},
+   {k:"backup",l:"Backup server",t:"bool",h:"Only receives traffic when all non-backup servers are down"},
+   {k:"description",l:"Description",t:"text"}]},
+
+ "haproxy/backends":{title:"Backend Pools",add:"Add pool",
+  intro:"Groups of Real Servers with a balancing algorithm, health checks and persistence.",
+  cols:[["name","Name"],["mode","Mode"],["balance","Balance",r=>r.balance||"roundrobin"],
+        ["servers","Servers",r=>(r.servers||[]).map(id=>esc(nameOf("haproxy/servers",id))).join(", ")||"—"],
+        ["hc","Check",r=>r.healthcheck_enabled?esc(nameOf("haproxy/healthchecks",r.healthcheck)):"off"]],
+  refs:["haproxy/servers","haproxy/healthchecks"],
+  fields:[
+   {k:"name",l:"Name",t:"text"},
+   {k:"enabled",l:"Enabled",t:"bool",d:true},
+   {k:"mode",l:"Mode",t:"select",o:["http","tcp"],d:"http"},
+   {k:"balance",l:"Balance algorithm",t:"select",o:["roundrobin","leastconn","source","static-rr","uri"],d:"roundrobin"},
+   {k:"servers",l:"Servers",t:"refmulti",ref:"haproxy/servers"},
+   {k:"healthcheck_enabled",l:"Enable health checking",t:"bool"},
+   {k:"healthcheck",l:"Health Monitor",t:"ref",ref:"haproxy/healthchecks"},
+   {k:"persistence",l:"Persistence",t:"select",o:["none","cookie"],d:"none",h:"Cookie-based persistence (HTTP mode only)"},
+   {k:"cookie_name",l:"Cookie name",t:"text",h:"Defaults to SRVID"},
+   {k:"custom",l:"Custom options",t:"textarea",h:"Raw haproxy.cfg lines appended to this backend"}]},
+
+ "haproxy/frontends":{title:"Public Services",add:"Add service",
+  intro:"Listening sockets clients connect to (frontends). Certificates come from ACME > Certificates.",
+  cols:[["name","Name"],["binds","Listen on",r=>"<span class=mono>"+esc((r.binds||"").split("\n").filter(Boolean).join(", "))+"</span>"],
+        ["mode","Mode",r=>esc(r.mode||"http")+(r.ssl_enabled?" +ssl":"")],
+        ["be","Default pool",r=>r.default_backend?esc(nameOf("haproxy/backends",r.default_backend)):"—"],
+        ["enabled","Enabled",r=>r.enabled!==false?"yes":"no"]],
+  refs:["haproxy/backends","haproxy/rules","acme/certificates"],
+  fields:[
+   {k:"name",l:"Name",t:"text"},
+   {k:"enabled",l:"Enabled",t:"bool",d:true},
+   {k:"binds",l:"Listen addresses",t:"textarea",h:"One per line, e.g. 0.0.0.0:80 or the shared VIP such as 192.0.2.10:443"},
+   {k:"mode",l:"Mode",t:"select",o:["http","tcp"],d:"http"},
+   {k:"ssl_enabled",l:"Enable SSL offloading",t:"bool"},
+   {k:"certificates",l:"Certificates",t:"refmulti",ref:"acme/certificates",h:"First certificate is the default; SNI selects among the rest"},
+   {k:"http2",l:"Enable HTTP/2",t:"bool"},
+   {k:"forwardfor",l:"Add X-Forwarded-For",t:"bool",d:true},
+   {k:"http_to_https",l:"Redirect HTTP to HTTPS",t:"bool",h:"For plain HTTP services on port 80. ACME challenge requests are never redirected."},
+   {k:"default_backend",l:"Default Backend Pool",t:"ref",ref:"haproxy/backends"},
+   {k:"rules",l:"Rules",t:"refmulti",ref:"haproxy/rules",h:"Applied in the order shown here (the order of the Rules list)"},
+   {k:"custom",l:"Custom options",t:"textarea"}]},
+
+ "haproxy/conditions":{title:"Conditions",add:"Add condition",
+  intro:"Named tests (ACLs) evaluated against traffic. Combine them in Rules.",
+  cols:[["name","Name"],["type","Type"],["value","Value",r=>"<span class=mono>"+esc((r.param?r.param+" = ":"")+(r.value||""))+"</span>"],
+        ["negate","Negate",r=>r.negate?"yes":"no"]],
+  fields:[
+   {k:"name",l:"Name",t:"text"},
+   {k:"type",l:"Condition type",t:"select",o:["host_matches","host_starts_with","host_ends_with","path_matches","path_starts_with","path_ends_with","path_contains","url_parameter","http_header","source_ip","ssl_sni","custom"],d:"host_matches"},
+   {k:"param",l:"Header / parameter name",t:"text",h:"Only for the http_header and url_parameter types"},
+   {k:"value",l:"Value",t:"text",h:"For type custom: a raw ACL expression"},
+   {k:"negate",l:"Negate",t:"bool"},
+   {k:"description",l:"Description",t:"text"}]},
+
+ "haproxy/rules":{title:"Rules",add:"Add rule",
+  intro:"Actions taken when Conditions match: select a pool, redirect, set headers, deny.",
+  cols:[["name","Name"],["type","Action"],
+        ["cond","Conditions",r=>(r.conditions||[]).map(id=>esc(nameOf("haproxy/conditions",id))).join(", ")||"always"],
+        ["tgt","Target",r=>r.type==="use_backend"?esc(nameOf("haproxy/backends",r.backend)):esc([r.param1,r.param2].filter(Boolean).join(" "))||"—"]],
+  refs:["haproxy/conditions","haproxy/backends"],
+  fields:[
+   {k:"name",l:"Name",t:"text"},
+   {k:"type",l:"Action",t:"select",o:["use_backend","redirect_scheme_https","redirect_location","http_request_deny","http_request_set_header","http_request_del_header","http_response_set_header","tcp_request_content_accept","tcp_request_content_reject","custom"],d:"use_backend"},
+   {k:"test",l:"Apply when",t:"select",o:["if","unless"],d:"if"},
+   {k:"operator",l:"Combine conditions with",t:"select",o:["and","or"],d:"and"},
+   {k:"conditions",l:"Conditions",t:"refmulti",ref:"haproxy/conditions",h:"Leave empty to apply unconditionally"},
+   {k:"backend",l:"Backend Pool",t:"ref",ref:"haproxy/backends",h:"Only for the use_backend action"},
+   {k:"param1",l:"Name / location / raw line",t:"text"},
+   {k:"param2",l:"Value",t:"text"}]},
+
+ "haproxy/healthchecks":{title:"Health Monitors",add:"Add monitor",
+  intro:"How Backend Pools decide whether a Real Server is alive.",
+  cols:[["name","Name"],["type","Type"],["interval","Interval",r=>r.interval||"2s"],
+        ["det","Detail",r=>r.type==="http"?"<span class=mono>"+esc((r.http_method||"GET")+" "+(r.http_uri||"/"))+"</span>":"—"]],
+  fields:[
+   {k:"name",l:"Name",t:"text"},
+   {k:"type",l:"Type",t:"select",o:["tcp","http","ssl"],d:"tcp"},
+   {k:"interval",l:"Check interval",t:"text",h:"e.g. 2s"},
+   {k:"http_method",l:"HTTP method",t:"select",o:["GET","HEAD","OPTIONS"],d:"GET"},
+   {k:"http_uri",l:"HTTP request URI",t:"text",h:"e.g. /health"},
+   {k:"expect_status",l:"Expected status",t:"text",h:"e.g. 200"}]},
+
+ "acme/accounts":{title:"Accounts",add:"Add account",
+  intro:"ACME accounts used to request certificates.",
+  cols:[["name","Name"],["email","E-mail"],["ca","CA"]],
+  fields:[
+   {k:"name",l:"Name",t:"text"},
+   {k:"email",l:"E-mail address",t:"text"},
+   {k:"ca",l:"Certificate authority",t:"select",o:["letsencrypt","letsencrypt_test","zerossl","buypass","google"],d:"letsencrypt",h:"Use letsencrypt_test while setting things up to avoid rate limits"},
+   {k:"eab_kid",l:"EAB key ID",t:"text",h:"Only for ZeroSSL / Google"},
+   {k:"eab_hmac",l:"EAB HMAC key",t:"password"}]},
+
+ "acme/challenges":{title:"Challenge Types",add:"Add challenge type",
+  intro:"How domain ownership is proven. HTTP-01 uses a local listener that HAProxy routes /.well-known/acme-challenge/ to; DNS-01 uses an acme.sh DNS hook.",
+  cols:[["name","Name"],["method","Method"],["prov","DNS provider",r=>r.method==="dns01"?"<span class=mono>"+esc(r.dns_provider||"")+"</span>":"—"]],
+  fields:[
+   {k:"name",l:"Name",t:"text"},
+   {k:"method",l:"Method",t:"select",o:["http01","dns01"],d:"http01"},
+   {k:"dns_provider",l:"DNS API hook",t:"text",h:"acme.sh hook name, e.g. dns_cf, dns_ovh, dns_route53"},
+   {k:"dns_credentials",l:"DNS API credentials",t:"textarea",h:"One KEY=value per line, e.g. CF_Token=..."}]},
+
+ "acme/certificates":{title:"Certificates",add:"Add certificate",
+  intro:"Certificates are issued with acme.sh, written as combined PEMs to the HAProxy certificate directory, then their Automations run.",
+  cols:[["name","Name"],["domains","Domains",r=>"<span class=mono>"+esc((r.domains||"").split(/\s+/).filter(Boolean).join(", "))+"</span>"],
+        ["ar","Auto-renew",r=>r.auto_renew!==false?"yes":"no"]],
+  refs:["acme/accounts","acme/challenges","acme/automations"],
+  rowActions:[
+   {label:"Issue",fn:r=>issueCert(r,false)},
+   {label:"Force",fn:r=>issueCert(r,true),cls:"dngr",title:"Reissue even if not due for renewal"}],
+  fields:[
+   {k:"name",l:"Name",t:"text",h:"Also used as the PEM file name"},
+   {k:"domains",l:"Domain names",t:"textarea",h:"One per line; the first is the certificate's primary name"},
+   {k:"account",l:"Account",t:"ref",ref:"acme/accounts"},
+   {k:"challenge",l:"Challenge Type",t:"ref",ref:"acme/challenges"},
+   {k:"key_type",l:"Key type",t:"select",o:["ec-256","ec-384","rsa-2048","rsa-4096"],d:"ec-256"},
+   {k:"auto_renew",l:"Auto-renew",t:"bool",d:true},
+   {k:"automations",l:"Automations",t:"refmulti",ref:"acme/automations",h:"Run after each successful issue/renew, e.g. reload HAProxy and sync to the peer"}]},
+
+ "acme/automations":{title:"Automations",add:"Add automation",
+  intro:"Actions that run after a certificate is issued or renewed.",
+  cols:[["name","Name"],["type","Type"],["command","Command",r=>r.type==="custom"?"<span class=mono>"+esc(r.command||"")+"</span>":"—"]],
+  fields:[
+   {k:"name",l:"Name",t:"text"},
+   {k:"type",l:"Type",t:"select",o:["reload_haproxy","restart_haproxy","sync_to_peer","custom"],d:"reload_haproxy"},
+   {k:"command",l:"Command",t:"text",h:"Only for type custom; runs via /bin/sh"}]},
+};
+
+/* settings pages: bound to a GET/PUT endpoint (or a sub-key of /api/local) */
+const S={
+ "haproxy-settings":{title:"HAProxy Settings",ep:"haproxy/settings",
+  intro:"Global and default parameters for the generated haproxy.cfg.",
+  fields:[
+   {k:"maxconn",l:"Maximum connections",t:"number"},
+   {k:"nbthread",l:"Worker threads",t:"text",h:"Leave empty for the HAProxy default"},
+   {k:"hard_stop_after",l:"Hard stop after",t:"text",h:"Grace period for old processes on reload, e.g. 60s"},
+   {k:"ssl_min_ver",l:"Minimum TLS version",t:"select",o:["TLSv1.2","TLSv1.3"],d:"TLSv1.2"},
+   {k:"ssl_ciphers",l:"SSL cipher list",t:"text",h:"Leave empty for the HAProxy default"},
+   {k:"timeout_connect",l:"Connect timeout",t:"text"},
+   {k:"timeout_client",l:"Client timeout",t:"text"},
+   {k:"timeout_server",l:"Server timeout",t:"text"},
+   {k:"retries",l:"Retries",t:"number"},
+   {k:"redispatch",l:"Redispatch on failure",t:"bool",d:true},
+   {k:"stats_enabled",l:"Enable statistics page",t:"bool"},
+   {k:"stats_bind",l:"Statistics listen address",t:"text"},
+   {k:"stats_uri",l:"Statistics URI",t:"text"},
+   {k:"custom_global",l:"Custom global options",t:"textarea"},
+   {k:"custom_defaults",l:"Custom default options",t:"textarea"}]},
+ "acme-settings":{title:"ACME Settings",ep:"acme/settings",
+  intro:"Settings for certificate issuance and renewal via acme.sh.",
+  fields:[
+   {k:"enabled",l:"Enabled",t:"bool",d:true},
+   {k:"auto_renew",l:"Automatic renewal",t:"bool",d:true},
+   {k:"renew_hours",l:"Renewal check interval (hours)",t:"number"},
+   {k:"challenge_port",l:"HTTP-01 challenge port",t:"number",h:"Local port acme.sh listens on during HTTP-01 validation"},
+   {k:"haproxy_integration",l:"HAProxy integration",t:"bool",d:true,h:"Route /.well-known/acme-challenge/ on all HTTP services to the local challenge listener"}]},
+ "keepalived":{title:"Keepalived",ep:"local",sub:"keepalived",
+  intro:"Node-local VRRP settings for the active-passive pair. These are never overwritten by sync -- configure them on each node. For non-preempting failover, set state BACKUP on both nodes with different priorities and enable nopreempt.",
+  fields:[
+   {k:"enabled",l:"Enabled",t:"bool"},
+   {k:"interface",l:"Interface",t:"text",h:"e.g. eth0"},
+   {k:"vrid",l:"Virtual router ID",t:"number",h:"Same on both nodes (1-255)"},
+   {k:"state",l:"Initial state",t:"select",o:["MASTER","BACKUP"],d:"BACKUP"},
+   {k:"priority",l:"Priority",t:"number",h:"Higher wins; e.g. 150 on the preferred node, 100 on the other"},
+   {k:"nopreempt",l:"No preempt",t:"bool",d:true,h:"A recovered node does not take the VIP back"},
+   {k:"advert_int",l:"Advertisement interval (s)",t:"number"},
+   {k:"auth_pass",l:"VRRP password",t:"password",h:"Same on both nodes; only the first 8 characters are used"},
+   {k:"unicast_src",l:"Unicast source IP",t:"text",h:"This node's own address; leave empty for multicast VRRP"},
+   {k:"unicast_peer",l:"Unicast peer IP",t:"text",h:"The other node's address"},
+   {k:"vips",l:"Virtual IP addresses",t:"textarea",h:"One per line with prefix, e.g. 192.0.2.10/24"},
+   {k:"track_haproxy",l:"Track HAProxy process",t:"bool",d:true,h:"Fail over when HAProxy dies on this node"},
+   {k:"custom",l:"Custom options",t:"textarea"}]},
+ "sync":{title:"Sync",ep:"local",sub:"sync",
+  intro:"Push the shared configuration (HAProxy + ACME) and deployed certificates to the peer node. The peer validates, applies and reloads. Its node-local settings (Keepalived, Sync, API key) are untouched.",
+  fields:[
+   {k:"peer_url",l:"Peer URL",t:"text",h:"e.g. http://10.0.0.2:8080"},
+   {k:"peer_api_key",l:"Peer API key",t:"password",h:"The API key configured on the peer node"},
+   {k:"verify_tls",l:"Verify TLS certificate",t:"bool"},
+   {k:"auto_sync",l:"Sync after every Apply",t:"bool"}]},
+};
+
+/* ============================ form rendering ============================ */
+function fieldRow(f,val){
+  const lab=document.createElement("label");lab.className="fl";lab.textContent=f.l;lab.htmlFor="f_"+f.k;
+  const cell=document.createElement("div");
+  let inp;
+  if(f.t==="bool"){
+    const wrap=document.createElement("div");wrap.className="ckbox";
+    inp=document.createElement("input");inp.type="checkbox";inp.id="f_"+f.k;
+    inp.checked=val!==undefined?!!val:!!f.d;
+    wrap.appendChild(inp);cell.appendChild(wrap);
+  }else if(f.t==="select"){
+    inp=document.createElement("select");inp.id="f_"+f.k;
+    f.o.forEach(o=>{const op=document.createElement("option");op.value=o;op.textContent=o;inp.appendChild(op);});
+    inp.value=val??f.d??f.o[0];cell.appendChild(inp);
+  }else if(f.t==="ref"){
+    inp=document.createElement("select");inp.id="f_"+f.k;
+    const none=document.createElement("option");none.value="";none.textContent="(none)";inp.appendChild(none);
+    (lists[f.ref]||[]).forEach(it=>{const op=document.createElement("option");op.value=it.id;op.textContent=it.name;inp.appendChild(op);});
+    inp.value=val||"";cell.appendChild(inp);
+  }else if(f.t==="refmulti"){
+    inp=document.createElement("div");inp.className="cklist";inp.id="f_"+f.k;inp.dataset.refmulti="1";
+    const items=lists[f.ref]||[];
+    if(!items.length){const d=document.createElement("div");d.className="none";d.textContent="Nothing defined yet.";inp.appendChild(d);}
+    items.forEach(it=>{
+      const l=document.createElement("label");
+      const c=document.createElement("input");c.type="checkbox";c.value=it.id;
+      c.checked=(val||[]).includes(it.id);
+      l.appendChild(c);l.appendChild(document.createTextNode(it.name));inp.appendChild(l);
+    });
+    cell.appendChild(inp);
+  }else if(f.t==="textarea"){
+    inp=document.createElement("textarea");inp.id="f_"+f.k;inp.value=val??"";cell.appendChild(inp);
+  }else{
+    inp=document.createElement("input");inp.type=f.t==="password"?"password":(f.t==="number"?"number":"text");
+    inp.id="f_"+f.k;inp.value=val??(f.d??"");
+    if(f.t==="password")inp.autocomplete="new-password";
+    cell.appendChild(inp);
+  }
+  if(f.h){const h=document.createElement("div");h.className="hint";h.textContent=f.h;cell.appendChild(h);}
+  return [lab,cell];
+}
+function readForm(fields){
+  const out={};
+  fields.forEach(f=>{
+    const el=document.getElementById("f_"+f.k);
+    if(f.t==="bool")out[f.k]=el.checked;
+    else if(f.t==="refmulti")out[f.k]=[...el.querySelectorAll("input:checked")].map(c=>c.value);
+    else if(f.t==="number")out[f.k]=el.value===""?"":Number(el.value);
+    else out[f.k]=el.value;
+  });
+  return out;
+}
+
+/* ============================ CRUD views ============================ */
+async function renderEntity(key){
+  const def=E[key];
+  await Promise.all([list(key,true),...(def.refs||[]).map(r=>list(r,true))]);
+  const items=lists[key];
+  const c=$("#content");c.innerHTML="";
+  const card=document.createElement("div");card.className="card";
+  const hd=document.createElement("div");hd.className="hd";
+  hd.innerHTML="<h2>"+esc(def.title)+"</h2><div class=sp></div>";
+  hd.appendChild(btn(def.add,"pri sm",()=>openEditor(key)));
+  card.appendChild(hd);
+  const bd=document.createElement("div");
+  if(!items.length){
+    bd.innerHTML='<div class="empty">'+esc(def.intro)+"<br><br>Nothing here yet -- use "+esc(def.add)+" to create the first entry.</div>";
+  }else{
+    const t=document.createElement("table");
+    t.innerHTML="<thead><tr>"+def.cols.map(c=>"<th>"+esc(c[1])+"</th>").join("")+"<th></th></tr></thead>";
+    const tb=document.createElement("tbody");
+    items.forEach(row=>{
+      const tr=document.createElement("tr");
+      def.cols.forEach(col=>{
+        const td=document.createElement("td");
+        td.innerHTML=col[2]?col[2](row):esc(row[col[0]]??"");
+        tr.appendChild(td);
+      });
+      const act=document.createElement("td");act.style.textAlign="right";act.style.whiteSpace="nowrap";
+      (def.rowActions||[]).forEach(a=>{
+        const b=btn(a.label,"sm "+(a.cls||""),()=>a.fn(row));
+        if(a.title)b.title=a.title;
+        act.appendChild(b);act.appendChild(document.createTextNode(" "));
+      });
+      act.appendChild(btn("Edit","sm",()=>openEditor(key,row)));
+      act.appendChild(document.createTextNode(" "));
+      act.appendChild(btn("Delete","sm dngr",async()=>{
+        if(!confirm("Delete \""+row.name+"\"?"))return;
+        try{await api(key+"/"+row.id,"DELETE");await renderEntity(key);refreshStatus();}
+        catch(e){alert(e.message);}
+      }));
+      tr.appendChild(act);tb.appendChild(tr);
+    });
+    t.appendChild(tb);bd.appendChild(t);
+    const hint=document.createElement("div");hint.className="hint";hint.style.padding="10px 16px";
+    hint.textContent=def.intro;bd.appendChild(hint);
+  }
+  card.appendChild(bd);c.appendChild(card);
+}
+function openEditor(key,item){
+  const def=E[key];
+  const frm=document.createElement("div");frm.className="frm";
+  def.fields.forEach(f=>fieldRow(f,item?item[f.k]:undefined).forEach(el=>frm.appendChild(el)));
+  const err=document.createElement("div");err.className="err";
+  openDlg((item?"Edit ":"New ")+def.title.replace(/s$/,""),frm,[err,
+    btn("Cancel","",closeDlg),
+    btn("Save","pri",async()=>{
+      const data=readForm(def.fields);
+      try{
+        if(item)await api(key+"/"+item.id,"PUT",Object.assign({},item,data));
+        else await api(key,"POST",data);
+        closeDlg();await renderEntity(key);refreshStatus();
+      }catch(e){err.textContent=e.message;}
+    })]);
+}
+
+/* ============================ settings views ============================ */
+async function renderSettings(key){
+  const def=S[key];
+  let cur=await api(def.ep);
+  if(def.sub)cur=cur[def.sub]||{};
+  const c=$("#content");c.innerHTML="";
+  const card=document.createElement("div");card.className="card";
+  card.innerHTML='<div class=hd><h2>'+esc(def.title)+'</h2></div>';
+  const bd=document.createElement("div");bd.className="bd";
+  const intro=document.createElement("p");intro.className="hint";intro.style.marginBottom="14px";intro.textContent=def.intro;
+  bd.appendChild(intro);
+  const frm=document.createElement("div");frm.className="frm";
+  def.fields.forEach(f=>fieldRow(f,cur[f.k]).forEach(el=>frm.appendChild(el)));
+  bd.appendChild(frm);
+  const foot=document.createElement("div");foot.style.marginTop="16px";
+  const msg=document.createElement("span");msg.className="hint";msg.style.marginLeft="10px";
+  foot.appendChild(btn("Save","pri",async()=>{
+    const data=readForm(def.fields);
+    try{
+      await api(def.ep,"PUT",def.sub?{[def.sub]:data}:data);
+      msg.textContent="Saved.";refreshStatus();
+    }catch(e){msg.textContent=e.message;}
+  }));
+  foot.appendChild(msg);
+  if(key==="sync")foot.appendChild(syncExtras());
+  bd.appendChild(foot);card.appendChild(bd);c.appendChild(card);
+  if(key==="sync")c.appendChild(apiKeyCard());
+}
+function syncExtras(){
+  const wrap=document.createElement("span");wrap.style.marginLeft="14px";
+  const out=document.createElement("span");out.className="hint";out.style.marginLeft="10px";
+  wrap.appendChild(btn("Test connection","",async()=>{
+    out.textContent="Testing...";
+    try{const r=await api("sync/test","POST",{});out.textContent=r.ok?("Peer reachable: "+r.peer):("Failed: "+r.error);}
+    catch(e){out.textContent=e.message;}
+  }));
+  wrap.appendChild(document.createTextNode(" "));
+  wrap.appendChild(btn("Sync to peer now","warn",async()=>{
+    out.textContent="Syncing...";
+    try{const r=await api("sync/push","POST",{});
+      out.textContent=r.ok?"Synced -- peer applied the configuration.":("Failed: "+r.error);}
+    catch(e){out.textContent=e.message;}
+  }));
+  wrap.appendChild(out);
+  return wrap;
+}
+function apiKeyCard(){
+  const card=document.createElement("div");card.className="card";
+  card.innerHTML='<div class=hd><h2>This node</h2></div>';
+  const bd=document.createElement("div");bd.className="bd";
+  bd.innerHTML='<p class=hint style="margin-bottom:12px">The API key protects this node\'s API and is required before the peer may push configuration here. Set a key on both nodes, then enter each node\'s key on the other under Peer API key.</p>';
+  const frm=document.createElement("div");frm.className="frm";
+  const f={k:"api_key",l:"API key",t:"password",h:"After saving, enter the same key in the sidebar field to keep using this UI"};
+  api("local").then(loc=>{
+    fieldRow(f,loc.api_key).forEach(el=>frm.appendChild(el));
+    const foot=document.createElement("div");foot.style.marginTop="14px";
+    const msg=document.createElement("span");msg.className="hint";msg.style.marginLeft="10px";
+    foot.appendChild(btn("Save key","pri",async()=>{
+      try{await api("local","PUT",{api_key:document.getElementById("f_api_key").value});
+        msg.textContent="Saved. Update the sidebar key if you changed it.";}
+      catch(e){msg.textContent=e.message;}
+    }));
+    foot.appendChild(msg);bd.appendChild(frm);bd.appendChild(foot);
+  });
+  card.appendChild(bd);
+  return card;
+}
+
+/* ============================ overview ============================ */
+async function renderOverview(){
+  const c=$("#content");
+  let st;
+  try{st=await api("status");}catch(e){c.innerHTML='<div class="card"><div class="bd">'+esc(e.message)+"</div></div>";return;}
+  c.innerHTML="";
+  const grid=document.createElement("div");grid.className="grid";grid.style.marginBottom="18px";
+  const pill=(v,goodVals)=>'<span class="pill '+(goodVals.includes(v)?"up":v==="disabled"?"off":"down")+'">'+esc(v)+"</span>";
+  grid.innerHTML=
+    '<div class=stat><div class=k>HAProxy</div><div class=v>'+pill(st.haproxy,["active"])+"</div></div>"+
+    '<div class=stat><div class=k>Keepalived</div><div class=v>'+pill(st.keepalived,["active"])+"</div></div>"+
+    '<div class=stat><div class=k>Node role</div><div class=v>'+esc(st.role)+"</div></div>"+
+    '<div class=stat><div class=k>Virtual IPs</div><div class=v style="font-size:13px">'+
+      (st.vips.length?st.vips.map(v=>esc(v)+(st.vip_held.includes(v)?" ●":"")).join("<br>"):"—")+"</div></div>"+
+    '<div class=stat><div class=k>Configuration</div><div class=v style="font-size:13px">'+
+      (st.dirty?'<span class="pill" style="background:#f6ecdd;color:var(--drift)">unapplied changes</span>':'<span class="pill up">applied</span>')+"</div></div>"+
+    '<div class=stat><div class=k>acme.sh</div><div class=v style="font-size:13px">'+(st.acme_installed?'<span class="pill up">installed</span>':'<span class="pill down">missing</span>')+"</div></div>";
+  c.appendChild(grid);
+
+  const cc=document.createElement("div");cc.className="card";
+  cc.innerHTML='<div class=hd><h2>Certificates</h2><div class=sp></div></div>';
+  cc.querySelector(".hd").appendChild(btn("Renew all now","sm",async()=>{
+    showText("Renewing...","Running acme.sh for all auto-renew certificates -- this can take a minute.");
+    try{const r=await api("acme/renew","POST",{});
+      showText("Renewal result",JSON.stringify(r,null,2));refreshStatus();}
+    catch(e){showText("Renewal failed",e.message);}
+  }));
+  const cb=document.createElement("div");
+  if(!st.certs.length)cb.innerHTML='<div class=empty>No certificates defined. Create them under ACME &gt; Certificates.</div>';
+  else{
+    cb.innerHTML="<table><thead><tr><th>Name</th><th>Deployed</th><th>Issuer</th><th>Expires</th></tr></thead><tbody>"+
+      st.certs.map(x=>"<tr><td>"+esc(x.name)+"</td><td>"+(x.deployed?"yes":"no")+
+        "</td><td class=mono>"+esc(x.issuer||"—")+"</td><td class=mono>"+esc(x.expires||"—")+"</td></tr>").join("")+
+      "</tbody></table>";
+  }
+  cc.appendChild(cb);c.appendChild(cc);
+
+  const pv=document.createElement("div");pv.className="card";
+  pv.innerHTML='<div class=hd><h2>Generated configuration</h2><div class=sp></div></div>';
+  const hd=pv.querySelector(".hd");
+  hd.appendChild(btn("Preview haproxy.cfg","sm",async()=>{const p=await api("preview");showText("haproxy.cfg (preview)",p.haproxy);}));
+  hd.appendChild(document.createTextNode(" "));
+  hd.appendChild(btn("Preview keepalived.conf","sm",async()=>{const p=await api("preview");showText("keepalived.conf (preview)",p.keepalived);}));
+  const pb=document.createElement("div");pb.className="bd";
+  pb.innerHTML='<p class=hint>Apply validates the rendered haproxy.cfg (haproxy -c) before writing anything, then reloads HAProxy'+
+    ' and Keepalived. The previous files are kept as .bak.</p>';
+  pv.appendChild(pb);c.appendChild(pv);
+}
+
+/* ============================ shell ============================ */
+const NAV=[
+ ["","Overview",null],
+ ["grp","HAPROXY"],
+ ["haproxy/frontends","Public Services"],
+ ["haproxy/backends","Backend Pools"],
+ ["haproxy/servers","Real Servers"],
+ ["haproxy/conditions","Conditions"],
+ ["haproxy/rules","Rules"],
+ ["haproxy/healthchecks","Health Monitors"],
+ ["s:haproxy-settings","Settings"],
+ ["grp","ACME / LET'S ENCRYPT"],
+ ["acme/certificates","Certificates"],
+ ["acme/accounts","Accounts"],
+ ["acme/challenges","Challenge Types"],
+ ["acme/automations","Automations"],
+ ["s:acme-settings","Settings"],
+ ["grp","HIGH AVAILABILITY"],
+ ["s:keepalived","Keepalived"],
+ ["s:sync","Sync"],
+];
+function buildNav(){
+  const n=$("#navlinks");
+  NAV.forEach(([key,label])=>{
+    if(key==="grp"){const g=document.createElement("div");g.className="grp";g.textContent=label;n.appendChild(g);return;}
+    const a=document.createElement("a");a.className="item";a.href="#/"+key;a.textContent=label;a.dataset.key=key;
+    n.appendChild(a);
+  });
+}
+async function route(){
+  const key=location.hash.replace(/^#\//,"");
+  document.querySelectorAll("#nav a.item").forEach(a=>a.classList.toggle("on",a.dataset.key===key));
+  const entry=NAV.find(x=>x[0]===key)||NAV[0];
+  $("#pagetitle").textContent=entry[1];
+  try{
+    if(key.startsWith("s:"))await renderSettings(key.slice(2));
+    else if(E[key])await renderEntity(key);
+    else await renderOverview();
+  }catch(e){
+    $("#content").innerHTML='<div class="card"><div class="bd">'+esc(e.message)+"</div></div>";
+  }
+}
+async function refreshStatus(){
+  try{
+    const st=await api("status");
+    $("#brandhost").textContent=st.hostname;
+    const ns=$("#nodestrip");ns.innerHTML="";
+    const role=document.createElement("span");
+    role.className="chip role-"+st.role;role.textContent=st.role.toUpperCase()+(st.vip_held.length?" · "+st.vip_held[0]:"");
+    ns.appendChild(role);
+    if(st.dirty){const d=document.createElement("span");d.className="chip drift";d.textContent="unapplied changes";ns.appendChild(d);}
+    $("#applybtn").classList.toggle("warn",st.dirty);
+    $("#applybtn").classList.toggle("pri",!st.dirty);
+  }catch(e){/* not fatal */}
+}
+async function doApply(){
+  const b=$("#applybtn");b.disabled=true;b.textContent="Applying...";
+  try{
+    const r=await api("apply","POST",{});
+    let text=(r.ok?"Applied.\n\n":"FAILED: "+(r.error||"")+"\n\n")+
+      (r.steps||[]).map(s=>"* "+s).join("\n")+
+      "\n\n--- haproxy -c output ---\n"+(r.haproxy_check||"(none)");
+    showText(r.ok?"Configuration applied":"Apply failed",text);
+  }catch(e){showText("Apply failed",e.message);}
+  b.disabled=false;b.textContent="Apply";
+  refreshStatus();
+  if(!location.hash||location.hash==="#/")route();
+}
+
+buildNav();
+$("#applybtn").onclick=doApply;
+$("#apikey").value=getKey();
+$("#apikey").addEventListener("change",e=>{setKey(e.target.value);refreshStatus();route();});
+window.addEventListener("hashchange",route);
+route();refreshStatus();
+setInterval(refreshStatus,10000);
+</script>
+</body>
+</html>

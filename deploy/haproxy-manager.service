@@ -1,0 +1,25 @@
+[Unit]
+# Reference copy. install.sh generates this unit itself (with the paths and
+# port you chose) -- keep the two in sync if you edit either.
+Description=HAProxy Manager web UI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Runs as root: it writes /etc/haproxy, /etc/keepalived and reloads services.
+# To harden, grant CAP_NET_ADMIN + write access to those paths and drop privileges instead.
+User=root
+Environment=HAM_DATA_DIR=/var/lib/haproxy-manager
+Environment=HAM_CERT_DIR=/etc/haproxy/certs
+Environment=HAM_HAPROXY_CFG=/etc/haproxy/haproxy.cfg
+Environment=HAM_KEEPALIVED_CFG=/etc/keepalived/keepalived.conf
+Environment=HAM_ACME_HOME=/root/.acme.sh
+Environment=HAM_LISTEN=0.0.0.0
+Environment=HAM_PORT=8080
+ExecStart=/usr/bin/python3 /opt/haproxy-manager/app.py
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.bak
+*.tmp
+config.json
+/certs/
+*.pem
+.venv/
+venv/
+.DS_Store

@@ -1,0 +1,14 @@
+#!/bin/sh
+# On a fresh container there is no haproxy.cfg until the first Apply in the UI.
+# Wait for it, then exec haproxy in master-worker foreground mode so that the
+# supervised PID is the master and SIGUSR2 performs a seamless reload.
+set -eu
+
+CFG="${HAM_HAPROXY_CFG:-/etc/haproxy/haproxy.cfg}"
+
+while [ ! -s "$CFG" ]; do
+    sleep 2
+done
+
+mkdir -p /run/haproxy
+exec /usr/sbin/haproxy -W -db -f "$CFG" -p /run/haproxy/haproxy.pid

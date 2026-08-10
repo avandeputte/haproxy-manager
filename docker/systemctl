@@ -1,0 +1,66 @@
+#!/bin/sh
+# systemctl(1) shim for the container image.
+#
+# app.py drives services with exactly three calls:
+#   systemctl is-active <unit>
+#   systemctl reload-or-restart <unit>
+#   systemctl restart <unit>
+# This maps them onto supervisorctl. HAProxy is reloaded with SIGUSR2 (seamless
+# master-worker reload, keeps established connections); Keepalived with SIGHUP.
+set -u
+
+SUPERVISORCTL="supervisorctl -c /etc/supervisor/supervisord.conf"
+
+action="${1:-}"
+unit="${2:-}"
+unit="${unit%.service}"
+
+state() {
+    # supervisorctl status prints: "<name> <STATE> <detail...>"
+    $SUPERVISORCTL status "$1" 2>/dev/null | awk '{print $2}'
+}
+
+case "$action" in
+    is-active)
+        case "$(state "$unit")" in
+            RUNNING)  echo active;      exit 0 ;;
+            STARTING) echo activating;  exit 3 ;;
+            FATAL|BACKOFF) echo failed; exit 3 ;;
+            STOPPED|EXITED|STOPPING) echo inactive; exit 3 ;;
+            *)        echo unknown;     exit 4 ;;
+        esac
+        ;;
+    reload|reload-or-restart|try-restart)
+        if [ "$(state "$unit")" = "RUNNING" ]; then
+            case "$unit" in
+                haproxy)    $SUPERVISORCTL signal USR2 haproxy ;;
+                keepalived) $SUPERVISORCTL signal HUP keepalived ;;
+                *)          $SUPERVISORCTL restart "$unit" ;;
+            esac
+        else
+            [ "$action" = "try-restart" ] && exit 0
+            $SUPERVISORCTL start "$unit"
+        fi
+        ;;
+    restart)
+        if [ "$(state "$unit")" = "RUNNING" ]; then
+            $SUPERVISORCTL restart "$unit"
+        else
+            $SUPERVISORCTL start "$unit"
+        fi
+        ;;
+    start|stop)
+        $SUPERVISORCTL "$action" "$unit"
+        ;;
+    status)
+        $SUPERVISORCTL status "$unit"
+        ;;
+    daemon-reload|enable|disable|is-enabled)
+        # No units to (re)generate in a container -- succeed quietly.
+        exit 0
+        ;;
+    *)
+        echo "systemctl shim: unsupported action '$action'" >&2
+        exit 1
+        ;;
+esac
