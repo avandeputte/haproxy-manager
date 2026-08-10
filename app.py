@@ -3444,6 +3444,7 @@ def _cli(argv):
         app.py set-admin <username> <password>   create/replace the UI login
         app.py set-admin <username> -            read the password from stdin
         app.py show-admin                        print the configured username
+        app.py keys                              print key fingerprints, for comparing nodes
     """
     cmd = argv[0]
     if cmd == "set-admin":
@@ -3460,6 +3461,33 @@ def _cli(argv):
         set_admin(cfg, argv[1], password)
         save_config(cfg)
         print("administrator '%s' set" % cfg["local"]["admin"]["username"])
+        return 0
+    if cmd == "keys":
+        cfg = load_config()
+        loc = cfg["local"]
+        print("node:      %s" % socket.gethostname())
+        print("url:       %s" % (loc.get("node_url") or "(not set)"))
+        print("api key:   %s  fingerprint %s"
+              % ("(not set)" if not (loc.get("api_key") or "").strip() else "set",
+                 key_fingerprint(loc.get("api_key")) or "-"))
+        print("           other nodes must hold a key with THIS fingerprint for this node")
+        peers = loc["sync"].get("peers") or []
+        print("peers:     %d" % len(peers))
+        seen = {}
+        for p in peers:
+            host = urlsplit(p.get("url") or "").hostname or "?"
+            fp = key_fingerprint(p.get("api_key")) or "-"
+            flags = []
+            if fp != "-" and fp == key_fingerprint(loc.get("api_key")):
+                flags.append("THIS NODE'S OWN KEY")
+            if host in seen:
+                flags.append("duplicate of %s" % seen[host])
+            seen.setdefault(host, p.get("url"))
+            if not p.get("enabled", True):
+                flags.append("disabled")
+            print("  %-28s %-34s fingerprint %s%s"
+                  % (p.get("name", "?"), p.get("url", "?"), fp,
+                     "   <-- " + ", ".join(flags) if flags else ""))
         return 0
     if cmd == "show-admin":
         admin = load_config()["local"].get("admin") or {}

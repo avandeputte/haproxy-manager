@@ -511,9 +511,21 @@ function fieldRow(f,val){
           const a=new Uint8Array(24);crypto.getRandomValues(a);
           inp.value=[...a].map(x=>x.toString(16).padStart(2,"0")).join("");
           inp.type="text";toggle.textContent="Hide";
-          note.textContent="generated -- remember to Save";
+          inp.dispatchEvent(new Event("input"));
         }));
       }
+      // The node still checks the SAVED key, so an edited field is a trap:
+      // copy it to another node and that node will present the wrong value.
+      const saved=inp.value;
+      const warn=document.createElement("div");warn.className="hint";
+      warn.style.cssText="margin-top:6px;color:var(--drift)";
+      inp.addEventListener("input",()=>{
+        warn.textContent=inp.value!==saved
+          ? "This key has not been saved yet. Press Save before copying it to another node -- "+
+            "until then this node still expects the previous key."
+          : "";
+      });
+      cell.appendChild(warn);
       bar.appendChild(note);
       cell.appendChild(bar);
     }
