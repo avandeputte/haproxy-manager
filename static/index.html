@@ -481,6 +481,42 @@ function fieldRow(f,val){
     inp.id="f_"+f.k;inp.value=val??(f.d??"");
     if(f.t==="password")inp.autocomplete="new-password";
     cell.appendChild(inp);
+    /* Secrets you have to move to another machine need to be readable. */
+    if(f.t==="password"&&f.reveal){
+      const bar=document.createElement("div");bar.style.marginTop="7px";
+      const note=document.createElement("span");note.className="sub";note.style.marginLeft="8px";
+      const toggle=btn("Show","sm",()=>{
+        const hidden=inp.type==="password";
+        inp.type=hidden?"text":"password";
+        toggle.textContent=hidden?"Hide":"Show";
+      });
+      bar.appendChild(toggle);
+      bar.appendChild(document.createTextNode(" "));
+      bar.appendChild(btn("Copy","sm",async()=>{
+        if(!inp.value){note.textContent="nothing to copy";return;}
+        try{
+          await navigator.clipboard.writeText(inp.value);
+          note.textContent="copied";
+        }catch(e){
+          // clipboard access needs a secure context; fall back to selecting it
+          const was=inp.type;inp.type="text";inp.focus();inp.select();
+          note.textContent="selected -- press "+(navigator.platform.indexOf("Mac")>=0?"Cmd":"Ctrl")+"+C";
+          if(was==="password")toggle.textContent="Hide";
+        }
+        setTimeout(()=>{note.textContent="";},4000);
+      }));
+      if(f.generate){
+        bar.appendChild(document.createTextNode(" "));
+        bar.appendChild(btn("Generate","sm",()=>{
+          const a=new Uint8Array(24);crypto.getRandomValues(a);
+          inp.value=[...a].map(x=>x.toString(16).padStart(2,"0")).join("");
+          inp.type="text";toggle.textContent="Hide";
+          note.textContent="generated -- remember to Save";
+        }));
+      }
+      bar.appendChild(note);
+      cell.appendChild(bar);
+    }
   }
   if(f.h){const h=document.createElement("div");h.className="hint";h.textContent=f.h;cell.appendChild(h);}
   return [lab,cell];
@@ -984,7 +1020,7 @@ function setupCreate(st){
 const PEER_FIELDS=[
  {k:"name",l:"Name",t:"text",h:"How this node should refer to it"},
  {k:"url",l:"URL",t:"text",h:"e.g. http://10.0.0.2:8080 or https://node2.example.com"},
- {k:"api_key",l:"Its API key",t:"password",h:"The API key configured on THAT node (Peer sync > This node). Leave blank when editing to keep the stored one."},
+ {k:"api_key",l:"Its API key",t:"password",reveal:true,h:"The API key configured on THAT node (Cluster > This node there). Leave blank when editing to keep the stored one."},
  {k:"verify_tls",l:"Verify its TLS certificate",t:"bool"},
  {k:"enabled",l:"Enabled",t:"bool",d:true},
 ];
@@ -1006,7 +1042,7 @@ function peerEditor(peer,after){
 const CLUSTER_SHARED=[
  {k:"vips",l:"Virtual IP addresses",t:"textarea",h:"One per line with prefix, e.g. 192.0.2.10/24. Bind your Public Services to these."},
  {k:"vrid",l:"Virtual router ID",t:"number",h:"1-255. Must be identical on every node, and unique among other VRRP groups on the same network."},
- {k:"auth_pass",l:"VRRP password",t:"password",h:"Same on every node; only the first 8 characters are used"},
+ {k:"auth_pass",l:"VRRP password",t:"password",reveal:true,h:"Same on every node; only the first 8 characters are used"},
  {k:"state",l:"Initial state",t:"select",o:["MASTER","BACKUP"],d:"BACKUP"},
  {k:"nopreempt",l:"No preempt",t:"bool",d:true,h:"A recovered node does not take the virtual IP back"},
  {k:"advert_int",l:"Advertisement interval (s)",t:"number"},
@@ -1054,7 +1090,8 @@ async function renderCluster(){
   const f2=document.createElement("div");f2.className="frm";
   const localFields=CLUSTER_LOCAL.concat([
     {k:"node_url",l:"This node's URL",t:"text",h:"How the other nodes reach this one, e.g. http://10.0.0.1:8080. Needed to hand them a way back."},
-    {k:"api_key",l:"API key",t:"password",h:"Machines only: the others present this to sync here, and scripts can send it as X-API-Key."},
+    {k:"api_key",l:"API key",t:"password",reveal:true,generate:true,
+     h:"Machines only: the other nodes present this to sync here, and scripts can send it as X-API-Key. Show it to copy it onto another node."},
   ]);
   localFields.forEach(f=>{
     const v=f.k==="node_url"?loc.node_url:f.k==="api_key"?loc.api_key:(loc.keepalived||{})[f.k];
