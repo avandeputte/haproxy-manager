@@ -26,6 +26,7 @@ Environment overrides:
 """
 
 import base64
+import concurrent.futures
 import copy
 import hashlib
 import hmac
@@ -157,10 +158,13 @@ DEFAULT_CONFIG = {
             "custom": "",
         },
         "sync": {
+            # One entry per other node: {id, name, url, api_key, verify_tls, enabled}
+            "peers": [],
+            "auto_sync": False,    # push to every peer after a successful Apply
+            # Legacy single-peer fields, migrated into "peers" on load.
             "peer_url": "",
             "peer_api_key": "",
             "verify_tls": False,
-            "auto_sync": False,    # push to peer after every successful Apply
         },
     },
     "_meta": {"applied_hash": ""},
@@ -181,6 +185,21 @@ def _merge_defaults(dst, src):
     return dst
 
 
+def _migrate(cfg):
+    """Bring an older config forward. Idempotent; persisted on the next save."""
+    s = cfg["local"]["sync"]
+    if s.get("peer_url") and not s.get("peers"):
+        s["peers"] = [{
+            "id": str(uuid.uuid4()),
+            "name": urlsplit(s["peer_url"]).hostname or "peer",
+            "url": s["peer_url"].rstrip("/"),
+            "api_key": s.get("peer_api_key", ""),
+            "verify_tls": bool(s.get("verify_tls")),
+            "enabled": True,
+        }]
+    return cfg
+
+
 def load_config():
     with _lock:
         cfg = {}
@@ -189,7 +208,7 @@ def load_config():
                 cfg = json.loads(CONF_PATH.read_text())
             except (ValueError, OSError):
                 cfg = {}
-        return _merge_defaults(cfg, DEFAULT_CONFIG)
+        return _migrate(_merge_defaults(cfg, DEFAULT_CONFIG))
 
 
 def save_config(cfg):
@@ -1066,9 +1085,14 @@ def do_apply(cfg=None, allow_push=True):
         save_config(cfg)
         result["ok"] = True
 
-        if allow_push and cfg["local"]["sync"].get("auto_sync") and cfg["local"]["sync"].get("peer_url"):
+        if allow_push and cfg["local"]["sync"].get("auto_sync") and enabled_peers(cfg):
             r = sync_push(cfg)
-            result["steps"].append("auto-sync to peer: " + ("ok" if r.get("ok") else str(r.get("error"))))
+            result["steps"].append("auto-sync to %d peer(s): " % len(enabled_peers(cfg)) +
+                                   ("ok" if r.get("ok") else str(r.get("error"))))
+            if not r.get("ok"):
+                result.setdefault("warnings", []).append(
+                    "This node applied its own configuration, but syncing it to the other "
+                    "nodes failed: %s" % r.get("error"))
         return result
 
 
@@ -1132,7 +1156,7 @@ def api_status():
         "dirty": cfg["_meta"].get("applied_hash") != config_hash(cfg),
         "certs": certs,
         "acme_installed": Path(ACME_SH).exists(),
-        "peer_url": cfg["local"]["sync"].get("peer_url", ""),
+        "peers": len(cfg["local"]["sync"].get("peers") or []),
         "sync_available": _requests is not None,
     })
 
@@ -1359,50 +1383,190 @@ def shared_payload(cfg):
     }
 
 
-def sync_push(cfg):
-    s = cfg["local"]["sync"]
+def enabled_peers(cfg):
+    return [p for p in (cfg["local"]["sync"].get("peers") or []) if p.get("enabled", True) and p.get("url")]
+
+
+def push_to_peer(peer, payload):
+    """Send the shared configuration to one node."""
+    url = (peer.get("url") or "").rstrip("/")
+    try:
+        r = _requests.post(url + "/api/sync/receive", json=payload,
+                           headers={"X-API-Key": peer.get("api_key", "")},
+                           timeout=90, verify=bool(peer.get("verify_tls")))
+        if r.status_code != 200:
+            return {"ok": False, "name": peer.get("name") or url,
+                    "error": "HTTP %s: %s" % (r.status_code, r.text[:200])}
+        return {"ok": True, "name": peer.get("name") or url, "peer": r.json()}
+    except Exception as e:
+        return {"ok": False, "name": peer.get("name") or url, "error": str(e)}
+
+
+def sync_push(cfg, only=None):
+    """Push to every enabled peer (or just one), in parallel."""
     if _requests is None:
         return {"ok": False, "error": "python3-requests is not installed on this node"}
-    url = (s.get("peer_url") or "").rstrip("/")
-    if not url:
-        return {"ok": False, "error": "no peer URL configured (High Availability > Sync)"}
-    try:
-        r = _requests.post(
-            url + "/api/sync/receive",
-            json=shared_payload(cfg),
-            headers={"X-API-Key": s.get("peer_api_key", "")},
-            timeout=90,
-            verify=bool(s.get("verify_tls")),
-        )
-        if r.status_code != 200:
-            return {"ok": False, "error": "peer returned HTTP %s: %s" % (r.status_code, r.text[:300])}
-        return {"ok": True, "peer": r.json()}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+    peers = enabled_peers(cfg)
+    if only:
+        peers = [p for p in (cfg["local"]["sync"].get("peers") or []) if p.get("id") == only]
+        if not peers:
+            return {"ok": False, "error": "no such peer"}
+    if not peers:
+        return {"ok": False, "error": "no peers configured (Advanced > Keepalived > Peer sync)"}
+
+    payload = shared_payload(cfg)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(peers))) as ex:
+        results = list(ex.map(lambda p: push_to_peer(p, payload), peers))
+    failed = [r for r in results if not r["ok"]]
+    return {"ok": not failed, "results": results,
+            "error": "; ".join("%s: %s" % (r["name"], r["error"]) for r in failed) or None}
 
 
 @app.post("/api/sync/push")
 def api_sync_push():
-    return jsonify(sync_push(load_config()))
+    body = request.get_json(silent=True) or {}
+    return jsonify(sync_push(load_config(), only=body.get("peer")))
 
 
-@app.post("/api/sync/test")
-def api_sync_test():
+# --------------------------------------------------------------------------
+# peers: the other nodes in the cluster
+# --------------------------------------------------------------------------
+
+@app.route("/api/peers", methods=["GET", "POST"])
+def api_peers():
     cfg = load_config()
-    s = cfg["local"]["sync"]
-    if _requests is None:
-        return jsonify({"ok": False, "error": "python3-requests is not installed on this node"})
-    url = (s.get("peer_url") or "").rstrip("/")
+    peers = cfg["local"]["sync"].setdefault("peers", [])
+    if request.method == "GET":
+        # Never hand the stored keys back to the browser.
+        return jsonify([{k: v for k, v in p.items() if k != "api_key"} |
+                        {"has_key": bool(p.get("api_key"))} for p in peers])
+    body = request.get_json(force=True) or {}
+    url = (body.get("url") or "").strip().rstrip("/")
     if not url:
-        return jsonify({"ok": False, "error": "no peer URL configured"})
+        return jsonify({"error": "the peer's URL is required, e.g. http://10.0.0.2:8080"}), 400
+    if "://" not in url:
+        url = "http://" + url
+    peer = {"id": str(uuid.uuid4()),
+            "name": (body.get("name") or "").strip() or (urlsplit(url).hostname or "peer"),
+            "url": url, "api_key": body.get("api_key", ""),
+            "verify_tls": bool(body.get("verify_tls")), "enabled": bool(body.get("enabled", True))}
+    peers.append(peer)
+    save_config(cfg)
+    return jsonify({k: v for k, v in peer.items() if k != "api_key"})
+
+
+@app.route("/api/peers/<pid>", methods=["PUT", "DELETE"])
+def api_peer_item(pid):
+    cfg = load_config()
+    peers = cfg["local"]["sync"].setdefault("peers", [])
+    for i, p in enumerate(peers):
+        if p.get("id") != pid:
+            continue
+        if request.method == "DELETE":
+            peers.pop(i)
+            save_config(cfg)
+            return jsonify({"ok": True})
+        body = request.get_json(force=True) or {}
+        for key in ("name", "url", "verify_tls", "enabled"):
+            if key in body:
+                p[key] = body[key]
+        if body.get("api_key"):          # blank means "leave the stored key alone"
+            p["api_key"] = body["api_key"]
+        p["url"] = (p.get("url") or "").rstrip("/")
+        save_config(cfg)
+        return jsonify({k: v for k, v in p.items() if k != "api_key"})
+    abort(404)
+
+
+def _query_peer(peer, timeout=6):
+    """Ask one node for its status."""
+    url = (peer.get("url") or "").rstrip("/")
+    out = {"id": peer.get("id"), "name": peer.get("name") or url, "url": url,
+           "self": False, "reachable": False, "error": ""}
+    if not peer.get("enabled", True):
+        out["error"] = "disabled"
+        return out
+    started = time.time()
     try:
-        r = _requests.get(url + "/api/ping", headers={"X-API-Key": s.get("peer_api_key", "")},
-                          timeout=10, verify=bool(s.get("verify_tls")))
+        r = _requests.get(url + "/api/status", headers={"X-API-Key": peer.get("api_key", "")},
+                          timeout=timeout, verify=bool(peer.get("verify_tls")))
+        out["ms"] = int((time.time() - started) * 1000)
+        if r.status_code == 401:
+            out["error"] = "the API key this node holds for it was rejected"
+            return out
         if r.status_code != 200:
-            return jsonify({"ok": False, "error": "peer returned HTTP %s" % r.status_code})
-        return jsonify({"ok": True, "peer": r.json().get("node")})
+            out["error"] = "HTTP %s" % r.status_code
+            return out
+        out.update(_node_summary(r.json()))
+        out["reachable"] = True
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)})
+        out["ms"] = int((time.time() - started) * 1000)
+        out["error"] = str(e)[:200]
+    return out
+
+
+def _node_summary(st):
+    certs = st.get("certs") or []
+    return {
+        "hostname": st.get("hostname", ""),
+        "version": st.get("version", ""),
+        "role": st.get("role", ""),
+        "haproxy": st.get("haproxy", ""),
+        "keepalived": st.get("keepalived", ""),
+        "vips": st.get("vips") or [],
+        "vip_held": st.get("vip_held") or [],
+        "dirty": bool(st.get("dirty")),
+        "update_available": bool(st.get("update_available")),
+        "certs_total": len(certs),
+        "certs_bad": sum(1 for c in certs if c.get("status") in ("expired", "expiring", "placeholder", "missing")),
+    }
+
+
+@app.get("/api/cluster")
+def api_cluster():
+    """Every node's health, as seen from this one."""
+    cfg = load_config()
+    peers = cfg["local"]["sync"].get("peers") or []
+
+    with app.test_request_context("/api/status"):
+        me = _node_summary(json.loads(api_status().get_data()))
+    me.update({"id": "self", "name": me["hostname"] or "this node", "url": "",
+               "self": True, "reachable": True, "error": "", "ms": 0})
+
+    nodes = [me]
+    if peers:
+        if _requests is None:
+            nodes += [dict(_query_peer(p), error="python3-requests is not installed on this node")
+                      for p in peers]
+        else:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(peers))) as ex:
+                nodes += list(ex.map(_query_peer, peers))
+
+    reachable = [n for n in nodes if n.get("reachable")]
+    holders = [n for n in reachable if n.get("vip_held")]
+    warnings = []
+    if len(nodes) - len(reachable):
+        warnings.append("%d of %d nodes did not answer." % (len(nodes) - len(reachable), len(nodes)))
+    vips_configured = any(n.get("vips") for n in reachable)
+    if vips_configured and not holders:
+        warnings.append("No node holds the virtual IP, so nothing is being served on it. "
+                        "Check Keepalived on each node.")
+    if len(holders) > 1:
+        warnings.append("%d nodes hold the virtual IP at the same time (split brain): %s. "
+                        "They are not seeing each other's VRRP."
+                        % (len(holders), ", ".join(n["name"] for n in holders)))
+    dirty = [n["name"] for n in reachable if n.get("dirty")]
+    if dirty:
+        warnings.append("Unapplied changes on: %s." % ", ".join(dirty))
+    versions = {n.get("version") for n in reachable if n.get("version")}
+    if len(versions) > 1:
+        warnings.append("Nodes run different versions: %s." % ", ".join(sorted(versions)))
+
+    return jsonify({
+        "ok": True, "nodes": nodes,
+        "summary": {"total": len(nodes), "reachable": len(reachable),
+                    "active": len(holders), "warnings": warnings},
+    })
 
 
 @app.post("/api/sync/receive")

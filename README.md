@@ -2,7 +2,7 @@
 
 A small self-hosted web UI to manage an **HAProxy** configuration, obtain
 **Let's Encrypt** certificates, and run an **active-passive pair with Keepalived**
-on a shared virtual IP — with settings and certificates syncing between the two
+on a shared virtual IP — with settings and certificates syncing across the
 nodes.
 
 ## Publishing a service
@@ -120,27 +120,59 @@ modeled on:
   issuer, its expiry date with the days remaining, and the outcome, timestamp
   and full `acme.sh` log of the last issue/renew attempt (the **Log** button).
 
-## High availability (active-passive)
+## High availability
 
-- **Keepalived** runs VRRP on both nodes with a shared **virtual IP**. Bind your
+Any number of nodes. One holds the virtual IP and serves traffic; the others
+stand by with the same configuration, ready to take it.
+
+### Cluster health
+
+**Overview** opens with a **Cluster** table: every node's role, HAProxy and
+Keepalived state, which virtual IPs it currently holds, its certificate health,
+its version and how long it took to answer. Each node asks the others directly,
+in parallel, so the view is live rather than remembered.
+
+It calls out the conditions that are otherwise invisible until traffic stops:
+
+- **No node holds the virtual IP** — nothing is being served on it.
+- **Two or more nodes hold it at once** — split brain; they are not seeing each
+  other's VRRP.
+- Nodes with **unapplied changes**, nodes running **different versions**, and
+  nodes that **did not answer** (with the reason: unreachable, or the API key
+  this node holds for it was rejected).
+
+### Peers
+
+**Advanced → Keepalived → Peer sync** lists the other nodes, each with its URL
+and the API key configured *on that node*. A push sends the shared configuration
+and the deployed certificates to all of them in parallel and reports per node;
+"Sync after every Apply" does it automatically. Their node-local settings —
+Keepalived, their own peer list, login and API key — are never touched, so there
+is no sync loop. Keys are stored per peer and never sent back to the browser.
+
+An existing two-node setup is migrated automatically: the old single peer
+becomes the first entry in the list.
+
+### Keepalived
+
+- **Keepalived** runs VRRP on every node with a shared **virtual IP**. Bind your
   Public Services to that VIP. Keepalived's settings are **node-local** — set them
-  separately on each node. For non-preempting failover, set both nodes to `BACKUP`
-  with different priorities and enable `nopreempt`; the higher-priority node holds
-  the VIP, and a recovered node won't yank it back. "Track HAProxy process" fails
-  over automatically if HAProxy dies.
-- **Sync** is push-based. On the active node, set Sync → Peer URL / Peer API key to
-  the passive node and either push manually ("Sync to peer now"), enable "Sync
-  after every Apply", or add a `sync_to_peer` Automation to a certificate. The peer
-  receives the **shared** config (HAProxy + ACME) and the deployed certificate
-  files, validates, applies and reloads. Its **node-local** settings — Keepalived,
-  Sync target, API key — are never overwritten, so there's no sync loop.
+  separately on each node, and they must agree on the **virtual router ID**. For
+  non-preempting failover set every node to `BACKUP` with a different priority
+  and enable `nopreempt`; the highest-priority node holds the VIP, and a
+  recovered node won't yank it back. "Track HAProxy process" fails over
+  automatically if HAProxy dies. The **Keepalived** page diagnoses this node:
+  whether the configured interface exists, whether the config was written,
+  the VRRP state from the journal, and the `keepalived -t` output.
+- **Sync** is push-based: the node you edit pushes to the others. Add a
+  `sync_to_peer` Automation to a certificate to push it after each renewal.
 
 ### Node-local vs. synced
 
 | Synced between nodes | Node-local (never synced) |
 |---|---|
 | Real Servers, Backend Pools, Public Services | Keepalived (interface, VRID, priority, VIP) |
-| Conditions, Rules, Health Monitors | Sync peer URL / peer key |
+| Conditions, Rules, Health Monitors | The peer list and their API keys |
 | HAProxy Settings | API key |
 | ACME accounts, challenges, certificates, automations | Administrator login |
 | Deployed certificate PEM files | |
