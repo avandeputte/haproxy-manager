@@ -454,8 +454,17 @@ function fieldRow(f,val){
     wrap.appendChild(inp);cell.appendChild(wrap);
   }else if(f.t==="select"){
     inp=document.createElement("select");inp.id="f_"+f.k;
-    f.o.forEach(o=>{const op=document.createElement("option");op.value=o;op.textContent=o;inp.appendChild(op);});
-    inp.value=val??f.d??f.o[0];cell.appendChild(inp);
+    /* options are plain strings, or {value,label} for things with an id */
+    const opts=(typeof f.o==="function"?f.o():f.o)||[];
+    const valOf=o=>(o&&typeof o==="object")?o.value:o;
+    opts.forEach(o=>{
+      const op=document.createElement("option");
+      op.value=valOf(o);
+      op.textContent=(o&&typeof o==="object")?(o.label??o.value):o;
+      inp.appendChild(op);
+    });
+    inp.value=val??f.d??(opts.length?valOf(opts[0]):"");
+    cell.appendChild(inp);
   }else if(f.t==="ref"){
     inp=document.createElement("select");inp.id="f_"+f.k;
     const none=document.createElement("option");none.value="";none.textContent="(none)";inp.appendChild(none);
