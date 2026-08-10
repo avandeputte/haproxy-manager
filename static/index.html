@@ -377,7 +377,8 @@ const E={
         ["expires","Expires",r=>certExpiryCell(r)],
         ["last","Last issue",r=>certLastCell(r)]],
   refs:["acme/accounts","acme/challenges"],
-  pre:loadCertStatus,
+  pre:async()=>{await loadCertStatus();await loadAcmeHealth();},
+  notice:acmeNotice,
   rowActions:[
    {label:"Issue",fn:r=>issueCert(r,false),title:"Request the certificate from the CA now"},
    {label:"Force",fn:r=>issueCert(r,true),cls:"dngr",title:"Reissue even if not due for renewal"},
@@ -563,6 +564,7 @@ async function renderEntity(key){
   if(def.pre)await def.pre();
   const items=lists[key];
   const c=$("#content");c.innerHTML="";
+  if(def.notice){const n=def.notice();if(n)c.appendChild(n);}
   const card=document.createElement("div");card.className="card";
   const hd=document.createElement("div");hd.className="hd";
   hd.innerHTML="<h2>"+esc(def.title)+"</h2><div class=sp></div>";
@@ -1877,6 +1879,29 @@ async function renderAdmin(){
   foot.appendChild(msg);bd.appendChild(foot);card.appendChild(bd);c.appendChild(card);
 }
 
+/* ============================ acme.sh health ============================ */
+let acmeHealth=null;
+async function loadAcmeHealth(){
+  try{acmeHealth=await api("acme/health");}catch(e){acmeHealth=null;}
+  return acmeHealth;
+}
+function acmeNotice(){
+  const h=acmeHealth;
+  if(!h||(h.ok&&!h.warning))return null;
+  const card=document.createElement("div");card.className="card";
+  card.style.borderColor=h.ok?"#e3cfa8":"var(--down)";
+  const bad=!h.ok;
+  card.innerHTML='<div class=hd><h2>'+(bad?"Certificates cannot be issued on this node"
+                                         :"acme.sh warning")+"</h2></div>"+
+    '<div class=bd><p>'+esc(h.problem||h.warning||"")+"</p>"+
+    (h.hint?'<p class=hint style="margin-top:8px">'+esc(h.hint)+"</p>":"")+
+    '<p class=hint style="margin-top:8px">Looked for it at <span class=mono>'+esc(h.path)+
+      "</span>"+(h.version?", found "+esc(h.version):"")+
+      ". Existing certificates are still served and still sync between nodes"+
+      (bad?"; only issuing and renewing are affected.":".")+"</p></div>";
+  return card;
+}
+
 /* ============================ certificate status ============================ */
 /* Per-certificate state comes from /api/status, keyed by certificate id. */
 let certStat={};
@@ -1965,8 +1990,8 @@ async function renderOverview(){
     '<div class=stat><div class=k>Virtual IPs</div><div class=v style="font-size:13px">'+
       (st.vips.length?st.vips.map(v=>esc(v)+(st.vip_held.includes(v)?" ●":"")).join("<br>"):"—")+"</div></div>"+
     '<div class=stat><div class=k>Configuration</div><div class=v style="font-size:13px">'+
-      (st.dirty?'<span class="pill" style="background:#f6ecdd;color:var(--drift)">unapplied changes</span>':'<span class="pill up">applied</span>')+"</div></div>"+
-    '<div class=stat><div class=k>acme.sh</div><div class=v style="font-size:13px">'+(st.acme_installed?'<span class="pill up">installed</span>':'<span class="pill down">missing</span>')+"</div></div>";
+      (st.dirty?'<span class="pill" style="background:#f6ecdd;color:var(--drift)">unapplied changes</span>':'<span class="pill up">applied</span>')+"</div></div>";
+  grid.style.gridTemplateColumns="repeat("+grid.children.length+",1fr)";
   c.appendChild(grid);
 
   c.appendChild(await clusterCard());

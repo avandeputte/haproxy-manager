@@ -3104,6 +3104,60 @@ def dnsapi_hooks():
     return hooks
 
 
+@app.get("/api/acme/health")
+def api_acme_health():
+    """Whether this node can actually obtain a certificate.
+
+    Existence is not enough: the file has to be runnable, its home has to be
+    writable for account keys and issued certificates, and the tools it shells
+    out to have to be there.
+    """
+    path = Path(ACME_SH)
+    out = {"ok": False, "path": str(path), "home": str(ACME_HOME),
+           "version": "", "problem": "", "hint": ""}
+
+    if not path.exists():
+        out["problem"] = "acme.sh is not installed at %s." % path
+        out["hint"] = ("Re-run the installer on this node -- it installs acme.sh when it is "
+                       "missing -- or point HAM_ACME_SH at an existing copy. Nodes installed "
+                       "before this was fixed never got it: the old installer reported success "
+                       "while acme.sh failed to install.")
+        return jsonify(out)
+
+    if not os.access(str(path), os.X_OK):
+        out["problem"] = "%s is not executable." % path
+        out["hint"] = "chmod +x %s" % path
+        return jsonify(out)
+
+    rc, text = run([str(path), "--home", str(ACME_HOME), "--version"], timeout=30)
+    if rc != 0:
+        out["problem"] = "acme.sh will not run: %s" % (text.strip()[:300] or "exit code %s" % rc)
+        out["hint"] = "Check that bash and curl are installed, then re-run the installer."
+        return jsonify(out)
+    out["version"] = next((l.strip() for l in reversed(text.splitlines())
+                           if l.strip().startswith("v")), text.strip()[:40])
+
+    if not os.access(str(ACME_HOME), os.W_OK):
+        out["problem"] = "%s is not writable, so account keys and certificates cannot be stored." % ACME_HOME
+        out["hint"] = "Fix the ownership of that directory; the service runs as root."
+        return jsonify(out)
+
+    missing = [t for t in ("curl", "openssl") if not shutil.which(t)]
+    if missing:
+        out["problem"] = "acme.sh needs %s, which is not installed." % " and ".join(missing)
+        out["hint"] = "apt-get install -y " + " ".join(missing)
+        return jsonify(out)
+    if not shutil.which("socat"):
+        out["ok"] = True
+        out["problem"] = ""
+        out["warning"] = ("socat is not installed, so HTTP-01 validation with acme.sh's standalone "
+                          "listener will fail. DNS-01 is unaffected.")
+        return jsonify(out)
+
+    out["ok"] = True
+    return jsonify(out)
+
+
 @app.get("/api/acme/dnsapi")
 def api_acme_dnsapi():
     hooks = dnsapi_hooks()
