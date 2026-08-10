@@ -2,27 +2,29 @@
 """
 haproxy-manager -- a small self-hosted web UI for managing:
 
-  * an HAProxy configuration (modeled on the OPNsense net/haproxy plugin:
-    Public Services / Backend Pools / Real Servers / Conditions / Rules /
-    Health Monitors / Settings)
-  * Let's Encrypt (ACME) certificates via acme.sh (modeled on the OPNsense
-    security/acme-client plugin: Accounts / Challenge Types / Certificates /
-    Automations / Settings)
-  * an active-passive pair using Keepalived with a shared virtual IP, with
-    push-based settings + certificate sync between the two nodes.
+  * an HAProxy configuration: Public Services, Backend Pools, Real Servers,
+    Conditions, Rules, Health Monitors and settings, published through a
+    service wizard that creates and updates those objects together
+  * Let's Encrypt (ACME) certificates via acme.sh: accounts, challenge types
+    and certificates, renewed automatically by the node that holds the VIP and
+    pushed to the others
+  * a cluster of any number of nodes using Keepalived on a shared virtual IP,
+    with push-based settings and certificate sync between them
+  * a watchdog that restarts HAProxy and Keepalived when they stop answering,
+    and notifications by email, Pushover or webhook when something needs a
+    person
 
-Single JSON config store, no database. Requires: Flask, requests (for sync),
-haproxy, keepalived, openssl, acme.sh. Run as root (it writes to /etc and
-reloads services via systemctl).
+One JSON config store, no database. Everything HAProxy and Keepalived read is
+generated from it and validated before it is written.
 
-Environment overrides:
-  HAM_DATA_DIR       default /var/lib/haproxy-manager
-  HAM_CERT_DIR       default /etc/haproxy/certs
-  HAM_HAPROXY_CFG    default /etc/haproxy/haproxy.cfg
-  HAM_KEEPALIVED_CFG default /etc/keepalived/keepalived.conf
-  HAM_ACME_HOME      default ~/.acme.sh
-  HAM_LISTEN / HAM_PORT   default 0.0.0.0 / 8080
-  HAM_DRY_RUN=1      skip systemctl calls (development)
+Requires: Flask, requests, waitress, haproxy, keepalived, openssl, acme.sh.
+Runs as root -- it writes /etc/haproxy and /etc/keepalived and reloads services
+through systemctl. Served by waitress as a single process with a thread pool;
+see _serve() for why it must not be run with multiple worker processes.
+
+Configuration lives in the UI. Environment overrides are documented in
+docs/configuration.md; HAM_DRY_RUN=1 renders and validates without reloading
+anything, which is how the tests run.
 """
 
 import base64
@@ -1635,7 +1637,7 @@ def do_apply(cfg=None, allow_push=True):
 def api_preview():
     cfg = load_config()
     ka = render_keepalived(cfg) if cfg["local"]["keepalived"].get("enabled") else \
-        "# Keepalived is disabled on this node (High Availability > Keepalived)."
+        "# Keepalived is disabled on this node (Cluster > This node)."
     return jsonify({"haproxy": render_haproxy(cfg), "keepalived": ka})
 
 

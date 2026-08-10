@@ -327,7 +327,8 @@ fetch_individual_files() {
     mkdir -p "$TMPDIR_/src/static"
     fetch "$raw/app.py" "$TMPDIR_/src/app.py" || return 1
     fetch "$raw/static/index.html" "$TMPDIR_/src/static/index.html" || return 1
-    fetch "$raw/VERSION" "$TMPDIR_/src/VERSION" || true   # optional
+    fetch "$raw/VERSION" "$TMPDIR_/src/VERSION" || true       # optional
+    fetch "$raw/install.sh" "$TMPDIR_/src/install.sh" || true  # optional
     [ -s "$TMPDIR_/src/app.py" ] && [ -s "$TMPDIR_/src/static/index.html" ] || return 1
     SRC="$TMPDIR_/src"
     return 0
@@ -442,6 +443,10 @@ install_app() {
     install -d -m 0700 "$DATA"
     install -d -m 0700 "$CERTS"
     install -m 0644 "$SRC/app.py" "$DEST/app.py"
+    # Keep a copy of the installer beside the app, so uninstalling and updating
+    # work without fetching anything -- useful exactly when the network is the
+    # problem.
+    [ -f "$SRC/install.sh" ] && install -m 0755 "$SRC/install.sh" "$DEST/install.sh"
     install -m 0644 "$SRC/static/index.html" "$DEST/static/index.html"
     # The app reads its own version from this file and compares it with GitHub.
     if [ -f "$SRC/VERSION" ]; then

@@ -1,8 +1,9 @@
 #!/bin/sh
 # systemctl(1) shim for the container image.
 #
-# app.py drives services with exactly three calls:
+# app.py drives services with four calls:
 #   systemctl is-active <unit>
+#   systemctl is-enabled <unit>     (the watchdog: leave a disabled unit alone)
 #   systemctl reload-or-restart <unit>
 #   systemctl restart <unit>
 # This maps them onto supervisorctl. HAProxy is reloaded with SIGUSR2 (seamless

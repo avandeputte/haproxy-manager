@@ -384,7 +384,7 @@ const E={
     h:"One KEY=value per line. Choosing a hook above fills in the names it needs."}]},
 
  "acme/certificates":{title:"Certificates",add:"Add certificate",
-  intro:"Certificates are issued with acme.sh, written as combined PEMs to the HAProxy certificate directory, then their Automations run. "+
+  intro:"Certificates are issued with acme.sh and written as combined PEMs to the HAProxy certificate directory. HAProxy is reloaded and the certificate is pushed to the other nodes automatically. "+
         "Until a certificate is issued, Apply installs a short-lived self-signed placeholder so HAProxy can still start.",
   cols:[["name","Name",r=>esc(r.name)+"<div class=sub>"+esc((r.domains||"").split(/\s+/).filter(Boolean).join(", "))+"</div>"],
         ["status","Status",r=>certStatusCell(r)],
@@ -1997,7 +1997,7 @@ async function issueCert(row,force){
   try{
     const r=await api("acme/issue/"+row.id,"POST",{force:!!force});
     pre.textContent=(r.ok
-        ? "SUCCESS -- certificate issued and written to the HAProxy certificate directory.\nIts Automations have run."
+        ? "SUCCESS -- certificate issued and written to the HAProxy certificate directory.\nHAProxy has been reloaded and the certificate pushed to the other nodes."
         : "FAILED -- "+(r.error||"unknown error"))+
       "\n\n--- acme.sh log ---\n"+(r.log||"(no output)");
   }catch(e){pre.textContent="FAILED -- "+e.message;}

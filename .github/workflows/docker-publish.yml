@@ -1,0 +1,102 @@
+name: Build and publish the container image
+
+# Publishes multi-architecture images to the GitHub Container Registry.
+#
+#   ghcr.io/<owner>/haproxy-manager:latest     the tip of main
+#   ghcr.io/<owner>/haproxy-manager:1.46       the contents of VERSION
+#   ghcr.io/<owner>/haproxy-manager:sha-abc123 one exact commit
+#
+# amd64 builds natively; arm64 builds under QEMU emulation, which is slower but
+# needs no self-hosted runner. Nothing here needs a secret: GITHUB_TOKEN can
+# write to the registry once `packages: write` is granted below.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    # Documentation-only commits do not change the image.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Read the version
+        id: version
+        run: echo "value=$(tr -d ' \n' < VERSION)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Sign in to the registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Work out the tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ steps.version.outputs.value }},enable={{is_default_branch}}
+            type=ref,event=tag
+            type=sha,prefix=sha-
+          labels: |
+            org.opencontainers.image.title=haproxy-manager
+            org.opencontainers.image.description=Web UI for HAProxy, Keepalived and acme.sh
+            org.opencontainers.image.version=${{ steps.version.outputs.value }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Proof the published image runs on both architectures, rather than
+      # assuming a successful build means a working container.
+      - name: Check both architectures start and answer
+        run: |
+          set -eu
+          for platform in linux/amd64 linux/arm64; do
+            echo "== $platform =="
+            docker run -d --name check --platform "$platform" \
+              -e HAM_ADMIN_PASSWORD=checkonly \
+              "${REGISTRY}/${IMAGE_NAME}:${{ steps.version.outputs.value }}"
+            for i in $(seq 60); do
+              if docker exec check curl -fsS http://127.0.0.1:8080/api/whoami >/dev/null 2>&1; then
+                echo "   the UI answered"
+                docker exec check /usr/bin/python3 -c \
+                  'import platform;print("   running on", platform.machine())'
+                break
+              fi
+              [ "$i" = 60 ] && { docker logs check; exit 1; }
+              sleep 2
+            done
+            docker rm -f check >/dev/null
+          done

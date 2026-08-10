@@ -5,6 +5,29 @@ A small self-hosted web UI to manage an **HAProxy** configuration, obtain
 on a shared virtual IP — with settings and certificates syncing across the
 nodes.
 
+```bash
+# on a Debian or Ubuntu server
+curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
+
+# or in Docker (linux/amd64 and linux/arm64)
+docker run -d --network host --cap-add NET_ADMIN --cap-add NET_BROADCAST --cap-add NET_RAW \
+  -v ham-data:/var/lib/haproxy-manager -v ham-acme:/var/lib/acme.sh \
+  -v ham-haproxy:/etc/haproxy -v ham-keepalived:/etc/keepalived \
+  ghcr.io/avandeputte/haproxy-manager:latest
+```
+
+Then open `http://<node>:8080`.
+
+**Detailed guides**
+
+| | |
+| --- | --- |
+| [Installing on a server](docs/install-standalone.md) | requirements, what the installer does, options, updating, uninstalling, troubleshooting |
+| [Running in Docker](docs/install-docker.md) | images, compose, networking, volumes, capabilities, limitations |
+| [Configuration](docs/configuration.md) | every setting, what is shared between nodes, environment variables, ports |
+
+The rest of this file describes what each part does and why.
+
 ## First run
 
 The first visit asks for a username and password, then offers a setup wizard
@@ -178,9 +201,9 @@ renewal happens on its own.)
   ignored.
 - **ACME** issuance/renewal shells out to [`acme.sh`](https://github.com/acmesh-official/acme.sh).
   Certificates are written as combined `fullchain + key` PEMs into the HAProxy
-  certificate directory (what HAProxy's `crt` expects), then the certificate's
-  Automations run (e.g. reload HAProxy, sync to peer). A built-in loop renews on
-  the interval set in ACME → Settings.
+  certificate directory (what HAProxy's `crt` expects). HAProxy is then reloaded
+  and the certificate pushed to the other nodes, with nothing to configure. A
+  built-in loop renews on the interval set in ACME → Settings.
 - **HTTP-01** challenges use a local `acme.sh --standalone` listener. When
   "HAProxy integration" is on, every HTTP Public Service automatically routes
   `/.well-known/acme-challenge/` to it, and HTTP→HTTPS redirects skip that path —
@@ -265,8 +288,8 @@ accident, and another browser signed in to the same node is unaffected.
   automatically if HAProxy dies. The **Keepalived** page diagnoses this node:
   whether the configured interface exists, whether the config was written,
   the VRRP state from the journal, and the `keepalived -t` output.
-- **Sync** is push-based: the node you edit pushes to the others. Add a
-  `sync_to_peer` Automation to a certificate to push it after each renewal.
+- **Sync** is push-based: the node you edit pushes to the others. A renewed
+  certificate is pushed automatically by the node that renewed it.
 
 ### Node-local vs. synced
 
@@ -546,17 +569,18 @@ over Sync, or are re-issued.
   hash, the session is an HMAC-signed `HttpOnly` / `SameSite=Strict` cookie that
   expires after 12 hours, and repeated failures lock that address out briefly.
   The login is node-local — set it on each node.
-- The **API key** (High Availability → Sync → *This node*) is for machines, not
+- The **API key** (Cluster → *This node*) is for machines, not
   people: the peer must present it before it may push configuration here, and
   scripts can send it as `X-API-Key` instead of signing in.
 - If no administrator exists yet, the UI asks you to create one on first visit.
   Until then only the calls that create it answer — everything else returns 401 —
   so a node waiting to be set up does not hand its configuration to whoever
   reaches it first.
-- **Every endpoint requires a session or the API key.** Of 51 routes the only
-  ones that answer without either are the sign-in page itself, `/api/whoami`
-  (which unauthenticated returns nothing but whether an administrator exists),
-  and `/api/setup`, which refuses once one does.
+- **Every endpoint requires a session or the API key.** Of 58 routes exactly
+  three answer without either: `/api/login`, `/api/whoami` (which
+  unauthenticated returns nothing but whether an administrator exists), and
+  `/api/setup`, which refuses once an administrator exists. This is verified by
+  a test that walks every route and checks the rest refuse an anonymous caller.
 - **Put the UI behind TLS** (or an SSH tunnel / reverse proxy). Over plain HTTP
   both the password and the session cookie cross the network in the clear.
 - The service runs as **root** because it writes `/etc/haproxy`, `/etc/keepalived`
@@ -574,68 +598,41 @@ over Sync, or are re-issued.
 
 ## Install
 
-Debian-based distributions (Debian, Ubuntu, ...). Run it on **both** nodes:
+Debian-based distributions (Debian 12/13, Ubuntu 22.04/24.04), on **every** node:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
 ```
 
-or, from a checkout, `sudo ./install.sh` — the installer uses the local files
-when it finds them next to itself, and downloads the release from GitHub
-otherwise.
+From a checkout, `sudo ./install.sh` installs those files instead of
+downloading. If haproxy-manager is already installed the same command detects
+it and offers to **update**, **remove** (keeping `config.json` and
+certificates), **purge** (removing those too), or cancel; piped from `curl`
+with no terminal to ask on, it updates in place and says so.
 
-If haproxy-manager is already installed, the same command detects it, prints
-where it lives and whether it is running, and offers to **update**, **remove**
-(keeping `config.json` and certificates), **purge** (removing those too), or
-cancel. Piped from `curl` with no terminal to ask on, it updates in place and
-says so. Pass `--update`, `--uninstall` or `--purge` to skip the question, and
-`-y` to skip the confirmation. An update keeps the port the node already runs
-on and leaves `config.json`, issued certificates and node-local settings alone.
+It installs `haproxy`, `keepalived`, `python3-flask`, `python3-requests`,
+`python3-waitress`, `openssl`, `socat` and `iproute2` from apt, a pinned
+[`acme.sh`](https://github.com/acmesh-official/acme.sh) with no cron of its own
+(the manager drives renewals), enables `net.ipv4.ip_nonlocal_bind` so HAProxy
+can bind a VIP this node does not hold, creates the administrator and API key,
+and installs the systemd unit.
 
-What it does:
+Nothing in HAProxy's configuration is touched until you press Apply. The first
+Apply overwrites `/etc/haproxy/haproxy.cfg`, keeping a `.bak`.
 
-- installs `haproxy`, `keepalived`, `python3-flask`, `python3-requests`,
-  `openssl`, `socat`, `iproute2` from apt;
-- installs a pinned [`acme.sh`](https://github.com/acmesh-official/acme.sh) into
-  `/root/.acme.sh` with no cron of its own — the manager drives renewals;
-- deploys the app to `/opt/haproxy-manager` and installs + enables
-  `haproxy-manager.service`, so it starts on boot;
-- enables `haproxy.service` and `keepalived.service`. Keepalived stays inert
-  until you enable it in the UI (its unit has
-  `ConditionFileNotEmpty=/etc/keepalived/keepalived.conf`) and comes back on
-  its own after a reboot once configured;
-- sets `net.ipv4/ipv6.ip_nonlocal_bind=1` in `/etc/sysctl.d/`, so HAProxy on the
-  **passive** node can bind the shared VIP it does not currently hold;
-- creates the administrator login (`admin` with a generated password) and a
-  random API key for peer sync, prints both, and stores them in
-  `/var/lib/haproxy-manager/admin-credentials.txt` and `api-key.txt` (mode 0600).
-  Updating an installation that predates the login creates one for it.
-
-Options — flags, or the equivalent environment variables:
-
-| Flag | Variable | Default |
-|---|---|---|
-| `--port` | `HAM_PORT` | `8080` |
-| `--listen` | `HAM_LISTEN` | `0.0.0.0` |
-| `--dest` | `HAM_DEST` | `/opt/haproxy-manager` |
-| `--repo` / `--ref` | `HAM_REPO` / `HAM_REF` | `avandeputte/haproxy-manager` / `main` |
-| `--admin-user` | `HAM_ADMIN_USER` | `admin` |
-| `--admin-password` | `HAM_ADMIN_PASSWORD` | random |
-| `--api-key` / `--no-api-key` | `HAM_API_KEY` | random |
-| `--skip-acme` | `HAM_SKIP_ACME` | off |
-| `--tarball` | `HAM_TARBALL` | — |
-| `--update` / `--uninstall` / `--purge` | — | ask |
-| `-y`, `--yes` | — | ask |
-| — | `GITHUB_TOKEN` | for a private repository |
-
-```bash
-curl -fsSL .../install.sh | sudo bash -s -- --port 9000 --no-api-key
-```
-
-Then open `http://<node>:8080` and follow the steps the installer prints. See the
-table above for what to configure where.
+**→ [Full installation guide](docs/install-standalone.md)** — every option, what
+happens in what order, where each file lives, updating, uninstalling and
+troubleshooting.
 
 ## Docker
+
+Multi-architecture images (**linux/amd64** and **linux/arm64**) are published to
+the GitHub Container Registry:
+
+```bash
+docker pull ghcr.io/avandeputte/haproxy-manager:latest   # or :1.46 to pin
+docker compose up -d                                     # on BOTH nodes
+```
 
 The image is all-in-one: the manager, HAProxy, Keepalived and `acme.sh` in one
 container. There is no systemd inside a container, so `supervisord` runs the
@@ -643,37 +640,17 @@ processes and a small `systemctl` shim ([docker/systemctl](docker/systemctl))
 translates the calls the app makes. HAProxy runs in master-worker mode and is
 reloaded with `SIGUSR2`, so Apply does not drop established connections.
 
-```bash
-docker compose up -d --build     # run on BOTH nodes
-```
+Host networking is the intended mode — Keepalived's VRRP and the virtual IP need
+a real interface — and Keepalived needs `NET_ADMIN`, `NET_BROADCAST` and
+`NET_RAW`. One container per node.
 
-Then open `http://<node>:8080` and follow the same steps as above.
+One thing a container cannot do: **restart a hung manager**. On a systemd host
+`WatchdogSec` handles that; supervisord only restarts a process that exits. The
+image's `HEALTHCHECK` reports it, but something has to act on that. For a
+production cluster, the native install is the better fit.
 
-- **Networking.** `docker-compose.yml` defaults to `network_mode: host`. That is
-  the intended setup: HAProxy binds whatever ports your Public Services define,
-  and Keepalived's VRRP/VIP needs a real interface. For a single standalone node
-  without Keepalived you can switch to bridge mode and publish ports explicitly —
-  the compose file has the block commented out.
-- **Capabilities.** Keepalived needs `NET_ADMIN`, `NET_BROADCAST` and `NET_RAW`
-  (already in the compose file). Without them the VIP cannot be claimed.
-- **Login.** Set `HAM_ADMIN_USER` / `HAM_ADMIN_PASSWORD` to seed the
-  administrator on first start; otherwise the UI asks you to create one on your
-  first visit.
-- **State** lives in four volumes: `/var/lib/haproxy-manager` (config.json),
-  `/var/lib/acme.sh` (ACME accounts + issued certs), `/etc/haproxy`
-  (haproxy.cfg + deployed cert PEMs) and `/etc/keepalived`.
-- **Logs.** A collector binds `/dev/log` and writes each message both to the
-  container's stdout — so `docker logs` shows HAProxy, Keepalived, the manager
-  and supervisord together — and to `/var/log/ham-syslog.log`, which is what the
-  UI's **Logs** page reads back (the image has no journal).
-- **Keepalived per node.** Keepalived settings are node-local, so set the
-  interface/VRID/priority separately in each node's container — they are never
-  synced.
-- Ports `8080` (UI/API) and `9080` (HTTP-01 standalone listener) are declared by
-  the image; the ports your Public Services bind to are yours to publish.
-
-Build the image on its own with `docker build -t haproxy-manager .`; the
-`acme.sh` version is pinned by the `ACME_VERSION` build arg.
+**→ [Full Docker guide](docs/install-docker.md)** — images and tags, compose,
+networking modes, volumes, environment, health, logs, upgrading and limitations.
 
 ## If the UI feels slow
 
