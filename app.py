@@ -150,6 +150,7 @@ DEFAULT_CONFIG = {
         # node-local settings -- never overwritten by sync
         "api_key": "",
         "node_url": "",        # how the OTHER nodes should reach this one
+        "web_ui": {"enabled": False, "url": "", "certificate": "auto", "rule_id": ""},
         "allow_edit_when_passive": False,   # escape hatch when no node holds the VIP
         # UI login. The password is only ever stored as a PBKDF2 hash.
         "admin": {"username": "admin", "salt": "", "hash": "", "iterations": 0, "updated": ""},
@@ -478,9 +479,8 @@ LOCAL_WRITE_PREFIXES = (
 
 
 def node_role(cfg):
-    k = cfg["local"]["keepalived"]
-    vips = [v.strip().split("/")[0] for v in (cfg["cluster"].get("vips") or "").splitlines() if v.strip()]
-    if not (k.get("enabled") and vips):
+    vips = cluster_vips(cfg)
+    if not vips:
         return "standalone", []
     rc, out = run(["ip", "-o", "addr"])
     held = [v for v in vips if rc == 0 and re.search(r"\binet6? %s/" % re.escape(v), out)]
@@ -493,6 +493,10 @@ def readonly_state(cfg):
         return False, ""
     role, _ = node_role(cfg)
     if role != "passive":
+        return False, ""
+    if not enabled_peers(cfg):
+        # Nothing to defer to. A lone node that has not won the virtual IP --
+        # during bring-up, or because VRRP is broken -- must stay usable.
         return False, ""
     return True, ("This node is passive: another node holds the virtual IP and serves traffic. "
                   "Change the shared configuration there and push it here, so the two cannot "
@@ -1105,7 +1109,7 @@ def api_keepalived_status():
 
     # Validate what Apply would write right now -- this is what names the fault.
     validation = {"ran": False, "ok": None, "output": ""}
-    if k.get("enabled"):
+    if keepalived_wanted(cfg):
         fd, staging = tempfile.mkstemp(suffix=".conf")
         try:
             with os.fdopen(fd, "w") as f:
@@ -1129,14 +1133,16 @@ def api_keepalived_status():
 
     return jsonify({
         "hostname": socket.gethostname(),
-        "enabled": bool(k.get("enabled")),
-        "service": service if k.get("enabled") else "disabled",
+        "enabled": keepalived_wanted(cfg),
+        "service": service if keepalived_wanted(cfg) else "disabled",
         "config_present": KEEPALIVED_CFG.exists(),
         "config_path": str(KEEPALIVED_CFG),
         "interface": configured,
         "interface_exists": configured in names,
         "interfaces": ifaces,
         "vrid": cl.get("vrid"), "priority": k.get("priority"), "state_setting": cl.get("state"),
+        "unicast_src": k.get("unicast_src", ""),
+        "unicast_peer": [x for x in (k.get("unicast_peer") or "").split() if x],
         "vips": vips, "vip_held": held,
         "vrrp_state": state,
         "validation": validation,
@@ -1175,7 +1181,11 @@ def do_apply(cfg=None, allow_push=True):
         result["steps"].append("haproxy reload: " + ("ok" if rc == 0 else out))
 
         k = cfg["local"]["keepalived"]
-        if k.get("enabled"):
+        if keepalived_wanted(cfg):
+            if derive_unicast(cfg):
+                result["steps"].append(
+                    "unicast peers refreshed from the node list: %s"
+                    % ((k.get("unicast_peer") or "").replace("\n", ", ") or "none -- using multicast"))
             ktext = render_keepalived(cfg)
             fd, kstaging = tempfile.mkstemp(suffix=".conf")
             with os.fdopen(fd, "w") as f:
@@ -1277,10 +1287,10 @@ def api_status():
         "update_available": bool(upd.get("latest")) and is_newer(upd["latest"], VERSION),
         "latest_version": upd.get("latest", ""),
         "haproxy": svc_state("haproxy"),
-        "keepalived": svc_state("keepalived") if k.get("enabled") else "disabled",
+        "keepalived": svc_state("keepalived") if keepalived_wanted(cfg) else "disabled",
         "vips": vips,
         "vip_held": held,
-        "role": ("active" if held else "passive") if (k.get("enabled") and vips) else "standalone",
+        "role": ("active" if held else "passive") if vips else "standalone",
         "dirty": cfg["_meta"].get("applied_hash") != config_hash(cfg),
         "certs": certs,
         "acme_installed": Path(ACME_SH).exists(),
@@ -1566,8 +1576,11 @@ def mesh_for(cfg, target):
     """
     me = (cfg["local"].get("node_url") or "").rstrip("/")
     out = []
+    tgt_url = (target.get("url") or "").rstrip("/").lower()
     for p in cfg["local"]["sync"].get("peers") or []:
-        if p.get("id") == target.get("id") or not p.get("url"):
+        if not p.get("url"):
+            continue
+        if p.get("id") == target.get("id") or (tgt_url and p["url"].rstrip("/").lower() == tgt_url):
             continue
         out.append({"id": p.get("id"), "name": p.get("name"), "url": p["url"],
                     "api_key": p.get("api_key", ""), "verify_tls": p.get("verify_tls"),
@@ -1697,16 +1710,16 @@ def api_setup_create():
                                 "interface \"%s\" does not exist here; available: %s"
                                 % (iface, ", ".join(n for n in names if n != "lo"))}), 400
             cfg["local"]["keepalived"].update({
-                "enabled": True, "interface": iface or "eth0",
+                "interface": iface or "eth0",
                 "priority": int(body.get("priority") or 150),
             })
-            steps.append("Keepalived enabled on %s with priority %s"
+            steps.append("Keepalived will run on %s with priority %s"
                          % (cfg["local"]["keepalived"]["interface"],
                             cfg["local"]["keepalived"]["priority"]))
             steps.append("virtual IP %s (VRID %s)" % (vips.replace("\n", ", "), cfg["cluster"]["vrid"]))
         else:
-            cfg["local"]["keepalived"]["enabled"] = False
-            steps.append("Keepalived left off -- this node runs on its own")
+            cfg["cluster"]["vips"] = ""      # no virtual IP means no Keepalived
+            steps.append("no virtual IP -- this node runs on its own")
         cfg["_meta"]["setup_complete"] = True
         save_config(cfg)
 
@@ -1770,7 +1783,7 @@ def api_setup_join():
                             "interface \"%s\" does not exist here; available: %s"
                             % (iface, ", ".join(n for n in names if n != "lo"))}), 400
         if iface:
-            cfg["local"]["keepalived"].update({"enabled": True, "interface": iface,
+            cfg["local"]["keepalived"].update({"interface": iface,
                                                "priority": int(body.get("priority") or 100)})
         my_url = cfg["local"]["node_url"]
         save_config(cfg)
@@ -1792,21 +1805,76 @@ def api_setup_join():
     except Exception as e:
         return jsonify({"ok": False, "steps": steps, "error": "registering failed: %s" % e}), 400
 
-    # 4. Ask it to push the shared configuration and the membership list here.
+    # 4. Pull the shared configuration. A read, not a push: the node being
+    #    joined is often passive -- during bring-up nobody holds the virtual IP
+    #    yet -- and a passive node refuses writes, so asking it to push left the
+    #    joining node with nothing.
     pushed = False
     try:
-        pr = call("POST", "/api/sync/push", {"include_peers": True})
-        data = pr.json() if pr.status_code in (200, 409) else {}
-        if pr.status_code == 409:
-            steps.append("that node is passive, so it would not push; the active node will "
-                         "send the configuration on its next sync")
-        elif data.get("ok"):
-            pushed = True
-            steps.append("received the configuration from %s" % remote.get("hostname", target))
+        pr = _requests.get(target + "/api/sync/pull", params={"node_url": my_url},
+                           headers={"X-API-Key": peer_key}, timeout=60, verify=verify)
+        if pr.status_code != 200:
+            steps.append("could not fetch the configuration: HTTP %s" % pr.status_code)
         else:
-            steps.append("push reported: %s" % (data.get("error") or pr.status_code))
+            data = pr.json()
+            conf = data.get("config") or {}
+            with _lock:
+                cfg = load_config()
+                for section in ("haproxy", "acme", "cluster"):
+                    if isinstance(conf.get(section), dict):
+                        cfg[section] = _merge_defaults(conf[section], DEFAULT_CONFIG[section])
+                mine = (cfg["local"].get("node_url") or "").rstrip("/").lower()
+                kept = []
+                for p in data.get("peers") or []:
+                    if not p.get("url") or p["url"].rstrip("/").lower() == mine:
+                        continue
+                    kept.append({"id": p.get("id") or str(uuid.uuid4()),
+                                 "name": p.get("name") or urlsplit(p["url"]).hostname or "peer",
+                                 "url": p["url"].rstrip("/"),
+                                 "api_key": (p.get("api_key") or "").strip(),
+                                 "verify_tls": bool(p.get("verify_tls")),
+                                 "enabled": bool(p.get("enabled", True))})
+                if kept:
+                    cfg["local"]["sync"]["peers"] = kept
+                CERT_DIR.mkdir(parents=True, exist_ok=True)
+                for name, b64 in (data.get("certs") or {}).items():
+                    if "/" in name or ".." in name or not name.endswith(".pem"):
+                        continue
+                    path = CERT_DIR / name
+                    path.write_bytes(base64.b64decode(b64))
+                    os.chmod(path, 0o600)
+                save_config(cfg)
+            pushed = True
+            steps.append("received the configuration from %s: %d other node(s), %d certificate(s)"
+                         % (data.get("source", target), len(kept), len(data.get("certs") or {})))
+            res = do_apply(load_config(), allow_push=False)
+            steps.append("applied here: " + ("ok" if res.get("ok") else str(res.get("error"))))
     except Exception as e:
-        steps.append("push failed: %s" % e)
+        steps.append("could not fetch the configuration: %s" % e)
+
+    # 5. Introduce this node to the rest of the cluster, not just to the node we
+    #    contacted. Otherwise the others only hear about it when that node next
+    #    pushes -- and a passive node never does -- leaving them with a partial
+    #    membership, an incomplete unicast list, and two nodes each believing
+    #    they are master.
+    for p in load_config()["local"]["sync"].get("peers") or []:
+        purl = (p.get("url") or "").rstrip("/")
+        if not purl or purl.lower() == target.lower():
+            continue
+        try:
+            known = _requests.get(purl + "/api/peers",
+                                  headers={"X-API-Key": (p.get("api_key") or "").strip()},
+                                  timeout=15, verify=bool(p.get("verify_tls"))).json()
+            if any((q.get("url") or "").rstrip("/").lower() == my_url.lower() for q in known):
+                continue
+            rr = _requests.post(purl + "/api/peers",
+                                json={"name": socket.gethostname(), "url": my_url, "api_key": key},
+                                headers={"X-API-Key": (p.get("api_key") or "").strip()},
+                                timeout=15, verify=bool(p.get("verify_tls")))
+            steps.append("introduced to %s: %s"
+                         % (p.get("name"), "ok" if rr.status_code == 200 else "HTTP %s" % rr.status_code))
+        except Exception as e:
+            steps.append("could not introduce this node to %s: %s" % (p.get("name"), e))
 
     # Unicast addresses are node-local, so the push could not carry them: give
     # this node and every other one their own source and peer list now.
@@ -2023,6 +2091,15 @@ def _node_summary(st):
 # unicast VRRP addresses: every node needs the others' real IPs
 # --------------------------------------------------------------------------
 
+def keepalived_wanted(cfg):
+    """Keepalived runs wherever the cluster has a virtual IP.
+
+    It used to be a per-node checkbox, which let a node sit in a cluster with
+    VRRP quietly switched off, never taking the address.
+    """
+    return bool(cluster_vips(cfg))
+
+
 def cluster_vips(cfg):
     return [v.strip().split("/")[0] for v in (cfg["cluster"].get("vips") or "").splitlines() if v.strip()]
 
@@ -2140,6 +2217,33 @@ def api_cluster_unicast():
                     "addresses": [n["address"] for n in nodes if n["address"] and not n["self"]]})
 
 
+def derive_unicast(cfg):
+    """This node's own unicast addresses, worked out from the membership.
+
+    Cheap enough for every Apply: local interfaces and name resolution only,
+    no calls to the other nodes. Each node derives its own, so the cluster
+    stays correct as members come and go.
+    """
+    k = cfg["local"]["keepalived"]
+    if not keepalived_wanted(cfg):
+        return False
+    vips = cluster_vips(cfg)
+    addrs = []
+    for p in cfg["local"]["sync"].get("peers") or []:
+        if not p.get("enabled", True):
+            continue
+        for ip in resolve_host(urlsplit(p.get("url") or "").hostname or ""):
+            if ip not in vips and ip not in addrs:
+                addrs.append(ip)
+                break                        # one address per node
+    new_peer = "\n".join(addrs) if addrs else ""
+    new_src = local_vrrp_address(cfg) if addrs else ""
+    if (k.get("unicast_peer") or "") == new_peer and (k.get("unicast_src") or "") == new_src:
+        return False
+    k["unicast_peer"], k["unicast_src"] = new_peer, new_src
+    return True
+
+
 def apply_unicast_plan():
     """Give every node its own source address and the list of the others.
 
@@ -2243,6 +2347,21 @@ def api_cluster():
         "summary": {"total": len(nodes), "reachable": len(reachable),
                     "active": len(holders), "warnings": warnings},
     })
+
+
+@app.get("/api/sync/pull")
+def api_sync_pull():
+    """Hand the shared configuration to a node that is joining.
+
+    A read, so a passive node can still serve it. Asking it to push would be
+    refused by the read-only rule, which left a joining node with nothing.
+    """
+    cfg = load_config()
+    caller = (request.args.get("node_url") or "").strip().rstrip("/")
+    payload = shared_payload(cfg)
+    payload["peers"] = mesh_for(cfg, {"id": None, "url": caller})
+    payload["source"] = socket.gethostname()
+    return jsonify(payload)
 
 
 @app.post("/api/sync/receive")
@@ -3188,8 +3307,13 @@ WEBUI_NAME = "haproxy-manager-ui"
 
 
 def _webui_setting(cfg):
-    return cfg["haproxy"]["settings"].setdefault(
+    """Node-local: each node publishes its own name for its own UI."""
+    old = (cfg["haproxy"]["settings"].pop("web_ui", None) or {})   # migrate off the shared section
+    cur = cfg["local"].setdefault(
         "web_ui", {"enabled": False, "url": "", "certificate": "auto", "rule_id": ""})
+    for k, v in old.items():
+        cur.setdefault(k, v)
+    return cur
 
 
 @app.get("/api/webui")

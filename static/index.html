@@ -270,7 +270,7 @@ const E={
    {k:"stick_size",l:"Stick table size",t:"text",h:"For source persistence, e.g. 50k"},
    {k:"stick_expire",l:"Stick table expiry",t:"text",h:"For source persistence, e.g. 30m"},
    {k:"log_health_checks",l:"Log health check changes",t:"bool",h:"option log-health-checks"},
-   {k:"custom",l:"Custom options",t:"textarea",h:"Raw haproxy.cfg lines appended to this backend"}]},
+   {k:"custom",l:"Extra directives",t:"textarea",h:"Advanced. Raw lines added inside this backend, for anything the fields above do not cover -- for example \"http-reuse safe\". One per line. See the HAProxy configuration manual: https://docs.haproxy.org/2.6/configuration.html"}]},
 
  "haproxy/frontends":{title:"Public Services",add:"Add service",
   intro:"Listening sockets clients connect to (frontends). Certificates come from ACME > Certificates.",
@@ -291,7 +291,7 @@ const E={
    {k:"http_to_https",l:"Redirect HTTP to HTTPS",t:"bool",h:"For plain HTTP services on port 80. ACME challenge requests are never redirected."},
    {k:"default_backend",l:"Default Backend Pool",t:"ref",ref:"haproxy/backends"},
    {k:"rules",l:"Rules",t:"refmulti",ref:"haproxy/rules",h:"Applied in the order shown here (the order of the Rules list)"},
-   {k:"custom",l:"Custom options",t:"textarea"}]},
+   {k:"custom",l:"Extra directives",t:"textarea",h:"Advanced. Raw lines added inside this frontend, for anything the fields above do not cover. One per line. See the HAProxy configuration manual: https://docs.haproxy.org/2.6/configuration.html"}]},
 
  "haproxy/conditions":{title:"Conditions",add:"Add condition",
   intro:"Named tests (ACLs) evaluated against traffic. Combine them in Rules.",
@@ -411,8 +411,8 @@ const S={
    {k:"stats_enabled",l:"Enable statistics page",t:"bool"},
    {k:"stats_bind",l:"Statistics listen address",t:"text"},
    {k:"stats_uri",l:"Statistics URI",t:"text"},
-   {k:"custom_global",l:"Custom global options",t:"textarea"},
-   {k:"custom_defaults",l:"Custom default options",t:"textarea"}]},
+   {k:"custom_global",l:"Extra global directives",t:"textarea",h:"Advanced. Raw lines added to the global section of haproxy.cfg, for settings this page does not cover -- for example \"tune.ssl.default-dh-param 2048\". One per line. Apply validates with haproxy -c first, so a mistake blocks the change rather than breaking HAProxy. See the HAProxy configuration manual: https://docs.haproxy.org/2.6/configuration.html"},
+   {k:"custom_defaults",l:"Extra defaults directives",t:"textarea",h:"Advanced. Raw lines added to the defaults section, inherited by every service and pool -- for example \"option http-server-close\". One per line. Apply validates with haproxy -c first, so a mistake blocks the change rather than breaking HAProxy. See the HAProxy configuration manual: https://docs.haproxy.org/2.6/configuration.html"}]},
  "acme-settings":{title:"ACME Settings",ep:"acme/settings",
   intro:"Settings for certificate issuance and renewal via acme.sh.",
   fields:[
@@ -644,7 +644,6 @@ async function renderSettings(key){
   bd.appendChild(intro);
   const frm=document.createElement("div");frm.className="frm";
   def.fields.forEach(f=>fieldRow(f,cur[f.k]).forEach(el=>frm.appendChild(el)));
-  if(def.formExtra)def.formExtra(frm);
   bd.appendChild(frm);
   const foot=document.createElement("div");foot.style.marginTop="16px";
   const msg=document.createElement("span");msg.className="hint";msg.style.marginLeft="10px";
@@ -1070,16 +1069,17 @@ const CLUSTER_SHARED=[
  {k:"nopreempt",l:"No preempt",t:"bool",d:true,h:"A recovered node does not take the virtual IP back"},
  {k:"advert_int",l:"Advertisement interval (s)",t:"number"},
  {k:"track_haproxy",l:"Track HAProxy process",t:"bool",d:true,h:"Fail over when HAProxy dies on a node"},
- {k:"custom",l:"Custom options",t:"textarea"},
+ {k:"custom",l:"Extra keepalived directives",t:"textarea",
+  h:"Advanced, and rarely needed. Raw lines added inside the vrrp_instance block of the generated "+
+    "keepalived.conf, for settings this page does not cover -- for example \"garp_master_delay 5\" or "+
+    "\"notify_master /etc/keepalived/on-master.sh\". One per line, exactly as keepalived expects. "+
+    "They are validated with keepalived -t before anything is written, so a mistake blocks Apply "+
+    "rather than breaking the node. See the keepalived.conf manual (man 5 keepalived.conf)."},
 ];
 const CLUSTER_LOCAL=[
- {k:"enabled",l:"Run Keepalived here",t:"bool"},
  {k:"interface",l:"Interface",t:"combo",o:()=>kaIfaceOptions,
   h:"The interface on THIS node that carries the virtual IP"},
  {k:"priority",l:"Priority",t:"number",h:"Higher wins. Give each node a different value, e.g. 150 / 140 / 130."},
- {k:"unicast_peer",l:"Unicast peers",t:"textarea",
-  h:"One address per line: every OTHER node. Leave empty to use multicast VRRP."},
- {k:"unicast_src",l:"Unicast source address",t:"text",h:"Optional: this node's own address to send VRRP from"},
 ];
 async function renderCluster(){
   const c=$("#content");c.innerHTML="";
@@ -1122,7 +1122,13 @@ async function renderCluster(){
     fieldRow(f,v).forEach(el=>f2.appendChild(el));
   });
   b2.appendChild(f2);
-  keepalivedFormExtra(f2);
+  const ka=document.createElement("div");ka.className="hint";ka.style.marginTop="10px";
+  ka.innerHTML=(shared.vips||"").trim()
+    ? "Keepalived runs on this node because the cluster has a virtual IP. Its interface and priority "+
+      "are set here; everything else follows the cluster settings above."
+    : "The cluster has no virtual IP, so Keepalived does not run and this node serves on its own "+
+      "addresses. Add one above to turn the nodes into an active/passive pair.";
+  b2.appendChild(ka);
   const fp=document.createElement("div");fp.className="hint";fp.style.marginTop="8px";
   try{
     const st=await api("status");
@@ -1296,52 +1302,6 @@ async function loadKeepalivedDiag(){
   }catch(e){kaDiag=null;kaIfaceOptions=[];}
   return kaDiag;
 }
-/* Unicast VRRP needs each node's real address. A DNS name is not enough: it
-   often points at the virtual IP, which moves between nodes. */
-function keepalivedFormExtra(frm){
-  const ta=frm.querySelector("#f_unicast_peer");
-  if(!ta)return;
-  const wrap=document.createElement("div");wrap.style.marginTop="8px";
-  const msg=document.createElement("div");msg.className="hint";msg.style.marginTop="6px";
-  wrap.appendChild(btn("Fill from the peer list","sm",async()=>{
-    msg.textContent="Asking each node for the address on its VRRP interface...";
-    try{
-      const r=await api("cluster/unicast");
-      const others=r.nodes.filter(n=>!n.self);
-      const addrs=others.filter(n=>n.address).map(n=>n.address);
-      if(!addrs.length){
-        msg.innerHTML="No usable addresses. "+
-          others.map(n=>esc(n.name)+": "+esc(n.warning||"no address")).join("<br>");
-        return;
-      }
-      const have=ta.value.split("\n").map(l=>l.trim()).filter(Boolean);
-      const add=addrs.filter(a=>!have.includes(a));
-      ta.value=have.concat(add).join("\n")+"\n";
-      ta.dispatchEvent(new Event("input"));
-      msg.innerHTML=others.filter(n=>n.address)
-          .map(n=>"<span class=mono>"+esc(n.address)+"</span> &mdash; "+esc(n.name)+
-                  " <span class=sub>("+esc(n.how)+")</span>").join("<br>")+
-        others.filter(n=>n.warning).map(n=>'<div style="margin-top:6px">! '+esc(n.warning)+"</div>").join("");
-    }catch(e){msg.textContent=e.message;}
-  }));
-  wrap.appendChild(document.createTextNode(" "));
-  wrap.appendChild(btn("Set unicast on every node","warn",async()=>{
-    if(!confirm("Give every node its own unicast source address and the list of the others?\n\n"+
-                "Each node's address is asked of that node directly. Their existing unicast "+
-                "settings are replaced. Press Apply on each node afterwards."))return;
-    msg.textContent="Configuring every node...";
-    try{
-      const r=await api("cluster/unicast/apply","POST",{});
-      msg.innerHTML=(r.steps||[]).map(x=>"&#10003; "+esc(x)).join("<br>")+
-        (r.warnings||[]).map(w=>'<div style="margin-top:6px">! '+esc(w)+"</div>").join("")+
-        (r.note?'<div style="margin-top:6px">'+esc(r.note)+"</div>":"");
-      route();
-    }catch(e){msg.textContent=e.message;}
-  }));
-  wrap.appendChild(msg);
-  ta.parentNode.appendChild(wrap);
-}
-
 function keepalivedDiagCard(){
   const card=document.createElement("div");card.className="card";
   card.innerHTML='<div class=hd><h2>This node right now</h2></div>';
@@ -1369,8 +1329,8 @@ function keepalivedDiagCard(){
     if(d.service==="active"&&d.interface_exists&&d.vips.length&&!d.vip_held.length)
       problems.push("Keepalived is running but this node holds no VIP. If the peer holds it, this node is "+
         "correctly passive. If <b>neither</b> node holds it, the two are not seeing each other's VRRP: "+
-        "check that both use the same virtual router ID, and set the unicast peer fields if multicast is "+
-        "blocked on your network.");
+        "check that every node uses the same virtual router ID, and that they list each other under "+
+        "Other nodes -- unicast addresses are derived from that list.");
   }
   const pill=(v,good)=>'<span class="pill '+(good?"up":v==="disabled"?"off":"down")+'">'+esc(v)+"</span>";
   bd.innerHTML='<div class=grid style="margin-bottom:14px">'+
@@ -1397,7 +1357,26 @@ function keepalivedDiagCard(){
                                     :"Nothing looks wrong here.";
     bd.appendChild(el);
   }
+  const uni=document.createElement("div");uni.className="hint";uni.style.marginBottom="10px";
+  uni.innerHTML=(d.unicast_peer&&d.unicast_peer.length)
+    ? "VRRP transport: <b>unicast</b> from <span class=mono>"+esc(d.unicast_src||"the interface address")+
+      "</span> to <span class=mono>"+d.unicast_peer.map(esc).join("</span>, <span class=mono>")+
+      "</span>. Managed automatically from the node list -- there is nothing to set."
+    : "VRRP transport: <b>multicast</b>. Add the other nodes under Other nodes and press Apply, and "+
+      "this node switches to unicast automatically, which is what most networks need.";
+  bd.appendChild(uni);
   const row=document.createElement("div");row.style.marginTop="14px";
+  row.appendChild(btn("Refresh addresses from the other nodes","sm",async()=>{
+    uni.textContent="Asking each node for the address on its VRRP interface...";
+    try{
+      const r=await api("cluster/unicast/apply","POST",{});
+      uni.innerHTML=(r.steps||[]).map(x=>"&#10003; "+esc(x)).join("<br>")+
+        (r.warnings||[]).map(w=>'<div style="margin-top:6px">! '+esc(w)+"</div>").join("")+
+        (r.error?'<div style="margin-top:6px">! '+esc(r.error)+"</div>":"")+
+        (r.note?'<div style="margin-top:6px">'+esc(r.note)+"</div>":"");
+    }catch(e){uni.textContent=e.message;}
+  }));
+  row.appendChild(document.createTextNode(" "));
   if(d.validation&&d.validation.output)
     row.appendChild(btn("Show keepalived -t output","sm",()=>showText("keepalived -t",d.validation.output)));
   if(d.log){

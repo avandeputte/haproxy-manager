@@ -191,6 +191,11 @@ The lock is enforced by the API, not just hidden in the UI.
 
 ### Keepalived
 
+- **Keepalived** runs on every node that has a virtual IP configured — it is not
+  a per-node switch, so a node cannot sit in a cluster with VRRP quietly off.
+  **Unicast addresses are derived** from the node list: each node asks the
+  others for the address on their VRRP interface, excluding the virtual IP,
+  which is why a DNS name is never used for this. There is nothing to type.
 - **Keepalived** runs VRRP on every node with a shared **virtual IP**. Bind your
   Public Services to that VIP. Keepalived's settings are **node-local** — set them
   separately on each node, and they must agree on the **virtual router ID**. For
