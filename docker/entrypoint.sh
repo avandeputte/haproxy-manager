@@ -9,7 +9,7 @@ ACME_HOME="${HAM_ACME_HOME:-/var/lib/acme.sh}"
 mkdir -p "$DATA_DIR" "$CERT_DIR" "$ACME_HOME" /run/haproxy \
          "$(dirname "${HAM_HAPROXY_CFG:-/etc/haproxy/haproxy.cfg}")" \
          "$(dirname "${HAM_KEEPALIVED_CFG:-/etc/keepalived/keepalived.conf}")"
-chmod 0700 "$DATA_DIR" "$ACME_HOME"
+chmod 0700 "$DATA_DIR" "$ACME_HOME" "$CERT_DIR"
 
 # Refresh acme.sh's program files inside the (persisted) home on every start,
 # without touching account keys, issued certificates or account.conf.

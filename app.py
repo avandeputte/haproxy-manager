@@ -89,6 +89,10 @@ PORT = int(os.environ.get("HAM_PORT", "8080"))
 DRY_RUN = os.environ.get("HAM_DRY_RUN") == "1"
 
 app = Flask(__name__, static_folder=None)
+# A request body is read into memory before a handler sees it. The largest
+# legitimate one is a sync payload carrying certificates, which is well under
+# a megabyte; anything past this is refused with 413 rather than buffered.
+app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
 _lock = threading.RLock()
 _last_renew = time.time()
 
@@ -261,6 +265,10 @@ def save_config(cfg):
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         tmp = CONF_PATH.with_suffix(".tmp")
         tmp.write_text(json.dumps(cfg, indent=2))
+        # It holds the API key, the session secret, the peers' keys and the
+        # password hash. The directory is 0700, but the file should not rely
+        # on that alone -- a backup or a loosened directory would expose it.
+        os.chmod(tmp, 0o600)
         os.replace(tmp, CONF_PATH)
 
 
@@ -524,6 +532,15 @@ def readonly_state(cfg):
 def _auth():
     if not request.path.startswith("/api/"):
         return
+
+    # Flask's MAX_CONTENT_LENGTH is only applied by the form parser on the
+    # Werkzeug that ships with Debian, so a JSON body of any size is read into
+    # memory. Check it here, before anything reads the stream.
+    limit = app.config.get("MAX_CONTENT_LENGTH") or 0
+    if limit and (request.content_length or 0) > limit:
+        return jsonify({"ok": False, "error":
+                        "the request body is too large (%d bytes, limit %d)"
+                        % (request.content_length, limit)}), 413
     if request.path in PUBLIC_PATHS:
         return
     if request.path == "/api/sync/receive":
@@ -562,6 +579,27 @@ def _auth():
             return jsonify({"ok": False, "error": why, "read_only": True}), 409
 
 
+@app.errorhandler(400)
+@app.errorhandler(404)
+@app.errorhandler(405)
+@app.errorhandler(413)
+@app.errorhandler(500)
+def _json_errors(e):
+    """API callers get JSON, not Werkzeug's HTML page."""
+    if not request.path.startswith("/api/"):
+        return e
+    code = getattr(e, "code", 500)
+    limit = app.config.get("MAX_CONTENT_LENGTH") or 0
+    if code == 400 and limit and (request.content_length or 0) > limit:
+        code = 413                       # Werkzeug reports the parse failure, not the size
+    text = {400: "the request body was not valid JSON",
+            404: "no such endpoint or object",
+            405: "that method is not allowed here",
+            413: "the request body is too large",
+            500: "the node hit an unexpected error"}.get(code, str(e))
+    return jsonify({"ok": False, "error": text}), code
+
+
 @app.get("/api/whoami")
 def api_whoami():
     cfg = load_config()
@@ -579,6 +617,15 @@ def api_whoami():
         "needs_setup": False,
         "admin_username": (cfg["local"].get("admin") or {}).get("username", "admin"),
     })
+
+
+def _prune_login_fails():
+    """Drop finished entries: one per source address would otherwise accumulate."""
+    now = time.time()
+    for addr in [a for a, (fails, until) in _login_fails.items() if until and until < now]:
+        _login_fails.pop(addr, None)
+    if len(_login_fails) > 5000:            # a flood from many addresses
+        _login_fails.clear()
 
 
 def _login_ok(cfg, username, resp_body):
@@ -604,8 +651,12 @@ def api_setup():
         return jsonify({"ok": False, "error": "a username is required"}), 400
     if len(password) < 8:
         return jsonify({"ok": False, "error": "the password must be at least 8 characters"}), 400
-    set_admin(cfg, username, password)
-    save_config(cfg)
+    with _lock:
+        cfg = load_config()
+        if not needs_setup(cfg):        # someone else got there first
+            return jsonify({"ok": False, "error": "an administrator already exists"}), 409
+        set_admin(cfg, username, password)
+        save_config(cfg)
     return _login_ok(cfg, username, {"ok": True, "username": username})
 
 
@@ -629,6 +680,7 @@ def api_login():
             _login_fails[ip] = [0, time.time() + LOGIN_LOCK_SECONDS]   # locked; counter restarts
         else:
             _login_fails[ip] = [fails, 0]
+        _prune_login_fails()
         time.sleep(0.5)  # blunt the rate of online guessing
         return jsonify({"ok": False, "error": "invalid username or password"}), 401
 
@@ -678,8 +730,10 @@ def api_password():
     if len(new) < 8:
         return jsonify({"ok": False, "error": "the new password must be at least 8 characters"}), 400
     username = (body.get("username") or admin.get("username") or "admin").strip()
-    set_admin(cfg, username, new)
-    save_config(cfg)
+    with _lock:
+        cfg = load_config()
+        set_admin(cfg, username, new)
+        save_config(cfg)
     return _login_ok(cfg, username, {"ok": True, "username": username})
 
 
@@ -689,31 +743,35 @@ def api_password():
 
 @app.route("/api/<sec>/<col>", methods=["GET", "POST", "PUT"])
 def collection(sec, col):
-    cfg = load_config()
     if col == "settings":
         if sec not in ("haproxy", "acme"):
             abort(404)
         if request.method == "GET":
-            return jsonify(cfg[sec]["settings"])
+            return jsonify(load_config()[sec]["settings"])
         proposed = request.get_json(force=True) or {}
+        # validated outside the lock: it runs haproxy -c, which is slow
         ok, message = check_rendered(draft_with(sec, proposed))
         if not ok:
             return jsonify({"error": "These settings were not saved -- they do not produce a "
                                      "working configuration.\n\n" + message}), 400
-        cfg[sec]["settings"].update(proposed)
-        save_config(cfg)
-        return jsonify(cfg[sec]["settings"])
+        with _lock:
+            cfg = load_config()
+            cfg[sec]["settings"].update(proposed)
+            save_config(cfg)
+            return jsonify(cfg[sec]["settings"])
     if sec not in VALID_COLLECTIONS or col not in VALID_COLLECTIONS[sec]:
         abort(404)
     if request.method == "GET":
-        return jsonify(cfg[sec][col])
+        return jsonify(load_config()[sec][col])
     if request.method == "POST":
         item = request.get_json(force=True) or {}
         if not item.get("name"):
             return jsonify({"error": "name is required"}), 400
-        item["id"] = str(uuid.uuid4())
-        cfg[sec][col].append(item)
-        save_config(cfg)
+        with _lock:
+            cfg = load_config()
+            item["id"] = str(uuid.uuid4())
+            cfg[sec][col].append(item)
+            save_config(cfg)
         return jsonify(item)
     abort(405)
 
@@ -722,10 +780,12 @@ def collection(sec, col):
 def collection_item(sec, col, iid):
     if sec not in VALID_COLLECTIONS or col not in VALID_COLLECTIONS[sec]:
         abort(404)
-    cfg = load_config()
-    items = cfg[sec][col]
-    for i, x in enumerate(items):
-        if x.get("id") == iid:
+    with _lock:
+        cfg = load_config()
+        items = cfg[sec][col]
+        for i, x in enumerate(items):
+            if x.get("id") != iid:
+                continue
             if x.get(LOCAL_ONLY):
                 return jsonify({"error":
                                 "\"%s\" is part of this node's web UI service and is managed from "
@@ -745,18 +805,19 @@ def collection_item(sec, col, iid):
 
 @app.route("/api/local", methods=["GET", "PUT"])
 def local_settings():
-    cfg = load_config()
     if request.method == "GET":
-        return jsonify(cfg["local"])
+        return jsonify(load_config()["local"])
     body = request.get_json(force=True) or {}
-    for key in ("keepalived", "sync"):
-        if isinstance(body.get(key), dict):
-            cfg["local"][key].update(body[key])
-    for key in ("api_key", "node_url"):
-        if key in body:
-            cfg["local"][key] = body[key].strip() if isinstance(body[key], str) else body[key]
-    save_config(cfg)
-    return jsonify(cfg["local"])
+    with _lock:
+        cfg = load_config()
+        for key in ("keepalived", "sync"):
+            if isinstance(body.get(key), dict):
+                cfg["local"][key].update(body[key])
+        for key in ("api_key", "node_url"):
+            if key in body:
+                cfg["local"][key] = body[key].strip() if isinstance(body[key], str) else body[key]
+        save_config(cfg)
+        return jsonify(cfg["local"])
 
 
 # --------------------------------------------------------------------------
@@ -2111,13 +2172,15 @@ def api_cluster_settings():
     if request.method == "GET":
         return jsonify(cfg["cluster"])
     body = request.get_json(force=True) or {}
-    ok, message = check_rendered(draft_with(None, body, cluster=True))
+    ok, message = check_rendered(draft_with(None, body, cluster=True))   # slow: outside the lock
     if not ok:
         return jsonify({"error": "These settings were not saved -- they do not produce a working "
                                  "configuration.\n\n" + message}), 400
-    cfg["cluster"].update({k: v for k, v in body.items() if k in CLUSTER_KEYS})
-    save_config(cfg)
-    return jsonify(cfg["cluster"])
+    with _lock:
+        cfg = load_config()
+        cfg["cluster"].update({k: v for k, v in body.items() if k in CLUSTER_KEYS})
+        save_config(cfg)
+        return jsonify(cfg["cluster"])
 
 
 @app.route("/api/peers", methods=["GET", "POST"])
@@ -2138,20 +2201,27 @@ def api_peers():
         return jsonify({"error": "the peer's URL is required, e.g. http://10.0.0.2:8080"}), 400
     if "://" not in url:
         url = "http://" + url
-    level, why = check_node_url(url, cluster_vips(cfg))
+    level, why = check_node_url(url, cluster_vips(cfg))   # resolves names: outside the lock
     if level == "error":
         return jsonify({"error": why}), 400
     peer = {"id": str(uuid.uuid4()),
             "name": (body.get("name") or "").strip() or (urlsplit(url).hostname or "peer"),
             "url": url, "api_key": (body.get("api_key") or "").strip(),
             "verify_tls": bool(body.get("verify_tls")), "enabled": bool(body.get("enabled", True))}
-    peers.append(peer)
-    save_config(cfg)
+    with _lock:
+        cfg = load_config()
+        cfg["local"]["sync"].setdefault("peers", []).append(peer)
+        save_config(cfg)
     return jsonify({k: v for k, v in peer.items() if k != "api_key"})
 
 
 @app.route("/api/peers/<pid>", methods=["PUT", "DELETE"])
 def api_peer_item(pid):
+    with _lock:
+        return _peer_item_locked(pid)
+
+
+def _peer_item_locked(pid):
     cfg = load_config()
     peers = cfg["local"]["sync"].setdefault("peers", [])
     for i, p in enumerate(peers):
@@ -2566,6 +2636,12 @@ def api_sync_receive():
                         "expected_fp": key_fingerprint(key)}), 401
     data = request.get_json(force=True) or {}
     conf = data.get("config") or {}
+    with _lock:
+        return _receive_locked(cfg, data, conf)
+
+
+def _receive_locked(cfg, data, conf):
+    cfg = load_config()          # re-read inside the lock: it may have moved
     if "haproxy" in conf:
         cfg["haproxy"] = keep_local_only(cfg["haproxy"],
                                          _merge_defaults(conf["haproxy"], DEFAULT_CONFIG["haproxy"]))
@@ -2830,6 +2906,11 @@ def api_update():
 
     url = INSTALL_URL
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    try:                                    # keep the log from growing forever
+        if UPDATE_LOG.stat().st_size > 256 * 1024:
+            UPDATE_LOG.write_text(UPDATE_LOG.read_text()[-64 * 1024:])
+    except OSError:
+        pass
     with open(UPDATE_LOG, "a") as f:
         f.write("\n=== update started %s (from %s) ===\n"
                 % (datetime.now(timezone.utc).isoformat(timespec="seconds"), url))
