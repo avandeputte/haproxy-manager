@@ -5,7 +5,9 @@ import { CERT_MODE_LABEL } from "../pages/services.js";
 /* ---- HTTPS for this UI ---- */
 export const WEBUI_FIELDS=[
  {k:"enabled",l:"Serve the UI through HAProxy",t:"bool"},
- {k:"url",l:"Address",t:"text",h:"e.g. https://proxy.example.com -- the name you want to reach this UI at"},
+ {k:"url",l:"This node's address",t:"text",h:"e.g. https://proxy1.example.com -- reaches this node specifically"},
+ {k:"shared_url",l:"Shared address (optional)",t:"text",
+  h:"e.g. https://proxy.example.com -- point it at the virtual IP and it reaches whichever node is active. Every node answers for it, so this setting is shared across the cluster."},
  {k:"certificate",l:"Certificate",t:"select",d:"auto",o:["auto","new","none"]},
  {k:"http_redirect",l:"Redirect HTTP to HTTPS",t:"bool",d:true},
  {k:"apply",l:"Apply immediately",t:"bool",d:true},
@@ -23,7 +25,8 @@ export async function renderWebui(){
   const frm=document.createElement("div");frm.className="frm";
   const rows={};
   WEBUI_FIELDS.forEach(f=>{
-    const v=f.k==="enabled"?cur.enabled:f.k==="url"?cur.url:f.k==="certificate"?cur.certificate:undefined;
+    const v=f.k==="enabled"?cur.enabled:f.k==="url"?cur.url
+           :f.k==="shared_url"?cur.shared_url:f.k==="certificate"?cur.certificate:undefined;
     const cells=fieldRow(f,v);rows[f.k]=cells;cells.forEach(el=>frm.appendChild(el));
   });
   bd.appendChild(frm);
@@ -31,7 +34,7 @@ export async function renderWebui(){
   if(sel)[...sel.options].forEach(o=>{o.textContent=CERT_MODE_LABEL[o.value]||o.value;});
   const sync=()=>{
     const on=frm.querySelector("#f_enabled").checked;
-    ["url","certificate","http_redirect"].forEach(k=>(rows[k]||[]).forEach(el=>{el.style.display=on?"":"none";}));
+    ["url","shared_url","certificate","http_redirect"].forEach(k=>(rows[k]||[]).forEach(el=>{el.style.display=on?"":"none";}));
   };
   frm.querySelector("#f_enabled").addEventListener("change",sync);sync();
 

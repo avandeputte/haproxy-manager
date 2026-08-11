@@ -198,6 +198,10 @@ DEFAULT_CONFIG = {
     },
     # Cluster-wide VRRP settings: identical on every node, so they sync.
     "cluster": {
+        # The name that should reach whichever node is currently active. It is
+        # shared, because every node has to answer for it -- the one holding the
+        # virtual IP is the one that will.
+        "ui_url": "",
         "vrid": 51,
         "vips": "",            # one address/prefix per line
         "auth_pass": "",
@@ -903,6 +907,53 @@ def check_setting_types(sec, proposed):
 # generic CRUD
 # --------------------------------------------------------------------------
 
+def service_owned(cfg):
+    """Which HAProxy objects exist because a service was published.
+
+    Derived from what the services actually reference rather than from a mark
+    written at creation time: a mark goes stale the moment something is edited
+    or rebuilt, and this cannot. Returns {object id: service name}.
+    """
+    hp = cfg["haproxy"]
+    rules, backends = _by_id(hp["rules"]), _by_id(hp["backends"])
+    owned = {}
+
+    def claim(oid, name):
+        if oid and oid not in owned:
+            owned[oid] = name
+
+    for fe in hp.get("frontends") or []:
+        for rid in (fe.get("rules") or []):
+            rule = rules.get(rid)
+            if not rule or rule.get("type") != "use_backend":
+                continue
+            pool = backends.get(rule.get("backend"))
+            if not pool:
+                continue
+            name = pool.get("name") or rule.get("name") or "a service"
+            claim(rule.get("id"), name)
+            claim(pool.get("id"), name)
+            for cid in (rule.get("conditions") or []):
+                claim(cid, name)
+            for sid in (pool.get("servers") or []):
+                claim(sid, name)
+            if pool.get("healthcheck"):
+                claim(pool["healthcheck"], name)
+    # a TCP service is a listener with a default backend and no rule at all
+    for fe in hp.get("frontends") or []:
+        pool = backends.get(fe.get("default_backend"))
+        if not pool:
+            continue
+        name = pool.get("name") or fe.get("name") or "a service"
+        claim(fe.get("id"), name)
+        claim(pool.get("id"), name)
+        for sid in (pool.get("servers") or []):
+            claim(sid, name)
+        if pool.get("healthcheck"):
+            claim(pool["healthcheck"], name)
+    return owned
+
+
 @app.route("/api/<sec>/<col>", methods=["GET", "POST", "PUT"])
 def collection(sec, col):
     if col == "settings":
@@ -927,7 +978,15 @@ def collection(sec, col):
     if sec not in VALID_COLLECTIONS or col not in VALID_COLLECTIONS[sec]:
         abort(404)
     if request.method == "GET":
-        return jsonify(load_config()[sec][col])
+        cfg = load_config()
+        items = cfg[sec][col]
+        if sec == "haproxy":
+            # Say which of these a published service is responsible for, so the
+            # advanced pages can warn before someone edits one by hand.
+            owned = service_owned(cfg)
+            items = [dict(i, managed_by=owned[i["id"]]) if i.get("id") in owned else i
+                     for i in items]
+        return jsonify(items)
     if request.method == "POST":
         item = request.get_json(force=True) or {}
         if not item.get("name"):
@@ -5008,10 +5067,31 @@ WEBUI_NAME = "haproxy-manager-ui"
 LOCAL_ONLY = "local_only"       # this object belongs to this node alone
 
 
+def webui_pubs(cfg, pub):
+    """This node's own name, plus the shared one if it fits on the same listener.
+
+    Both point at this node's local UI. On the node holding the virtual IP the
+    shared name resolves there, so it always reaches whichever node is active,
+    while the per-node names stay reachable individually.
+    """
+    pubs = [pub]
+    shared = (cfg.get("cluster") or {}).get("ui_url") or ""
+    if not shared:
+        return pubs
+    sp, err = _split_url(shared, "The shared UI address", default_scheme="https",
+                         allow=("http", "https"))
+    if err or sp["host"].lower() == pub["host"].lower():
+        return pubs
+    if sp["scheme"] != pub["scheme"] or sp["port"] != pub["port"]:
+        return pubs          # one listener cannot serve both; validated on save
+    pubs.append(sp)
+    return pubs
+
+
 def build_webui(cfg, pub, mode="auto", http_redirect=True):
     """Create (or re-attach) this node's own UI service and mark it node-local."""
     target = {"scheme": "http", "host": "127.0.0.1", "port": PORT, "path": "", "label": WEBUI_NAME}
-    acts, warns = wizard_publish(cfg, pub, [target], name=WEBUI_NAME,
+    acts, warns = wizard_publish(cfg, webui_pubs(cfg, pub), [target], name=WEBUI_NAME,
                                  want_cert=(mode != "none"), new_certificate=(mode == "new"),
                                  http_redirect=http_redirect,
                                  health={"type": "http", "interval": "5s", "uri": "/", "status": "200"})
@@ -5123,6 +5203,7 @@ def api_webui_get():
     s = _webui_setting(cfg)
     return jsonify({
         "enabled": bool(s.get("enabled")), "url": s.get("url", ""),
+        "shared_url": (cfg.get("cluster") or {}).get("ui_url", ""),
         "certificate": s.get("certificate", "auto"), "rule_id": s.get("rule_id", ""),
         "port": PORT, "listen": LISTEN,
         "exposed_directly": LISTEN not in ("127.0.0.1", "localhost", "::1"),
@@ -5153,6 +5234,26 @@ def api_webui_set():
                               default_scheme="https", allow=("http", "https"))
         if err:
             return jsonify({"ok": False, "error": err}), 400
+
+        # The shared name is cluster-wide: every node answers for it, and the
+        # one holding the virtual IP is the one reached. Both names sit on the
+        # same listener, so they have to agree on scheme and port.
+        shared_raw = (body.get("shared_url") or "").strip()
+        shared = None
+        if shared_raw:
+            shared, serr = _split_url(shared_raw, "The shared address",
+                                      default_scheme="https", allow=("http", "https"))
+            if serr:
+                return jsonify({"ok": False, "error": serr}), 400
+            if shared["host"].lower() == pub["host"].lower():
+                return jsonify({"ok": False, "error":
+                                "The shared address must differ from this node's own address."}), 400
+            if shared["scheme"] != pub["scheme"] or shared["port"] != pub["port"]:
+                return jsonify({"ok": False, "error":
+                                "Both addresses are served by one listener, so they must use the "
+                                "same scheme and port. This node's is %s://%s:%s."
+                                % (pub["scheme"], pub["host"], pub["port"])}), 400
+        cfg["cluster"]["ui_url"] = ("%s://%s" % (shared["scheme"], shared["host"])) if shared else ""
 
         # Refuse to take a host name that already points somewhere else.
         hp = cfg["haproxy"]

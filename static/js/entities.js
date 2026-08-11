@@ -234,9 +234,15 @@ export async function renderEntity(key,into){
     const tb=document.createElement("tbody");
     items.forEach(row=>{
       const tr=document.createElement("tr");
-      def.cols.forEach(col=>{
+      def.cols.forEach((col,ci)=>{
         const td=document.createElement("td");
         td.innerHTML=col[2]?col[2](row):esc(row[col[0]]??"");
+        /* Mark what a published service owns, in the first column where the
+           name is, so it is obvious before anything is clicked. */
+        if(ci===0&&row.managed_by){
+          td.innerHTML+=' <span class="pill off" title="Part of the service '+
+            esc(row.managed_by)+'. Change it under Services, not here.">service</span>';
+        }
         tr.appendChild(td);
       });
       const act=document.createElement("td");act.style.textAlign="right";act.style.whiteSpace="nowrap";
@@ -264,11 +270,28 @@ export async function renderEntity(key,into){
 }
 export function openEditor(key,item){
   const def=E[key];
+  const wrap=document.createElement("div");
+  if(item&&item.managed_by){
+    /* Editing here is allowed -- sometimes it is the only way to set something
+       the wizard does not expose -- but the next publish of that service will
+       rebuild these objects, so say that plainly rather than silently losing
+       the change later. */
+    const w=document.createElement("div");
+    w.className="hint";
+    w.style.cssText="border:1px solid #e3cfa8;border-radius:6px;padding:10px 12px;"+
+                    "margin-bottom:14px;color:var(--ink)";
+    w.innerHTML="<b>This belongs to the service &ldquo;"+esc(item.managed_by)+"&rdquo;.</b><br>"+
+      "Edit it under <b>Services</b> instead: publishing that service again rebuilds "+
+      "these objects, and anything changed here that the service also sets would be "+
+      "overwritten.";
+    wrap.appendChild(w);
+  }
   const frm=document.createElement("div");frm.className="frm";
   def.fields.forEach(f=>fieldRow(f,item?item[f.k]:undefined).forEach(el=>frm.appendChild(el)));
   if(def.editorExtra)def.editorExtra(frm,item);
+  wrap.appendChild(frm);
   const err=document.createElement("div");err.className="err";
-  openDlg((item?"Edit ":"New ")+def.title.replace(/s$/,""),frm,[err,
+  openDlg((item?"Edit ":"New ")+def.title.replace(/s$/,""),wrap,[err,
     btn("Cancel","",closeDlg),
     btn("Save","pri",async()=>{
       const data=readForm(def.fields);

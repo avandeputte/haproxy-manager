@@ -28,7 +28,11 @@ real servers behind them, and optionally a health check and a certificate.
 Publishing one creates the underlying HAProxy objects — a frontend binding, a
 host-matching condition, a routing rule, a backend and its servers.
 
-The advanced pages expose those objects directly if you need them. Anything the
+The advanced pages expose those objects directly if you need them. Anything a
+published service owns is marked **service** there, and its editor says which
+service and warns that publishing that service again rebuilds it. Ownership is
+worked out from what the services actually reference, so it stays right even
+after objects are edited or rebuilt. Anything the
 wizard created is marked as such, and hand-edits to those objects survive: the
 wizard updates in place.
 
@@ -85,9 +89,19 @@ If acme.sh is missing or broken the Certificates page says so, with the reason.
 publishes this UI as a normal service with a certificate, so you stop using
 plain HTTP.
 
-This service is deliberately **not editable** on the Services page and does not
-propagate: each node publishes its own UI under its own name. Changing the
-address here rebuilds it.
+Two addresses, and they do different jobs:
+
+| | |
+| --- | --- |
+| **This node's address** | `https://proxy1.example.com` — reaches this node specifically. Node-local: each node has its own. |
+| **Shared address** | `https://proxy.example.com` — point it at the virtual IP and it reaches whichever node is active. Shared across the cluster, so every node answers for it. |
+
+Both names sit on one listener, so they must use the same scheme and port, and
+the certificate covers both. The shared name is the one to bookmark; the
+per-node names are how you reach a specific node when you need to.
+
+This service is deliberately **not editable** on the Services page: each node
+builds its own copy from these settings.
 
 Do this early. Over plain HTTP both the password and the session cookie cross
 the network in clear.
@@ -188,7 +202,7 @@ of its peers.
 ## Upgrades and the browser cache
 
 The page is served with `no-cache`, and everything it loads lives under a path
-that contains the version — `/static/v/1.52.1/js/main.js`. Those files are then
+that contains the version — `/static/v/1.53.0/js/main.js`. Those files are then
 cached for a year, which is safe because the URL changes whenever the version
 does.
 
