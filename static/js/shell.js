@@ -35,7 +35,7 @@ export const NAV=[
  ["s:haproxy-settings","Settings"],
  /* Settings last: everything here is something you set once and revisit
     rarely, unlike the pages above that you watch. */
- ["grp","SETTINGS"],
+ ["grp","SETTINGS","collapse"],
  ["p:acme","ACME Settings"],
  ["p:webui","Web UI access"],
  ["p:admin","Administrator login"],

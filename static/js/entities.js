@@ -1,6 +1,6 @@
 import { $, HEALTH_LABEL, api, btn, closeDlg, esc, fieldRow, list, lists, nameOf, openDlg, readForm, showText } from "./core.js";
 import { refreshStatus, route } from "./shell.js";
-import { acmeNotice, certExpiryCell, certLastCell, certStatusCell, dnsApiByHook, dnsApiOptions, dnsCredentialHelp, issueCert, loadAcmeHealth, loadCertStatus, loadDnsApis, openCertWizard, showCertLog } from "./pages/certificates.js";
+import { certificateNotices, certExpiryCell, certLastCell, certStatusCell, dnsApiByHook, dnsApiOptions, dnsCredentialHelp, issueCert, loadAcmeHealth, loadCertStatus, loadDnsApis, openCertWizard, showCertLog } from "./pages/certificates.js";
 import { state } from "./state.js";
 
 /* ---- entity registry ---- */
@@ -149,7 +149,7 @@ export const E={
         ["last","Last issue",r=>certLastCell(r)]],
   refs:["acme/accounts","acme/challenges"],
   pre:async()=>{await loadCertStatus();await loadAcmeHealth();},
-  notice:acmeNotice,
+  notice:certificateNotices,
   rowActions:[
    {label:"Issue",fn:r=>issueCert(r,false),title:"Request the certificate from the CA now"},
    {label:"Force",fn:r=>issueCert(r,true),cls:"dngr",title:"Reissue even if not due for renewal"},
@@ -207,7 +207,11 @@ export async function renderEntity(key,into){
   const items=lists[key];
   const c=into||$("#content");
   if(!into)c.innerHTML="";
-  if(def.notice){const n=def.notice();if(n)c.appendChild(n);}
+  /* a page may have more than one thing to say before its table */
+  if(def.notice){
+    const n=def.notice();
+    (Array.isArray(n)?n:[n]).filter(Boolean).forEach(x=>c.appendChild(x));
+  }
   const card=document.createElement("div");card.className="card";
   const hd=document.createElement("div");hd.className="hd";
   hd.innerHTML="<h2>"+esc(def.title)+"</h2><div class=sp></div>";

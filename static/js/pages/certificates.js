@@ -163,6 +163,36 @@ export async function loadAcmeHealth(){
   try{acmeHealth=await api("acme/health");}catch(e){acmeHealth=null;}
   return acmeHealth;
 }
+/* A certificate needs an account to be issued under and a challenge type to
+   prove the domain with. Without either, "Request a certificate" leads to a
+   wizard that cannot finish, so say it here where the attempt starts. */
+export function acmeSetupNotice(){
+  const accounts=lists["acme/accounts"]||[], challenges=lists["acme/challenges"]||[];
+  if(accounts.length&&challenges.length)return null;
+  const missing=[];
+  if(!accounts.length)missing.push("an ACME account");
+  if(!challenges.length)missing.push("a challenge type");
+  const card=document.createElement("div");card.className="card";
+  card.style.borderColor="#e3cfa8";
+  card.innerHTML='<div class=hd><h2>Set up ACME first</h2></div>'+
+    '<div class=bd><p>Issuing a certificate needs '+esc(missing.join(" and "))+
+      ', and this node has '+(missing.length===2?"neither":"none")+' yet.</p>'+
+    '<p class=hint style="margin-top:8px">An account is who the certificate is '+
+      'requested as; a challenge type is how the certificate authority checks you '+
+      'control the domain &mdash; HTTP-01 over port 80, or DNS-01 through your DNS '+
+      'provider for wildcards.</p></div>';
+  const foot=document.createElement("div");foot.className="bd";
+  foot.style.cssText="border-top:1px solid var(--hair)";
+  foot.appendChild(btn("Open ACME Settings","pri",()=>{location.hash="#/p:acme";}));
+  card.appendChild(foot);
+  return card;
+}
+
+/* Both notices the certificates page can show, in the order they matter. */
+export function certificateNotices(){
+  return [acmeSetupNotice(), acmeNotice()];
+}
+
 export function acmeNotice(){
   const h=acmeHealth;
   if(!h||(h.ok&&!h.warning))return null;

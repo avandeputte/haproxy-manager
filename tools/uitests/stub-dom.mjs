@@ -13,6 +13,8 @@ class El {
   get previousElementSibling(){ return this._prev || (this._prev = new El("div")); }
   get parentNode(){ return this._parent || (this._parent = new El("div")); }
   insertBefore(c){ return this.appendChild(c); }
+  /* everything a person would see: markup, text nodes and children */
+  get text(){ return this._html + (this.textContent||"") + this.children.map(c=>c.text).join(""); }
   get firstChild(){ return this.children[0] || null; }
   removeChild(){} contains(){ return false; }
   setAttribute(){} getAttribute(){ return null; } removeAttribute(){} remove(){}
