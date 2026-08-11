@@ -38,3 +38,7 @@ globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({}),
 globalThis.Event = class {};
 globalThis.setTimeout = () => 0;
 globalThis.setInterval = () => 0;
+
+/* The app upgrades tables as they appear; under the stub nothing mutates,
+   so observing is a no-op that still has to exist. */
+globalThis.MutationObserver = class { observe(){} disconnect(){} takeRecords(){return [];} };

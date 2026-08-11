@@ -155,3 +155,11 @@ pre{font:12px/1.5 var(--mono);background:#0f191e;color:#d5e2e0;padding:14px;bord
   #dlg{animation:pop .12s ease-out}
   @keyframes pop{from{transform:translateY(6px);opacity:.6}to{transform:none;opacity:1}}
 }
+
+/* sortable tables */
+th.sortable{cursor:pointer;user-select:none;position:relative;padding-right:18px}
+th.sortable:hover{color:var(--ink)}
+th.sortable::after{content:"";position:absolute;right:6px;top:50%;margin-top:-2px;
+  border:4px solid transparent;border-top-color:var(--hair)}
+th.sorted-asc::after{border-top-color:transparent;border-bottom-color:var(--line);margin-top:-6px}
+th.sorted-desc::after{border-top-color:var(--line)}

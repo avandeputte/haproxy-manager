@@ -1,6 +1,6 @@
 /* Entry point. Imports every page, tells the shell about them, and starts. */
 import { refreshWho, showLogin } from "./auth.js";
-import { $, api, btn, esc, showText } from "./core.js";
+import { $, api, btn, enhanceTables, esc, showText } from "./core.js";
 import { E, renderEntity, renderSettings } from "./entities.js";
 import { renderAcmeSettings } from "./pages/acme.js";
 import { renderAdmin } from "./pages/admin.js";
@@ -23,6 +23,18 @@ const P={acme:renderAcmeSettings,services:renderServices,stats:renderStats,backu
          watchdog:renderWatchdog,notify:renderNotify};
 
 /* Collapsed groups are remembered, so the nav stays how you left it. */
+
+/* Any table that appears becomes sortable, including the ones the statistics
+   and log pages replace every few seconds -- which is also why the sort is
+   remembered rather than reset on each refresh. */
+const content=$("#content");
+let upgrading=false;
+const upgrade=()=>{
+  if(upgrading)return;
+  upgrading=true;
+  try{enhanceTables(content);}finally{upgrading=false;}
+};
+new MutationObserver(upgrade).observe(content,{childList:true,subtree:true});
 
 setPages(P);
 setRenderers({entities:E, entity:renderEntity, settings:renderSettings,

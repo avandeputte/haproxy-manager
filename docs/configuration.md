@@ -202,7 +202,7 @@ of its peers.
 ## Upgrades and the browser cache
 
 The page is served with `no-cache`, and everything it loads lives under a path
-that contains the version — `/static/v/1.53.0/js/main.js`. Those files are then
+that contains the version — `/static/v/1.54.0/js/main.js`. Those files are then
 cached for a year, which is safe because the URL changes whenever the version
 does.
 
@@ -213,6 +213,18 @@ without touching any of them. After an upgrade a browser fetches the whole set
 fresh, and can never hold a mixture of old and new modules.
 
 If you put a caching proxy in front of the UI, let it honour those headers.
+
+## Sorting tables
+
+Every table in the UI sorts: click a heading, click it again to reverse. The
+column keeps its arrow so it is clear what the order is.
+
+Values sort by what they mean rather than by how they are spelled — `900 MB`
+before `1.2 GB`, `srv9` before `srv10`, `30 mins` before `2 days` — numbers come
+before words, blanks stay at the bottom whichever way the column is sorted, and
+a totals row stays where it belongs. Pages that refresh on a timer, like
+Statistics and Logs, keep the sort you chose instead of resetting it every few
+seconds.
 
 ## Logs
 

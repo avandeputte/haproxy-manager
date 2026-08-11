@@ -23,6 +23,7 @@ const GLOBALS = new Set([
   "RegExp","Error","TypeError","parseInt","parseFloat","isNaN","isFinite","encodeURIComponent",
   "decodeURIComponent","btoa","atob","Intl","Symbol","WeakMap","Uint8Array","structuredClone",
   "undefined","NaN","Infinity","globalThis","arguments","this","null","true","false",
+  "MutationObserver","IntersectionObserver","ResizeObserver","queueMicrotask",
 ]);
 const KEYWORDS = new Set(["break","case","catch","class","const","continue","debugger","default",
   "delete","do","else","export","extends","finally","for","function","if","import","in",

@@ -182,3 +182,103 @@ export function readForm(fields){
   });
   return out;
 }
+
+/* ============================ sortable tables ============================ */
+/* Every table in the app is built from HTML, so rather than teach each page to
+   sort, tables are upgraded after they are rendered: click a heading to sort by
+   it, click again to reverse. The comparison is separated from the DOM work so
+   it can be tested on its own. */
+
+/* What a cell is worth when sorting. Numbers sort as numbers even when they
+   carry a unit ("1.2 GB", "12/s", "3 days"), because a table of sizes sorted
+   as text is worse than not sorting at all. Empty and "—" sort last. */
+export function sortValue(text){
+  const t=String(text==null?"":text).trim();
+  if(!t||t==="—"||t==="-")return {empty:true};
+  const m=t.match(/^([<>]?\s*-?\d[\d\s,]*\.?\d*)\s*([a-zA-Z%/]*)/);
+  if(m){
+    const n=parseFloat(m[1].replace(/[\s,<>]/g,""));
+    if(!isNaN(n)){
+      const unit=(m[2]||"").toLowerCase();
+      const scale={b:1,kb:1e3,mb:1e6,gb:1e9,tb:1e12,
+                   ms:1e-3,s:1,sec:1,secs:1,m:60,min:60,mins:60,
+                   h:3600,hour:3600,hours:3600,
+                   d:86400,day:86400,days:86400}[unit];
+      return {num:scale?n*scale:n};
+    }
+  }
+  return {text:t.toLowerCase()};
+}
+
+export function compareValues(a,b){
+  const x=sortValue(a), y=sortValue(b);
+  if(x.empty&&y.empty)return 0;
+  if(x.empty)return 1;               /* blanks always at the bottom */
+  if(y.empty)return -1;
+  if("num" in x&&"num" in y)return x.num-y.num;
+  if("num" in x)return -1;           /* numbers before words */
+  if("num" in y)return 1;
+  return x.text.localeCompare(y.text,undefined,{numeric:true});
+}
+
+/* rows: [{key:[cell text,...], el}] -- returns them in the wanted order */
+export function sortRows(rows,index,dir){
+  const out=rows.slice();
+  out.sort((r1,r2)=>{
+    const a=r1.key[index], b=r2.key[index];
+    const ea=sortValue(a).empty, eb=sortValue(b).empty;
+    /* Blank stays at the bottom whichever way the column is sorted: reversing
+       the order should not fill the top of the table with nothing. */
+    if(ea||eb)return ea&&eb?0:(ea?1:-1);
+    return compareValues(a,b)*(dir==="desc"?-1:1);
+  });
+  return out;
+}
+
+/* Remembered per table so a refresh (statistics, logs) does not undo a sort. */
+const sorted={};
+function tableKey(t){
+  const hs=[...t.querySelectorAll("thead th")].map(h=>h.textContent.trim()).join("|");
+  return (location.hash||"#/")+"::"+hs;
+}
+
+function applySort(t,index,dir){
+  const body=t.querySelector("tbody");
+  if(!body)return;
+  const rows=[...body.querySelectorAll(":scope > tr")].map(tr=>({
+    key:[...tr.children].map(td=>td.textContent), el:tr,
+  }));
+  /* A trailing row that spans the table is a total, not data: leave it last. */
+  const data=rows.filter(r=>r.el.children.length>1&&!r.el.querySelector("[colspan]"));
+  const rest=rows.filter(r=>!data.includes(r));
+  sortRows(data,index,dir).forEach(r=>body.appendChild(r.el));
+  rest.forEach(r=>body.appendChild(r.el));
+  [...t.querySelectorAll("thead th")].forEach((h,i)=>{
+    h.classList.remove("sorted-asc","sorted-desc");
+    if(i===index)h.classList.add(dir==="desc"?"sorted-desc":"sorted-asc");
+  });
+}
+
+export function makeSortable(t){
+  if(t.dataset.sortable)return;
+  const heads=[...t.querySelectorAll("thead th")];
+  if(heads.length<2||!t.querySelector("tbody"))return;
+  t.dataset.sortable="1";
+  const key=tableKey(t);
+  heads.forEach((h,i)=>{
+    if(!h.textContent.trim())return;          /* the actions column */
+    h.classList.add("sortable");
+    h.addEventListener("click",()=>{
+      const cur=sorted[key];
+      const dir=cur&&cur.index===i&&cur.dir==="asc"?"desc":"asc";
+      sorted[key]={index:i,dir};
+      applySort(t,i,dir);
+    });
+  });
+  const remembered=sorted[key];
+  if(remembered)applySort(t,remembered.index,remembered.dir);
+}
+
+export function enhanceTables(root){
+  (root||document).querySelectorAll("table").forEach(makeSortable);
+}
