@@ -9,7 +9,6 @@ js/core.js
 js/entities.js
 js/main.js
 js/pages/acme.js
-js/pages/admin.js
 js/pages/backup.js
 js/pages/certificates.js
 js/pages/cluster.js

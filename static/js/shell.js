@@ -38,7 +38,6 @@ export const NAV=[
  ["grp","SETTINGS","collapse"],
  ["p:acme","ACME Settings"],
  ["p:webui","Web UI access"],
- ["p:admin","Administrator login"],
  ["p:watchdog","Watchdog"],
  ["p:notify","Notifications"],
  ["p:backup","Backup & Export"],

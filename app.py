@@ -228,7 +228,11 @@ DEFAULT_CONFIG = {
         "node_url": "",        # how the OTHER nodes should reach this one
         "web_ui": {"enabled": False, "url": "", "certificate": "auto", "rule_id": ""},
         # UI login. The password is only ever stored as a PBKDF2 hash.
-        "admin": {"username": "admin", "salt": "", "hash": "", "iterations": 0, "updated": ""},
+        # email: who to reach about this node. Offered as the default when an
+        # ACME account is created, and as the recipient when notifications are
+        # set up, so it is only typed once.
+        "admin": {"username": "admin", "email": "", "salt": "", "hash": "",
+                  "iterations": 0, "updated": ""},
         "session_secret": "",      # HMAC key for session cookies; rotating it logs everyone out
         "session_hours": 12,
         "keepalived": {
@@ -733,6 +737,7 @@ def api_whoami():
     return jsonify({
         "authenticated": True,
         "username": user,
+        "email": (cfg["local"].get("admin") or {}).get("email", ""),
         "version": VERSION,
         "hostname": socket.gethostname(),
         "needs_setup": False,
@@ -846,18 +851,39 @@ def api_password():
         return jsonify({"ok": False, "error": "log in first"}), 401
     body = request.get_json(force=True) or {}
     admin = cfg["local"].get("admin") or {}
-    if not verify_password(body.get("current") or "", admin):
-        time.sleep(0.5)
-        return jsonify({"ok": False, "error": "the current password is not correct"}), 401
     new = body.get("new") or ""
-    if len(new) < 8:
+    wants_name = (body.get("username") or admin.get("username") or "admin").strip() \
+        != (admin.get("username") or "admin")
+    # The current password is what proves it is still you at the keyboard, so
+    # anything that changes how you sign in requires it. The email is not a
+    # credential and there is no reset-by-email here, so a session is enough.
+    if new or wants_name:
+        if not verify_password(body.get("current") or "", admin):
+            time.sleep(0.5)
+            return jsonify({"ok": False, "error":
+                            "the current password is not correct"}), 401
+    # The email can be changed on its own; a password only when one is given.
+    email = body.get("email")
+    if email is not None:
+        email = str(email).strip()
+        if email and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+            return jsonify({"ok": False, "error": "that does not look like an email address"}), 400
+    if new and len(new) < 8:
         return jsonify({"ok": False, "error": "the new password must be at least 8 characters"}), 400
     username = (body.get("username") or admin.get("username") or "admin").strip()
     with _lock:
         cfg = load_config()
-        set_admin(cfg, username, new)
+        if new:
+            set_admin(cfg, username, new)
+        else:
+            cfg["local"]["admin"]["username"] = username
+        if email is not None:
+            cfg["local"]["admin"]["email"] = email
         save_config(cfg)
-    return _login_ok(cfg, username, {"ok": True, "username": username})
+    if new or wants_name:
+        return _login_ok(cfg, username, {"ok": True, "username": username})
+    return jsonify({"ok": True, "username": username,
+                    "email": cfg["local"]["admin"].get("email", "")})
 
 
 # --------------------------------------------------------------------------

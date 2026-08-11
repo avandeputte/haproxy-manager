@@ -83,6 +83,19 @@ HAProxy is reloaded, without anything to configure.
 
 If acme.sh is missing or broken the Certificates page says so, with the reason.
 
+## The account
+
+The gear beside your name at the foot of the menu opens **Account**: the
+username, an email, and the password.
+
+Changing the password or the username asks for the current password — a session
+alone is not enough to change how you sign in. The email is not a credential
+and there is no reset-by-email here, so it can be set without one. It is
+offered as the default when an ACME account is created and when notifications
+are set up, so it is only typed once.
+
+The login is node-local: set it on each node.
+
 ## Serving the UI over HTTPS
 
 **System → Web UI access.** Give it a name (`https://proxy.example.com`) and it
@@ -202,7 +215,7 @@ of its peers.
 ## Upgrades and the browser cache
 
 The page is served with `no-cache`, and everything it loads lives under a path
-that contains the version — `/static/v/1.54.0/js/main.js`. Those files are then
+that contains the version — `/static/v/1.54.1/js/main.js`. Those files are then
 cached for a year, which is safe because the URL changes whenever the version
 does.
 

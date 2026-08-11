@@ -104,6 +104,18 @@ for name, text in DOCS.items():
         check(quoted == version, "%s names an old package file" % name,
               "says %s, VERSION is %s" % (quoted, version))
 
+# -- strings the state refactor could have damaged --------------------------
+# Moving the shared variables into state.js rewrote every occurrence of their
+# names, including ones inside strings: className="who" became
+# className="state.who", which silently dropped the styling.
+CLASS_OR_ID = re.compile(r"(?:className|id)\s*=\s*[\"']([^\"']*)[\"']")
+for js in sorted((ROOT / "static" / "js").rglob("*.js")):
+    text = js.read_text()
+    for m in CLASS_OR_ID.finditer(text):
+        check("state." not in m.group(1),
+              "a class or id looks like the state refactor rewrote it",
+              "%s in %s" % (m.group(1), js.name))
+
 # -- cache busting ---------------------------------------------------------
 # Assets are cached for a year, which is only safe while their URL carries the
 # version. An unversioned stylesheet or module reference would be served stale
