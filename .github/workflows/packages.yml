@@ -43,8 +43,21 @@ jobs:
           done
           ls -la dist/*.deb dist/*.rpm
 
-      # Installing on the distribution itself is the only check that means
-      # anything: dependency names and scriptlet behaviour differ per family.
+      # A package that does not contain exactly what the repository contains is
+      # worse than a build failure, because it installs and then misbehaves. A
+      # truncated app.py once produced a service that started, exited zero and
+      # said nothing at all.
+      - name: Check the packages contain the real files
+        run: |
+          set -eu
+          mkdir -p /tmp/x && dpkg-deb -x dist/*.deb /tmp/x
+          for f in app.py static/index.html VERSION; do
+            cmp "/tmp/x/opt/haproxy-manager/$f" "$f" \
+              || { echo "packaged $f differs from the source"; exit 1; }
+          done
+          grep -q '^if __name__' /tmp/x/opt/haproxy-manager/app.py
+          echo "the package matches the source"
+
       # Installing on the distribution itself is the only check that means
       # anything: dependency names and scriptlet behaviour differ per family.
       - name: Install on Debian, Ubuntu, Rocky and Fedora
