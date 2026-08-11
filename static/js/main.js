@@ -2,6 +2,7 @@
 import { refreshWho, showLogin } from "./auth.js";
 import { $, api, btn, esc, showText } from "./core.js";
 import { E, renderEntity, renderSettings } from "./entities.js";
+import { renderAcmeSettings } from "./pages/acme.js";
 import { renderAdmin } from "./pages/admin.js";
 import { renderBackup } from "./pages/backup.js";
 import { renderCluster } from "./pages/cluster.js";
@@ -17,7 +18,7 @@ import { renderWebui } from "./pages/webui.js";
 import { state } from "./state.js";
 import { boot, buildNav, doApply, route, setPages, setRenderers } from "./shell.js";
 
-const P={services:renderServices,stats:renderStats,backup:renderBackup,admin:renderAdmin,
+const P={acme:renderAcmeSettings,services:renderServices,stats:renderStats,backup:renderBackup,admin:renderAdmin,
          updates:renderUpdates,webui:renderWebui,cluster:renderCluster,logs:renderLogs,
          watchdog:renderWatchdog,notify:renderNotify};
 

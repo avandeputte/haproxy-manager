@@ -61,7 +61,8 @@ HTTP check; the rendered backend then checks one place and routes to another.
 ## Certificates
 
 **Certificates → Request a certificate** walks through an ACME account, a
-challenge type and the domains.
+challenge type and the domains. The accounts, the challenge types and the
+issuance settings are all on one page, **Settings → ACME Settings**.
 
 - **HTTP-01** needs port 80 reachable from the internet. The app runs acme.sh's
   standalone listener on 9080 and routes `/.well-known/acme-challenge/` to it
@@ -187,7 +188,7 @@ of its peers.
 ## Upgrades and the browser cache
 
 The page is served with `no-cache`, and everything it loads lives under a path
-that contains the version — `/static/v/1.51.1/js/main.js`. Those files are then
+that contains the version — `/static/v/1.52.0/js/main.js`. Those files are then
 cached for a year, which is safe because the URL changes whenever the version
 does.
 

@@ -24,10 +24,7 @@ export const NAV=[
  ["p:stats","Statistics"],
  ["p:logs","Logs"],
  ["p:cluster","Cluster"],
- ["grp","CERTIFICATES"],
  ["acme/certificates","Certificates"],
- ["acme/accounts","ACME Accounts"],
- ["acme/challenges","Challenge Types"],
  ["grp","ADVANCED · HAPROXY","collapse"],
  ["haproxy/frontends","Public Services"],
  ["haproxy/backends","Backend Pools"],
@@ -36,11 +33,10 @@ export const NAV=[
  ["haproxy/rules","Rules"],
  ["haproxy/healthchecks","Health Monitors"],
  ["s:haproxy-settings","Settings"],
- ["grp","ADVANCED · ACME","collapse"],
- ["s:acme-settings","Settings"],
  /* Settings last: everything here is something you set once and revisit
     rarely, unlike the pages above that you watch. */
  ["grp","SETTINGS"],
+ ["p:acme","ACME Settings"],
  ["p:webui","Web UI access"],
  ["p:admin","Administrator login"],
  ["p:watchdog","Watchdog"],

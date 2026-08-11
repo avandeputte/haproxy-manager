@@ -1,5 +1,5 @@
 import { $, HEALTH_LABEL, api, btn, closeDlg, esc, fieldRow, list, lists, nameOf, openDlg, readForm, showText } from "./core.js";
-import { refreshStatus } from "./shell.js";
+import { refreshStatus, route } from "./shell.js";
 import { acmeNotice, certExpiryCell, certLastCell, certStatusCell, dnsApiByHook, dnsApiOptions, dnsCredentialHelp, issueCert, loadAcmeHealth, loadCertStatus, loadDnsApis, openCertWizard, showCertLog } from "./pages/certificates.js";
 import { state } from "./state.js";
 
@@ -115,7 +115,7 @@ export const E={
    {k:"db_user",l:"Database user",t:"text",h:"For the PostgreSQL and MySQL/MariaDB checks. Only the login handshake is performed -- no password is sent, so an account with no privileges is enough."},
    {k:"mysql_post41",l:"MySQL 4.1+ authentication",t:"bool",d:true,h:"Leave on for MariaDB and any modern MySQL"}]},
 
- "acme/accounts":{title:"Accounts",add:"Add account",
+ "acme/accounts":{title:"ACME Accounts",add:"Add account",
   intro:"ACME accounts used to request certificates.",
   cols:[["name","Name"],["email","E-mail"],["ca","CA"]],
   fields:[
@@ -185,8 +185,10 @@ export const S={
    {k:"stats_uri",l:"Statistics URI",t:"text"},
    {k:"custom_global",l:"Extra global directives",t:"textarea",h:"Advanced. Raw lines added to the global section of haproxy.cfg, for settings this page does not cover -- for example \"tune.ssl.default-dh-param 2048\". One per line. Apply validates with haproxy -c first, so a mistake blocks the change rather than breaking HAProxy. See the HAProxy configuration manual: https://docs.haproxy.org/2.6/configuration.html"},
    {k:"custom_defaults",l:"Extra defaults directives",t:"textarea",h:"Advanced. Raw lines added to the defaults section, inherited by every service and pool -- for example \"option http-server-close\". One per line. Apply validates with haproxy -c first, so a mistake blocks the change rather than breaking HAProxy. See the HAProxy configuration manual: https://docs.haproxy.org/2.6/configuration.html"}]},
- "acme-settings":{title:"ACME Settings",ep:"acme/settings",
-  intro:"Settings for certificate issuance and renewal via acme.sh.",
+ /* One of three cards on the ACME Settings page, so it is named for what it
+     configures rather than repeating the page title. */
+ "acme-settings":{title:"Issuance and renewal",ep:"acme/settings",
+  intro:"How acme.sh obtains and renews certificates on this node.",
   fields:[
    {k:"enabled",l:"Enabled",t:"bool",d:true},
    {k:"auto_renew",l:"Automatic renewal",t:"bool",d:true},
@@ -196,12 +198,15 @@ export const S={
 };
 
 /* ---- CRUD views ---- */
-export async function renderEntity(key){
+/* `into` lets a page host several of these; on its own it takes over the page,
+   which is what the navigation does for a plain CRUD entry. */
+export async function renderEntity(key,into){
   const def=E[key];
   await Promise.all([list(key,true),...(def.refs||[]).map(r=>list(r,true))]);
   if(def.pre)await def.pre();
   const items=lists[key];
-  const c=$("#content");c.innerHTML="";
+  const c=into||$("#content");
+  if(!into)c.innerHTML="";
   if(def.notice){const n=def.notice();if(n)c.appendChild(n);}
   const card=document.createElement("div");card.className="card";
   const hd=document.createElement("div");hd.className="hd";
@@ -241,7 +246,8 @@ export async function renderEntity(key){
       act.appendChild(document.createTextNode(" "));
       act.appendChild(btn("Delete","sm dngr",async()=>{
         if(!confirm("Delete \""+row.name+"\"?"))return;
-        try{await api(key+"/"+row.id,"DELETE");await renderEntity(key);refreshStatus();}
+        /* re-render the page, not just this table: it may be one of several */
+          try{await api(key+"/"+row.id,"DELETE");await route();refreshStatus();}
         catch(e){alert(e.message);}
       }));}
       tr.appendChild(act);tb.appendChild(tr);
@@ -265,18 +271,19 @@ export function openEditor(key,item){
       try{
         if(item)await api(key+"/"+item.id,"PUT",Object.assign({},item,data));
         else await api(key,"POST",data);
-        closeDlg();await renderEntity(key);refreshStatus();
+        closeDlg();await route();refreshStatus();
       }catch(e){err.textContent=e.message;}
     })]);
 }
 
 /* ---- settings views ---- */
-export async function renderSettings(key){
+export async function renderSettings(key,into){
   const def=S[key];
   if(def.pre)await def.pre();
   let cur=await api(def.ep);
   if(def.sub)cur=cur[def.sub]||{};
-  const c=$("#content");c.innerHTML="";
+  const c=into||$("#content");
+  if(!into)c.innerHTML="";
   const card=document.createElement("div");card.className="card";
   card.innerHTML='<div class=hd><h2>'+esc(def.title)+'</h2></div>';
   const bd=document.createElement("div");bd.className="bd";
