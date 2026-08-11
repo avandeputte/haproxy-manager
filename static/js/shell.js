@@ -83,8 +83,10 @@ export function buildNav(){
     const a=document.createElement("a");a.className="item";a.href="#/"+key;a.textContent=label;a.dataset.key=key;
     (bucket||n).appendChild(a);
     if(bucket){
-      const c=bucket.previousElementSibling.querySelector(".count");
-      c.textContent=bucket.querySelectorAll("a").length;
+      /* the count badge is decoration; do not take the whole menu down for it */
+      const head=bucket.previousElementSibling;
+      const c=head&&head.querySelector(".count");
+      if(c)c.textContent=bucket.querySelectorAll("a").length;
     }
   });
 }

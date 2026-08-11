@@ -14,6 +14,13 @@ rather than when someone opens that page. It also boots `main.js`, which is why
 the stub grows an occasional `previousElementSibling` -- those additions are
 the stub catching up with the app, not the app misbehaving.
 
+`dialogs.mjs` opens them. Rendering a page does not: a dialog that threw before
+it could open shipped once because the button simply did nothing and every test
+still passed. The stub's `querySelector` searches its children and returns null
+when there is no match, and `document.querySelector` only knows the ids
+`index.html` really has -- a stub that conjures an element for any selector
+makes every lookup succeed, including the ones a browser fails.
+
 `table-sorting-dom.mjs` needs a real DOM and skips itself without one. The stub
 here is deliberately thin, and reordering rows is exactly the kind of thing it
 cannot model honestly:

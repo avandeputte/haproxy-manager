@@ -1,4 +1,4 @@
-import { $, api, btn, closeDlg, esc, fieldEl, fieldRow, openDlg, readForm } from "../core.js";
+import { $, api, btn, closeDlg, esc, fieldRow, openDlg, readForm } from "../core.js";
 
 /* ---- notifications ---- */
 export const NOTIFY_TYPES={
@@ -130,9 +130,13 @@ export async function renderNotify(){
                   {k:"enabled",l:"Enabled",t:"bool",d:true}];
     body.className="frm";
     common.forEach(f=>fieldRow(f,d[f.k]).forEach(el=>body.appendChild(el)));
-    fieldRow({k:"type",l:"Type",t:"select",d:d.type,
+    /* Keep the element rather than looking it up later: nothing here is in the
+       document until openDlg runs, so a lookup by id finds nothing. */
+    const typeCells=fieldRow({k:"type",l:"Type",t:"select",d:d.type,
               o:Object.keys(NOTIFY_TYPES).map(k=>({value:k,label:NOTIFY_TYPES[k].label}))},
-             d.type).forEach(el=>body.appendChild(el));
+             d.type);
+    typeCells.forEach(el=>body.appendChild(el));
+    const typeSel=typeCells[1].querySelector("select");
     // The type-specific fields are replaced when the type changes, so they get
     // their own grid rather than being spliced into this one.
     const holder=document.createElement("div");holder.className="frm";
@@ -144,14 +148,14 @@ export async function renderNotify(){
         .forEach(f=>fieldRow(f,d[f.k]).forEach(el=>holder.appendChild(el)));
     };
     paint(d.type);
-    fieldEl("type").onchange=e=>paint(e.target.value);
+    typeSel.onchange=e=>paint(e.target.value);
     const err=document.createElement("span");err.className="err";
     openDlg(idx===null?"Add a destination":"Edit destination",body,[err,
       btn("Cancel","",closeDlg),
       btn("Save","primary",async()=>{
         try{
           const vals=readForm(common.concat([{k:"type",t:"select"}])
-                              .concat(NOTIFY_TYPES[fieldEl("type").value].fields));
+                              .concat(NOTIFY_TYPES[typeSel.value].fields));
           const merged=Object.assign({},d,vals);
           if(idx===null)dests.push(merged); else dests[idx]=merged;
           await save(null,"Saved.");
