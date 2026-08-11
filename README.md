@@ -2,13 +2,13 @@
 
 
 A small self-hosted web UI to manage an **HAProxy** configuration, obtain
-**Let's Encrypt** certificates, and run an **active-passive pair with Keepalived**
-on a shared virtual IP — with settings and certificates syncing across the
-nodes.
+**Let's Encrypt** certificates, and run a **cluster of any number of nodes with
+Keepalived** on a shared virtual IP — one node active, the rest ready to take
+over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.49.0_all.deb
+sudo apt-get install -y ./haproxy-manager_1.49.1_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -39,7 +39,7 @@ The first visit asks for a username and password, then offers a setup wizard
 with two branches:
 
 - **Join an existing cluster** — point it at any node already running and give
-  that node's API key. It registers itself there and the other node pushes the
+  that node's API key. It registers itself there and that node pushes the
   whole configuration, the cluster settings and the membership list back. You do
   not touch the other nodes.
 - **Create a new cluster, or run standalone** — set the virtual IP the nodes will
@@ -264,7 +264,7 @@ the first entry, and the shared VRRP settings move out of the node-local section
 ### Only the active node is editable
 
 The node holding the virtual IP is where the shared configuration is edited; the
-others are **read-only** and show a banner saying so. This stops two nodes from
+others are **read-only** and show a banner saying so. This stops nodes from
 diverging and then overwriting each other on the next push.
 
 A passive node can still fix **itself** — interface, priority, unicast addresses,
@@ -642,7 +642,7 @@ the GitHub Container Registry:
 
 ```bash
 docker pull ghcr.io/avandeputte/haproxy-manager:latest   # or :1.46 to pin
-docker compose up -d                                     # on BOTH nodes
+docker compose up -d                                     # on every node
 ```
 
 The image is all-in-one: the manager, HAProxy, Keepalived and `acme.sh` in one

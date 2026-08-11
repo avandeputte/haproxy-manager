@@ -104,6 +104,15 @@ for name, text in DOCS.items():
         check(quoted == version, "%s names an old package file" % name,
               "says %s, VERSION is %s" % (quoted, version))
 
+# -- claims the code has outgrown ------------------------------------------
+# The cluster was two nodes once. Wording that still says so is wrong, and
+# nothing else here would catch it: it is prose, not a name or a number.
+for phrase in ["active-passive pair", "active/passive pair", "the two nodes",
+               "both nodes", "on BOTH nodes"]:
+    for name, text in list(DOCS.items()) + [("app.py", APP), ("install.sh", INSTALL)]:
+        check(phrase.lower() not in text.lower(),
+              "wording that assumes exactly two nodes", "%r in %s" % (phrase, name))
+
 # -- things that were removed must not linger ------------------------------
 for gone in ["apprise", "HAM_VENV", "--with-apprise"]:
     for name, text in list(DOCS.items()) + [("app.py", APP), ("install.sh", INSTALL)]:

@@ -8,7 +8,7 @@
 #
 #   sudo ./install.sh
 #
-# Run it on BOTH nodes. When haproxy-manager is already installed it offers to
+# Run it on every node. When it is already installed it offers to
 # update or remove it; --update / --uninstall pick one without asking. An update
 # preserves config.json, issued certificates and node-local settings.
 #

@@ -1599,7 +1599,7 @@ def do_apply(cfg=None, allow_push=True):
                 os.unlink(kstaging)
                 # Loud, not a step line: keepalived.conf is left untouched here,
                 # so the node keeps whatever it had -- or never starts at all,
-                # and both nodes sit passive with no VIP anywhere.
+                # and every node sits passive with no VIP anywhere.
                 result["steps"].append("keepalived config NOT updated")
                 result.setdefault("warnings", []).append(
                     "Keepalived configuration was rejected, so /etc/keepalived/keepalived.conf "
@@ -2627,7 +2627,7 @@ def _renew_loop():
 
 
 # --------------------------------------------------------------------------
-# node sync (active-passive)
+# node sync: one active node holds the virtual IP, any number stand ready
 # --------------------------------------------------------------------------
 
 def shared_payload(cfg):
@@ -2654,7 +2654,7 @@ def _key_verdict(d, url):
     """Turn a rejection into the one sentence that identifies the cause."""
     host = d.get("hostname") or url
     if not d.get("header_seen"):
-        return ("%s never received the X-API-Key header -- something between the two nodes is "
+        return ("%s never received the X-API-Key header -- something between the nodes is "
                 "stripping it. Check any reverse proxy in front of %s." % (host, url))
     ver = (" running %s" % d["version"]) if d.get("version") else ""
     sent, want = d.get("presented_fp"), d.get("expected_fp")
@@ -2662,7 +2662,7 @@ def _key_verdict(d, url):
         return "%s has no API key set, so it refuses every sync." % host
     if sent == want:
         return ("%s says the key does not match, yet both fingerprints are %s. The key is being "
-                "altered in transit -- check any proxy between the two nodes." % (host, sent))
+                "altered in transit -- check any proxy between them." % (host, sent))
     return ("%s%s expects a key fingerprinted %s, but this node sent %s. Open Cluster > This node "
             "on %s, press Show, and paste that key into this peer's entry."
             % (host, ver, want, sent, host))

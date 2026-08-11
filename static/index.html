@@ -1192,7 +1192,7 @@ async function renderCluster(){
     ? "Keepalived runs on this node because the cluster has a virtual IP. Its interface and priority "+
       "are set here; everything else follows the cluster settings above."
     : "The cluster has no virtual IP, so Keepalived does not run and this node serves on its own "+
-      "addresses. Add one above to turn the nodes into an active/passive pair.";
+      "addresses. Add one above and the nodes take turns holding it: one active, the rest ready.";
   b2.appendChild(ka);
   const fp=document.createElement("div");fp.className="hint";fp.style.marginTop="8px";
   try{
