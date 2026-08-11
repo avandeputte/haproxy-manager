@@ -90,8 +90,8 @@ jobs:
           APT='apt-get update -q && apt-get install -y --no-install-recommends systemd systemd-sysv dbus curl ca-certificates && rm -rf /var/lib/apt/lists/*'
           test_one debian:bookworm deb "$APT"
           test_one ubuntu:24.04    deb "$APT"
-          test_one rockylinux:9    rpm 'dnf -y install systemd systemd-sysv epel-release curl && dnf clean all'
-          test_one fedora:41       rpm 'dnf -y install systemd curl && dnf clean all'
+          test_one rockylinux:9    rpm 'dnf -y --allowerasing install systemd systemd-sysv epel-release curl && dnf clean all'
+          test_one fedora:41       rpm 'dnf -y --allowerasing install systemd curl && dnf clean all'
 
       - name: Keep the packages as build artefacts
         uses: actions/upload-artifact@v4
