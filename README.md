@@ -1,4 +1,5 @@
-# haproxy-manager
+<img src="static/logo.svg" alt="HAProxy Cluster Manager" width="268" height="64">
+
 
 A small self-hosted web UI to manage an **HAProxy** configuration, obtain
 **Let's Encrypt** certificates, and run an **active-passive pair with Keepalived**
@@ -7,7 +8,7 @@ nodes.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.48.0_all.deb
+sudo apt-get install -y ./haproxy-manager_1.49.0_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -28,6 +29,7 @@ Then open `http://<node>:8080`.
 | [Installing on a server](docs/install-standalone.md) | requirements, what the installer does, options, updating, uninstalling, troubleshooting |
 | [Running in Docker](docs/install-docker.md) | images, compose, networking, volumes, capabilities, limitations |
 | [Configuration](docs/configuration.md) | every setting, what is shared between nodes, environment variables, ports |
+| [Refactoring plan](docs/refactoring.md) | how the two large files would be split up, and in what order |
 
 The rest of this file describes what each part does and why.
 
@@ -614,7 +616,7 @@ curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/in
 ```
 
 From a checkout, `sudo ./install.sh` installs those files instead of
-downloading. If haproxy-manager is already installed the same command detects
+downloading. If HAProxy Cluster Manager is already installed the same command detects
 it and offers to **update**, **remove** (keeping `config.json` and
 certificates), **purge** (removing those too), or cancel; piped from `curl`
 with no terminal to ask on, it updates in place and says so.

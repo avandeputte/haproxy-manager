@@ -14,7 +14,7 @@ section: net
 priority: optional
 maintainer: avandeputte <avndptt@gmail.com>
 description: |
-  Web UI for HAProxy, Keepalived and acme.sh.
+  HAProxy Cluster Manager -- a web UI for HAProxy, Keepalived and acme.sh.
   Publish services, obtain Let's Encrypt certificates and run a cluster on a
   shared virtual IP, with settings and certificates syncing between nodes.
 vendor: avandeputte

@@ -72,7 +72,7 @@ cleanup() { [ -n "$TMPDIR_" ] && rm -rf "$TMPDIR_"; }
 
 usage() {
     cat <<'EOF'
-haproxy-manager installer (Debian-based distributions)
+HAProxy Cluster Manager installer (Debian-based distributions)
 
   curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
   sudo ./install.sh
@@ -276,7 +276,7 @@ do_uninstall() {
     fi
 
     echo
-    printf '%s>> haproxy-manager removed.%s\n' "$C_B" "$C_0"
+    printf '%s>> HAProxy Cluster Manager removed.%s\n' "$C_B" "$C_0"
     if [ "$PURGE" = "0" ]; then
         echo "   Your settings are still in $DATA -- reinstalling picks them up again."
     fi
@@ -537,7 +537,7 @@ install_service() {
     log "Installing systemd service"
     cat > "$UNIT" <<EOF
 [Unit]
-Description=HAProxy Manager web UI
+Description=HAProxy Cluster Manager web UI
 Documentation=https://github.com/$REPO
 After=network-online.target
 Wants=network-online.target
@@ -593,7 +593,7 @@ summary() {
     [ -n "$ip" ] || ip="<this-node>"
 
     echo
-    printf '%s>> haproxy-manager is running at http://%s:%s%s\n' "$C_B" "$ip" "$PORT" "$C_0"
+    printf '%s>> HAProxy Cluster Manager is running at http://%s:%s%s\n' "$C_B" "$ip" "$PORT" "$C_0"
     echo
     if [ -n "${ADMIN_PW:-}" ]; then
         printf '   Sign in with   username %s%s%s\n' "$C_B" "${ADMIN_USER:-admin}" "$C_0"

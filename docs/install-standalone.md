@@ -1,6 +1,6 @@
-# Installing on a server (no containers)
+# Installing HAProxy Cluster Manager on a server
 
-This is the intended way to run haproxy-manager. HAProxy, Keepalived and
+This is the intended way to run HAProxy Cluster Manager. HAProxy, Keepalived and
 acme.sh are installed as normal system packages, systemd runs everything, and
 the virtual IP works because the node is on a real network.
 
@@ -43,16 +43,16 @@ package mirrors.
 
 ```bash
 # Debian / Ubuntu
-curl -fsSLO https://github.com/avandeputte/haproxy-manager/releases/latest/download/haproxy-manager_1.48.0_all.deb
-sudo apt-get install -y ./haproxy-manager_1.48.0_all.deb
+curl -fsSLO https://github.com/avandeputte/haproxy-manager/releases/latest/download/haproxy-manager_1.49.0_all.deb
+sudo apt-get install -y ./haproxy-manager_1.49.0_all.deb
 
 # Fedora
-curl -fsSLO https://github.com/avandeputte/haproxy-manager/releases/latest/download/haproxy-manager-1.48.0-1.noarch.rpm
-sudo dnf install -y ./haproxy-manager-1.48.0-1.noarch.rpm
+curl -fsSLO https://github.com/avandeputte/haproxy-manager/releases/latest/download/haproxy-manager-1.49.0-1.noarch.rpm
+sudo dnf install -y ./haproxy-manager-1.49.0-1.noarch.rpm
 
 # RHEL / Rocky / Alma -- python3-flask and python3-waitress live in EPEL
 sudo dnf install -y epel-release
-sudo dnf install -y ./haproxy-manager-1.48.0-1.noarch.rpm
+sudo dnf install -y ./haproxy-manager-1.49.0-1.noarch.rpm
 ```
 
 The package installs and starts the service, prints the generated

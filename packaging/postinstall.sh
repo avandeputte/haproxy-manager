@@ -4,7 +4,7 @@
 set -e
 # A failing step must not disappear: without this the script could abort
 # half-way and leave the service disabled with nothing said about it.
-trap 'rc=$?; [ "$rc" -ne 0 ] && echo "haproxy-manager: post-install failed at line $LINENO (exit $rc); the service may not be enabled -- run: systemctl enable --now haproxy-manager" >&2; exit $rc' EXIT
+trap 'rc=$?; [ "$rc" -ne 0 ] && echo "HAProxy Cluster Manager: post-install failed at line $LINENO (exit $rc); the service may not be enabled -- run: systemctl enable --now haproxy-manager" >&2; exit $rc' EXIT
 
 DATA=/var/lib/haproxy-manager
 CERTS=/etc/haproxy/certs
@@ -63,7 +63,7 @@ if [ -n "${SEEDED:-}" ]; then
     [ -n "$ADDR" ] || ADDR="$(hostname)"
     cat <<EOF
 
-  haproxy-manager is running at  http://$ADDR:8080
+  HAProxy Cluster Manager is running at  http://$ADDR:8080
 
     username  admin
     password  $PW

@@ -1,5 +1,5 @@
 [Unit]
-Description=HAProxy Manager web UI
+Description=HAProxy Cluster Manager web UI
 Documentation=https://github.com/avandeputte/haproxy-manager
 After=network-online.target
 Wants=network-online.target

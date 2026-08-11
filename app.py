@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-haproxy-manager -- a small self-hosted web UI for managing:
+HAProxy Cluster Manager -- a small self-hosted web UI for managing:
 
   * an HAProxy configuration: Public Services, Backend Pools, Real Servers,
     Conditions, Rules, Health Monitors and settings, published through a
@@ -2066,7 +2066,7 @@ def notify(event, subject, body, severity="warning", cfg=None):
         return {"sent": 0, "skipped": "no destinations are configured"}
 
     host = socket.gethostname()
-    full = "%s\n\n-- \nhaproxy-manager %s on %s" % (body, VERSION, host)
+    full = "%s\n\n-- \nHAProxy Cluster Manager %s on %s" % (body, VERSION, host)
     sent = 0
     for d in dests:
         name = d.get("name") or d.get("type") or "?"
@@ -2171,7 +2171,7 @@ def api_notify_test():
         return jsonify({"ok": False, "error": "save the destination first, then test it"}), 400
     try:
         send_to(dest, "[%s] Test message" % socket.gethostname(),
-                "This is a test from haproxy-manager %s on %s.\n\n"
+                "This is a test from HAProxy Cluster Manager %s on %s.\n\n"
                 "If you are reading it, alerts will reach you here."
                 % (VERSION, socket.gethostname()),
                 "info", "test")
