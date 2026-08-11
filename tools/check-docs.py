@@ -90,10 +90,18 @@ for path in ["/var/lib/haproxy-manager/config.json", "/opt/haproxy-manager",
     check(path in ALL_DOCS, "a path is missing from the docs", path)
 
 # -- version consistency ---------------------------------------------------
+# Three components, so the package filenames match VERSION exactly rather than
+# being normalised to semver by the packager.
 version = (ROOT / "VERSION").read_text().strip()
+check(re.fullmatch(r"\d+\.\d+\.\d+", version) is not None,
+      "VERSION is not three components", version)
 for name, text in DOCS.items():
-    for quoted in re.findall(r'haproxy-manager:(\d+\.\d+)', text):
+    for quoted in re.findall(r'haproxy-manager:(\d+\.\d+(?:\.\d+)?)', text):
         check(quoted == version, "%s pins an old image tag" % name,
+              "says %s, VERSION is %s" % (quoted, version))
+    # the documented package filenames are commands people paste
+    for quoted in re.findall(r'haproxy-manager[_-](\d+\.\d+\.\d+)[_-]', text):
+        check(quoted == version, "%s names an old package file" % name,
               "says %s, VERSION is %s" % (quoted, version))
 
 # -- things that were removed must not linger ------------------------------
