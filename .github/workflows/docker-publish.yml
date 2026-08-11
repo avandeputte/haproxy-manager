@@ -59,7 +59,10 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=${{ steps.version.outputs.value }},enable={{is_default_branch}}
+            # Always tag with VERSION, on a branch build and a tag build alike,
+            # so `docker pull …:1.48.0` works whichever triggered it and the
+            # image tag matches the file the app reports.
+            type=raw,value=${{ steps.version.outputs.value }}
             type=ref,event=tag
             type=sha,prefix=sha-
           labels: |
