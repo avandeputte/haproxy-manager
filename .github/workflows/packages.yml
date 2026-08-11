@@ -87,11 +87,13 @@ jobs:
               [ "$code" = 200 ] || exit 1'
             docker rm -f "$cid" >/dev/null
           }
+          # curl is already in the RPM base images (as curl or curl-minimal);
+          # installing it again is what made the image build conflict.
           APT='apt-get update -q && apt-get install -y --no-install-recommends systemd systemd-sysv dbus curl ca-certificates && rm -rf /var/lib/apt/lists/*'
           test_one debian:bookworm deb "$APT"
           test_one ubuntu:24.04    deb "$APT"
-          test_one rockylinux:9    rpm 'dnf -y --allowerasing install systemd systemd-sysv epel-release curl && dnf clean all'
-          test_one fedora:41       rpm 'dnf -y --allowerasing install systemd curl && dnf clean all'
+          test_one rockylinux:9    rpm 'dnf -y install systemd systemd-sysv epel-release && dnf clean all'
+          test_one fedora:41       rpm 'dnf -y install systemd && dnf clean all'
 
       - name: Keep the packages as build artefacts
         uses: actions/upload-artifact@v4
