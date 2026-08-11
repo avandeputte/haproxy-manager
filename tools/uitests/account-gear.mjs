@@ -30,6 +30,10 @@ ok(foot.querySelector(".who")!==null, "the name block uses the styled class");
 ok(foot.querySelector(".who small").textContent==="Signed in as", "the label is its own block, so nothing runs together");
 const gear=foot.querySelector(".gear");
 ok(gear!==null, "there is a gear beside the name");
+ok(gear.parentNode.className==="whorow" && gear.previousElementSibling.className==="who",
+   "it sits on the same row as the name, not on a line of its own");
+ok(foot.children.length===2 && foot.children[1].textContent==="Sign out",
+   "Sign out keeps its own full-width row below");
 ok(gear.querySelector("svg")!==null, "it draws an icon");
 
 gear.dispatchEvent(new window.Event("click"));

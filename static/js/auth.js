@@ -59,17 +59,17 @@ export async function refreshWho(){
     d.innerHTML="<small>Signed in as</small>"+esc(state.who.username);
     const g=document.createElement("button");g.className="lo gear";
     g.title="Account";g.setAttribute("aria-label","Account settings");
-    g.innerHTML='<svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">'+
-      '<circle cx="8" cy="8" r="2.4" fill="none" stroke="currentColor" stroke-width="1.6"/>'+
-      '<path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" '+
-      'd="M8 1.4v1.7M8 12.9v1.7M14.6 8h-1.7M3.1 8H1.4M12.7 3.3l-1.2 1.2M4.5 11.5l-1.2 1.2'+
-      'M12.7 12.7l-1.2-1.2M4.5 4.5L3.3 3.3"/></svg>';
+    g.innerHTML='<svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">'+
+      '<path fill="currentColor" fill-rule="evenodd" d="M6.27 0.80 L9.73 0.80 L10.10 2.92 L10.10 2.92 L11.87 1.69 L14.31 4.13 L13.08 5.90 L13.08 5.90 L15.20 6.27 L15.20 9.73 L13.08 10.10 L13.08 10.10 L14.31 11.87 L11.87 14.31 L10.10 13.08 L10.10 13.08 L9.73 15.20 L6.27 15.20 L5.90 13.08 L5.90 13.08 L4.13 14.31 L1.69 11.87 L2.92 10.10 L2.92 10.10 L0.80 9.73 L0.80 6.27 L2.92 5.90 L2.92 5.90 L1.69 4.13 L4.13 1.69 L5.90 2.92 L5.90 2.92 Z M5.50 8.00 a2.50 2.50 0 1 0 5.00 0 a2.50 2.50 0 1 0 -5.00 0 Z"/></svg>';
     g.onclick=openAccount;
     const b=document.createElement("button");b.className="lo";b.textContent="Sign out";
     b.onclick=async()=>{try{await api("logout","POST",{});}catch(e){}
       state.who={authenticated:false,needs_setup:false,username:"",admin_username:state.who.admin_username};
       showLogin(false);};
-    f.appendChild(d);f.appendChild(g);f.appendChild(b);
+    /* name and gear share a row; Sign out keeps the full width below it */
+    const row=document.createElement("div");row.className="whorow";
+    row.appendChild(d);row.appendChild(g);
+    f.appendChild(row);f.appendChild(b);
   }else if(state.who.needs_setup){
     const d=document.createElement("div");d.className="who";
     d.innerHTML="<small>Security</small>no administrator";

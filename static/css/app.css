@@ -20,8 +20,14 @@ a{color:var(--line)}
 button{font:inherit;cursor:pointer}
 
 /* ---- sidebar ---- */
-#nav{width:232px;flex:0 0 232px;background:var(--petrol);color:#c8d4d2;display:flex;flex-direction:column}
-#nav .brand{display:flex;align-items:center;gap:9px;padding:16px 16px 13px;font:600 15px/1.3 var(--mono);color:#fff;letter-spacing:.02em;border-bottom:1px solid rgba(255,255,255,.08)}
+/* The sidebar stays put while the page scrolls: it is as tall as the window,
+   sticks to the top, and scrolls its own links if the menu outgrows it. Without
+   align-self it would stretch to the page height and sticky would do nothing. */
+#nav{width:232px;flex:0 0 232px;background:var(--petrol);color:#c8d4d2;
+  display:flex;flex-direction:column;position:sticky;top:0;align-self:flex-start;
+  height:100vh;height:100dvh}
+#navlinks{flex:1;min-height:0;overflow-y:auto}
+#nav .brand{flex:none;display:flex;align-items:center;gap:9px;padding:16px 16px 13px;font:600 15px/1.3 var(--mono);color:#fff;letter-spacing:.02em;border-bottom:1px solid rgba(255,255,255,.08)}
 #nav .brand img{width:26px;height:26px;flex:none;border-radius:6px}
 #nav .brand .brand2{font-weight:400;color:#8fb9b1;letter-spacing:.01em}
 #nav .brand small{display:block;font-weight:400;color:#7d918f;font-size:11px;margin-top:2px}
@@ -35,7 +41,10 @@ button{font:inherit;cursor:pointer}
 #nav a.item{display:block;padding:7px 16px;color:#c8d4d2;text-decoration:none;font-size:13px;border-left:3px solid transparent}
 #nav a.item:hover{background:var(--petrol-2)}
 #nav a.item.on{background:var(--petrol-2);color:#fff;border-left-color:var(--line)}
-#nav .foot{margin-top:auto;padding:12px 16px;border-top:1px solid rgba(255,255,255,.08)}
+/* The sidebar is its own scroll area: the links scroll, the account block stays
+   on screen. Otherwise signing out means scrolling to the end of a long menu. */
+#nav .foot{margin-top:auto;flex:none;padding:12px 16px;
+  border-top:1px solid rgba(255,255,255,.08);background:var(--petrol)}
 #nav .foot input{width:100%;background:#0f191e;border:1px solid #2c3e44;color:#dfe8e6;font:12px var(--mono);padding:6px 8px;border-radius:4px}
 #nav .foot label{font:10px var(--mono);letter-spacing:.1em;color:#7d918f;text-transform:uppercase;display:block;margin-bottom:4px}
 
@@ -146,7 +155,11 @@ pre{font:12px/1.5 var(--mono);background:#0f191e;color:#d5e2e0;padding:14px;bord
 
 @media (max-width:840px){
   body{flex-direction:column}
-  #nav{width:100%;flex:none}
+  /* Stacked on a narrow screen, so the sidebar is a header: full width, its own
+     height, and no sticking -- a full-height sticky column would leave no room
+     for the page. */
+  #nav{width:100%;flex:none;position:static;height:auto;align-self:auto}
+  #navlinks{overflow:visible;min-height:0}
   .frm{grid-template-columns:1fr}
   .frm label.fl{text-align:left;padding-top:0}
   #nodestrip{display:none}
@@ -164,6 +177,11 @@ th.sortable::after{content:"";position:absolute;right:6px;top:50%;margin-top:-2p
 th.sorted-asc::after{border-top-color:transparent;border-bottom-color:var(--line);margin-top:-6px}
 th.sorted-desc::after{border-top-color:var(--line)}
 
-#nav .foot .lo.gear{padding:5px 7px;line-height:0;flex:none}
-#nav .foot .lo.gear svg{display:block;opacity:.85}
-#nav .foot .lo.gear:hover svg{opacity:1}
+/* The gear sits next to the name, not as another full-width button: it is an
+   icon you reach for occasionally, so it stays quiet until hovered. */
+#nav .foot .whorow{display:flex;align-items:center;gap:8px}
+#nav .foot .whorow .who{flex:1;min-width:0}
+#nav .foot .lo.gear{margin-top:0;width:auto;flex:none;padding:6px;line-height:0;
+  background:transparent;border-color:transparent;color:#9db2ae}
+#nav .foot .lo.gear:hover{background:#0f191e;border-color:#2c3e44;color:#fff}
+#nav .foot .lo.gear svg{display:block}

@@ -8,4 +8,7 @@ __pycache__/
 /certs/
 config.json
 dist/
+tools/uitests/screenshot/*.png
+tools/uitests/screenshot/icon.svg
+tools/uitests/screenshot/nav.html
 venv/
