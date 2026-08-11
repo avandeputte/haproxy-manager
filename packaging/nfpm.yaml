@@ -70,8 +70,8 @@ overrides:
 contents:
   - src: ./app.py
     dst: /opt/haproxy-manager/app.py
-  - src: ./static/index.html
-    dst: /opt/haproxy-manager/static/index.html
+  - src: ./static
+    dst: /opt/haproxy-manager/static
   - src: ./VERSION
     dst: /opt/haproxy-manager/VERSION
   - src: ./install.sh

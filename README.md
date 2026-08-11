@@ -579,11 +579,17 @@ over Sync, or are re-issued.
   Until then only the calls that create it answer — everything else returns 401 —
   so a node waiting to be set up does not hand its configuration to whoever
   reaches it first.
-- **Every endpoint requires a session or the API key.** Of 58 routes exactly
+- **Every API endpoint requires a session or the API key.** Of 60 routes exactly
   three answer without either: `/api/login`, `/api/whoami` (which
   unauthenticated returns nothing but whether an administrator exists), and
   `/api/setup`, which refuses once an administrator exists. This is verified by
   a test that walks every route and checks the rest refuse an anonymous caller.
+  On a node with no administrator yet, `/api/setup/state` answers too, so the
+  browser can tell it must offer the setup wizard; it returns 401 the moment an
+  administrator exists.
+  The sign-in page and its icons are served without a session too, because the
+  page has to render before anyone can sign in; they come from a fixed list of
+  filenames, not from the directory.
 - **Put the UI behind TLS** (or an SSH tunnel / reverse proxy). Over plain HTTP
   both the password and the session cookie cross the network in the clear.
 - The service runs as **root** because it writes `/etc/haproxy`, `/etc/keepalived`

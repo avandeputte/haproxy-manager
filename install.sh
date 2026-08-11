@@ -327,6 +327,10 @@ fetch_individual_files() {
     mkdir -p "$TMPDIR_/src/static"
     fetch "$raw/app.py" "$TMPDIR_/src/app.py" || return 1
     fetch "$raw/static/index.html" "$TMPDIR_/src/static/index.html" || return 1
+    # Cosmetic, so a failure here must not stop an installation.
+    for asset in icon.svg logo.svg favicon.svg favicon.ico apple-touch-icon.png; do
+        fetch "$raw/static/$asset" "$TMPDIR_/src/static/$asset" || true
+    done
     fetch "$raw/VERSION" "$TMPDIR_/src/VERSION" || true       # optional
     fetch "$raw/install.sh" "$TMPDIR_/src/install.sh" || true  # optional
     [ -s "$TMPDIR_/src/app.py" ] && [ -s "$TMPDIR_/src/static/index.html" ] || return 1
@@ -447,7 +451,10 @@ install_app() {
     # work without fetching anything -- useful exactly when the network is the
     # problem.
     [ -f "$SRC/install.sh" ] && install -m 0755 "$SRC/install.sh" "$DEST/install.sh"
-    install -m 0644 "$SRC/static/index.html" "$DEST/static/index.html"
+    # Everything in static/, not just the page: it also carries the icons.
+    for f in "$SRC"/static/*; do
+        [ -f "$f" ] && install -m 0644 "$f" "$DEST/static/$(basename "$f")"
+    done
     # The app reads its own version from this file and compares it with GitHub.
     if [ -f "$SRC/VERSION" ]; then
         install -m 0644 "$SRC/VERSION" "$DEST/VERSION"

@@ -5601,9 +5601,30 @@ def api_import_config():
 # static
 # --------------------------------------------------------------------------
 
+# Flask's own static route is switched off (static_folder=None), so these are
+# the only files served from disk. An explicit list rather than the directory:
+# dropping something into static/ should never publish it by accident. They
+# answer without a session because the sign-in page itself shows the logo.
+STATIC_ASSETS = {"icon.svg", "logo.svg", "favicon.svg", "favicon.ico",
+                 "apple-touch-icon.png"}
+
+
 @app.get("/")
 def index():
     return send_from_directory(STATIC_DIR, "index.html")
+
+
+@app.get("/static/<name>")
+def static_asset(name):
+    if name not in STATIC_ASSETS:
+        abort(404)
+    return send_from_directory(STATIC_DIR, name, max_age=86400)
+
+
+@app.get("/favicon.ico")
+def favicon():
+    """Browsers ask for this whether or not the page links to it."""
+    return send_from_directory(STATIC_DIR, "favicon.ico", max_age=86400)
 
 
 def _cli(argv):

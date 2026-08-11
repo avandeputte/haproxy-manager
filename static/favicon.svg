@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64"
+     role="img" aria-label="haproxy-manager">
+  <title>haproxy-manager</title>
+  <!-- The same idea as icon.svg, redrawn for small sizes: two branches instead
+       of three, fatter strokes, bigger nodes and almost no corner radius, so it
+       still reads as one address fanning out at 16 pixels. -->
+  <rect width="64" height="64" rx="10" fill="#17242a"/>
+  <g fill="none" stroke="#3ecfa8" stroke-width="7" stroke-linecap="round">
+    <path d="M20 32 H30"/>
+    <path d="M30 32 C40 32 40 18 48 18"/>
+    <path d="M30 32 C40 32 40 46 48 46"/>
+  </g>
+  <circle cx="18" cy="32" r="9" fill="#f2f4f3"/>
+  <g fill="#3ecfa8">
+    <circle cx="48" cy="18" r="8"/>
+    <circle cx="48" cy="46" r="8"/>
+  </g>
+</svg>
