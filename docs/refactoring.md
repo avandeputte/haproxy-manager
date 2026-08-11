@@ -95,8 +95,22 @@ What the plan did not anticipate, and what it cost:
   which module scope cannot see, and three `let a=1,b=2` statements whose extra
   declarators my splitting script silently dropped.
 
-The tooling is in `tools/uitests/`; `module-graph.mjs` is what makes stage 2
-safe to attempt.
+**And one it shipped.** Splitting `main.js` into `shell.js` dropped an import,
+so `route()` — the function that renders every page — referred to an `E` it no
+longer had. Ten of twenty-two pages showed *"E is not defined"*. The lint that
+would have caught it had said so, in output I did not read.
+
+Two things came out of that. `tools/uitests/navigate.mjs` now visits every
+entry in the navigation and fails on any page that reports a name it does not
+have; against the broken build it fails ten of twenty-two, which is how the
+test was proved to work. And `undefined-names.mjs` was rewritten to scan
+properly rather than pattern-match — it had been drowning real findings in
+false ones from regex literals and `const a=1,b=2` statements, which is exactly
+why its output was easy to dismiss. It reports nothing now unless something is
+wrong, and it immediately found a second real bug: `certificates.js` called
+`renderEntity` without importing it.
+
+The tooling is in `tools/uitests/`; `run-all.sh` runs the four checks.
 
 The rest of this section is the plan as written.
 

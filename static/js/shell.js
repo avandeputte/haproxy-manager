@@ -8,8 +8,15 @@ import { $, api, btn, esc, showText } from "./core.js";
 import { refreshWho, showLogin } from "./auth.js";
 import { state } from "./state.js";
 
-let pages = {};                 /* key -> renderer, set by main.js at start-up */
+let pages = {};        /* "p:" pages, keyed by name */
+let render = {};       /* the generic renderers, and the entity definitions */
+
+/* main.js hands these over at start-up. Importing them here instead would put
+   the shell in a cycle with every page, and a cycle is how the first attempt
+   at this broke: core.js exports $ as a const, so whichever module evaluated
+   first hit its temporal dead zone. */
 export function setPages(map){ pages = map; }
+export function setRenderers(r){ render = r; }
 
 export const NAV=[
  ["","Overview",null],
@@ -99,10 +106,10 @@ export async function route(){
   const entry=NAV.find(x=>x[0]===key)||NAV[0];
   $("#pagetitle").textContent=entry[1];
   try{
-    if(key.startsWith("s:"))await renderSettings(key.slice(2));
+    if(key.startsWith("s:"))await render.settings(key.slice(2));
     else if(key.startsWith("p:"))await pages[key.slice(2)]();
-    else if(E[key])await renderEntity(key);
-    else await renderOverview();
+    else if(render.entities[key])await render.entity(key);
+    else await render.overview();
   }catch(e){
     $("#content").innerHTML='<div class="card"><div class="bd">'+esc(e.message)+"</div></div>";
   }

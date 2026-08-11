@@ -15,7 +15,7 @@ import { renderUpdates } from "./pages/updates.js";
 import { renderWatchdog } from "./pages/watchdog.js";
 import { renderWebui } from "./pages/webui.js";
 import { state } from "./state.js";
-import { boot, buildNav, doApply, route, setPages } from "./shell.js";
+import { boot, buildNav, doApply, route, setPages, setRenderers } from "./shell.js";
 
 const P={services:renderServices,stats:renderStats,backup:renderBackup,admin:renderAdmin,
          updates:renderUpdates,webui:renderWebui,cluster:renderCluster,logs:renderLogs,
@@ -24,6 +24,8 @@ const P={services:renderServices,stats:renderStats,backup:renderBackup,admin:ren
 /* Collapsed groups are remembered, so the nav stays how you left it. */
 
 setPages(P);
+setRenderers({entities:E, entity:renderEntity, settings:renderSettings,
+              overview:renderOverview});
 buildNav();
 $("#applybtn").onclick=doApply;
 window.addEventListener("hashchange",route);

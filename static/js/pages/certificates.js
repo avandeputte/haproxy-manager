@@ -1,5 +1,5 @@
 import { $, api, btn, closeDlg, esc, fieldRow, list, lists, openDlg, readForm, showText } from "../core.js";
-import { E } from "../entities.js";
+import { E, renderEntity } from "../entities.js";
 import { refreshStatus, route } from "../shell.js";
 import { state } from "../state.js";
 
