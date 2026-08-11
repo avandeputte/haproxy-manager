@@ -326,11 +326,19 @@ fetch_individual_files() {
     log "Falling back to fetching the individual files from raw.githubusercontent.com"
     mkdir -p "$TMPDIR_/src/static"
     fetch "$raw/app.py" "$TMPDIR_/src/app.py" || return 1
-    fetch "$raw/static/index.html" "$TMPDIR_/src/static/index.html" || return 1
-    # Cosmetic, so a failure here must not stop an installation.
-    for asset in icon.svg logo.svg favicon.svg favicon.ico apple-touch-icon.png; do
-        fetch "$raw/static/$asset" "$TMPDIR_/src/static/$asset" || true
-    done
+    # static/ is a tree of modules now, so the file list travels with it rather
+    # than being repeated here where it would rot.
+    fetch "$raw/static/FILES" "$TMPDIR_/src/static/FILES" || return 1
+    while IFS= read -r rel; do
+        [ -n "$rel" ] || continue
+        mkdir -p "$TMPDIR_/src/static/$(dirname "$rel")"
+        fetch "$raw/static/$rel" "$TMPDIR_/src/static/$rel" || {
+            case "$rel" in
+                *.js|index.html) return 1 ;;   # the UI does not work without these
+                *) : ;;                        # an icon can be missing
+            esac
+        }
+    done < "$TMPDIR_/src/static/FILES"
     fetch "$raw/VERSION" "$TMPDIR_/src/VERSION" || true       # optional
     fetch "$raw/install.sh" "$TMPDIR_/src/install.sh" || true  # optional
     [ -s "$TMPDIR_/src/app.py" ] && [ -s "$TMPDIR_/src/static/index.html" ] || return 1
@@ -451,10 +459,11 @@ install_app() {
     # work without fetching anything -- useful exactly when the network is the
     # problem.
     [ -f "$SRC/install.sh" ] && install -m 0755 "$SRC/install.sh" "$DEST/install.sh"
-    # Everything in static/, not just the page: it also carries the icons.
-    for f in "$SRC"/static/*; do
-        [ -f "$f" ] && install -m 0644 "$f" "$DEST/static/$(basename "$f")"
-    done
+    # The whole static tree: the page, its stylesheet, the JavaScript modules
+    # and the icons. Copied recursively -- it has subdirectories now.
+    (cd "$SRC/static" && find . -type f -print0 | while IFS= read -r -d "" f; do
+        install -D -m 0644 "$SRC/static/$f" "$DEST/static/$f"
+    done)
     # The app reads its own version from this file and compares it with GitHub.
     if [ -f "$SRC/VERSION" ]; then
         install -m 0644 "$SRC/VERSION" "$DEST/VERSION"

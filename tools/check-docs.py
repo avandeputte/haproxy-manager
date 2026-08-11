@@ -104,6 +104,17 @@ for name, text in DOCS.items():
         check(quoted == version, "%s names an old package file" % name,
               "says %s, VERSION is %s" % (quoted, version))
 
+# -- the static manifest ---------------------------------------------------
+# install.sh's offline fallback fetches exactly what static/FILES lists, so a
+# module missing from it would simply not be installed.
+listed = set((ROOT / "static" / "FILES").read_text().split())
+actual = {str(p.relative_to(ROOT / "static")) for p in (ROOT / "static").rglob("*")
+          if p.is_file() and p.name != "FILES"}
+for missing in sorted(actual - listed):
+    check(False, "a static file is missing from static/FILES", missing)
+for extra in sorted(listed - actual):
+    check(False, "static/FILES lists a file that is not there", extra)
+
 # -- claims the code has outgrown ------------------------------------------
 # The cluster was two nodes once. Wording that still says so is wrong, and
 # nothing else here would catch it: it is prose, not a name or a number.

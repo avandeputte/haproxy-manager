@@ -71,7 +71,34 @@ These shape the design more than taste does:
 4. **`app.py` is the entry point** named by the systemd unit, the packages, the
    Dockerfile and the docs. It should keep that name whatever moves out of it.
 
-## Stage 1 — split the front end
+## Stage 1 — split the front end — **done**
+
+Landed in 1.50.0. `index.html` went from 2,632 lines to 56: markup, a
+stylesheet link and one `<script type="module">`. The JavaScript is 19 modules
+under `static/js/`, the largest 393 lines.
+
+What the plan did not anticipate, and what it cost:
+
+- **Three files were needed that were not in the plan.** `state.js`, because a
+  module cannot assign to a binding it imported, so the six shared variables had
+  to become properties of one object. `shell.js`, because every page wanted
+  `route()` and `refreshStatus()` from `main.js` while `main.js` imports every
+  page — the shell now takes the page registry from `main.js` instead of
+  importing it. And `static/FILES`, a manifest, because the installer's offline
+  fallback fetches files by name and a list buried in a shell script would rot.
+- **An import cycle is not automatically harmless.** The plan said cycles are
+  fine for hoisted functions. True, but `core.js` exports `$` as a `const`, and
+  a cycle meant `main.js` evaluated first and hit the temporal dead zone. The
+  graph is acyclic now: `core.js` takes a handler from `auth.js` rather than
+  importing it.
+- **Two bugs the move exposed.** An inline `onclick="closeDlg()"` in the markup,
+  which module scope cannot see, and three `let a=1,b=2` statements whose extra
+  declarators my splitting script silently dropped.
+
+The tooling is in `tools/uitests/`; `module-graph.mjs` is what makes stage 2
+safe to attempt.
+
+The rest of this section is the plan as written.
 
 The bigger win, and the lower risk.
 

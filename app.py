@@ -5601,12 +5601,13 @@ def api_import_config():
 # static
 # --------------------------------------------------------------------------
 
-# Flask's own static route is switched off (static_folder=None), so these are
-# the only files served from disk. An explicit list rather than the directory:
-# dropping something into static/ should never publish it by accident. They
-# answer without a session because the sign-in page itself shows the logo.
-STATIC_ASSETS = {"icon.svg", "logo.svg", "favicon.svg", "favicon.ico",
-                 "apple-touch-icon.png"}
+# Flask's own static route is switched off (static_folder=None), so this is the
+# only way anything is served from disk. Allowed by extension rather than by a
+# list of names, now that the UI is a directory of modules -- send_from_directory
+# refuses to escape STATIC_DIR, so the extension is the whole policy. They answer
+# without a session because the sign-in page itself has to render before anyone
+# can sign in.
+STATIC_SUFFIXES = (".css", ".js", ".svg", ".png", ".ico", ".map", ".woff2")
 
 
 @app.get("/")
@@ -5614,9 +5615,9 @@ def index():
     return send_from_directory(STATIC_DIR, "index.html")
 
 
-@app.get("/static/<name>")
+@app.get("/static/<path:name>")
 def static_asset(name):
-    if name not in STATIC_ASSETS:
+    if not name.endswith(STATIC_SUFFIXES):
         abort(404)
     return send_from_directory(STATIC_DIR, name, max_age=86400)
 
