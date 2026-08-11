@@ -184,6 +184,21 @@ over HTTPS, or keep it on a trusted network.
 Because every node watches every other, a node that vanishes is reported by each
 of its peers.
 
+## Upgrades and the browser cache
+
+The page is served with `no-cache`, and everything it loads lives under a path
+that contains the version — `/static/v/1.51.0/js/main.js`. Those files are then
+cached for a year, which is safe because the URL changes whenever the version
+does.
+
+The version has to be in the *path* rather than a query string: each
+`import "./shell.js"` inside a module is its own request, resolved relative to
+the module that wrote it, so a version in the path is inherited by every import
+without touching any of them. After an upgrade a browser fetches the whole set
+fresh, and can never hold a mixture of old and new modules.
+
+If you put a caching proxy in front of the UI, let it honour those headers.
+
 ## Logs
 
 **System → Logs** merges four sources into one timeline: the UI's own log,

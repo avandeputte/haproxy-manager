@@ -104,6 +104,17 @@ for name, text in DOCS.items():
         check(quoted == version, "%s names an old package file" % name,
               "says %s, VERSION is %s" % (quoted, version))
 
+# -- cache busting ---------------------------------------------------------
+# Assets are cached for a year, which is only safe while their URL carries the
+# version. An unversioned stylesheet or module reference would be served stale
+# after an upgrade, and a page loading a mixture of old and new modules fails
+# in ways that look like nothing else.
+index = (ROOT / "static" / "index.html").read_text()
+for m in re.finditer(r'(?:href|src)="(/static/[^"]+\.(?:css|js))"', index):
+    check(m.group(1).startswith("/static/v/__VERSION__/"),
+          "an asset is referenced without the version in its path", m.group(1))
+check('__VERSION__' in index, "index.html has no version placeholder to substitute")
+
 # -- the static manifest ---------------------------------------------------
 # install.sh's offline fallback fetches exactly what static/FILES lists, so a
 # module missing from it would simply not be installed.

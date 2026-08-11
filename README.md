@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.50.1_all.deb
+sudo apt-get install -y ./haproxy-manager_1.51.0_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -581,7 +581,7 @@ over Sync, or are re-issued.
   Until then only the calls that create it answer — everything else returns 401 —
   so a node waiting to be set up does not hand its configuration to whoever
   reaches it first.
-- **Every API endpoint requires a session or the API key.** Of 60 routes exactly
+- **Every API endpoint requires a session or the API key.** Of 61 routes exactly
   three answer without either: `/api/login`, `/api/whoami` (which
   unauthenticated returns nothing but whether an administrator exists), and
   `/api/setup`, which refuses once an administrator exists. This is verified by
