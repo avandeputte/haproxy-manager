@@ -22,19 +22,12 @@ export const NAV=[
  ["","Overview",null],
  ["p:services","Services"],
  ["p:stats","Statistics"],
+ ["p:logs","Logs"],
  ["p:cluster","Cluster"],
  ["grp","CERTIFICATES"],
  ["acme/certificates","Certificates"],
  ["acme/accounts","ACME Accounts"],
  ["acme/challenges","Challenge Types"],
- ["grp","SYSTEM"],
- ["p:webui","Web UI access"],
- ["p:backup","Backup & Export"],
- ["p:admin","Administrator login"],
- ["p:watchdog","Watchdog"],
- ["p:notify","Notifications"],
- ["p:logs","Logs"],
- ["p:updates","Version & updates"],
  ["grp","ADVANCED · HAPROXY","collapse"],
  ["haproxy/frontends","Public Services"],
  ["haproxy/backends","Backend Pools"],
@@ -45,6 +38,15 @@ export const NAV=[
  ["s:haproxy-settings","Settings"],
  ["grp","ADVANCED · ACME","collapse"],
  ["s:acme-settings","Settings"],
+ /* Settings last: everything here is something you set once and revisit
+    rarely, unlike the pages above that you watch. */
+ ["grp","SETTINGS"],
+ ["p:webui","Web UI access"],
+ ["p:admin","Administrator login"],
+ ["p:watchdog","Watchdog"],
+ ["p:notify","Notifications"],
+ ["p:backup","Backup & Export"],
+ ["p:updates","Version & updates"],
 ];
 /* pages with a hand-written renderer (neither CRUD nor a settings form) */
 export function openGroups(){

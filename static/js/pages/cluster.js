@@ -311,7 +311,14 @@ export function keepalivedDiagCard(){
   card.innerHTML='<div class=hd><h2>This node right now</h2></div>';
   const bd=document.createElement("div");bd.className="bd";
   const d=state.kaDiag;
-  if(!d){bd.innerHTML='<p class=hint>Diagnostics are unavailable.</p>';card.appendChild(bd);return card;}
+  /* The endpoint answers {ok:false,error} when it cannot inspect the node, and
+     a card that assumes the full shape takes the whole Cluster page down with
+     it. Say what went wrong instead. */
+  if(!d||d.ok===false||!Array.isArray(d.vips)){
+    bd.innerHTML='<p class=hint>Diagnostics are unavailable'+
+      (d&&d.error?": "+esc(d.error):".")+'</p>';
+    card.appendChild(bd);return card;
+  }
 
   /* Name the fault outright rather than making it a reading exercise. */
   const problems=[];

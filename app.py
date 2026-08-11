@@ -1467,7 +1467,7 @@ def api_keepalived_status():
         "vips": vips, "vip_held": held,
         "vrrp_state": state,
         "validation": validation,
-        "log": log,
+        "log": journal,
     })
 
 
