@@ -8,6 +8,7 @@ Neither is obvious from reading the code, so it is pinned here.
 
     HAM_DATA_DIR=/tmp/x python3 tools/test-revision.py
 """
+import json
 import os
 import pathlib
 import sys
@@ -157,7 +158,8 @@ ok(shared_fingerprint(a) == shared_fingerprint(b),
 # certificate for its own host. Those have to stay with the node that made
 # them: shared, they travel to the others, which keep them and add their own,
 # and no two nodes ever hold the same configuration again.
-from ham.config import _migrate_webui_certs, WEBUI_NAME   # noqa: E402
+from ham.config import (_migrate_webui_certs, is_webui_cert,   # noqa: E402
+                        WEBUI_NAME)
 
 def damaged():
     return {
@@ -179,26 +181,19 @@ def damaged():
 cfg = damaged()
 _migrate_webui_certs(cfg)
 names = [c["name"] for c in cfg["acme"]["certificates"]]
-ok(names == ["shop", WEBUI_NAME], "the migration keeps ours and the ordinary ones: %s" % names)
-ok(cfg["acme"]["certificates"][1].get(LOCAL_ONLY) is True, "ours is marked as this node's")
-ok(cfg["acme"]["certificates"][0].get(LOCAL_ONLY) is None, "an ordinary certificate is untouched")
-ok(cfg["haproxy"]["frontends"][0]["certificates"] == ["c-mine"],
-   "and the listener no longer names what was removed")
+ok(len(names) == 4, "the migration removes no certificate: %s" % names)
+ok(all(c.get(LOCAL_ONLY) for c in cfg["acme"]["certificates"] if is_webui_cert(c)),
+   "every management UI certificate is marked as this node's")
+ok(cfg["acme"]["certificates"][0].get(LOCAL_ONLY) is None,
+   "an ordinary certificate is untouched")
+ok(cfg["haproxy"]["frontends"][0]["certificates"] == ["c-mine", "c-dup", "c-theirs"],
+   "and the listener still names everything it named before")
 
 cfg = damaged()
 _migrate_webui_certs(cfg)
 before = [dict(c) for c in cfg["acme"]["certificates"]]
 _migrate_webui_certs(cfg)
 ok(cfg["acme"]["certificates"] == before, "running it twice changes nothing")
-
-# A node that has not published its UI cannot tell whose certificate is whose,
-# so it must not throw any of them away.
-cfg = damaged()
-cfg["local"]["web_ui"] = {}
-cfg["cluster"]["ui_url"] = ""
-_migrate_webui_certs(cfg)
-ok(len(cfg["acme"]["certificates"]) == 3,
-   "with no UI address configured it drops only the duplicate")
 
 # -- the UI service's rules and conditions ---------------------------------
 # From a real three-node cluster, which reported:
@@ -262,38 +257,36 @@ ok("b-shop" not in found and "c-shop" not in found and "r-shop" not in found,
 _migrate_webui_objects(cfg)
 hp = cfg["haproxy"]
 ids = lambda coll: [x["id"] for x in hp[coll]]
-ok(ids("rules") == ["r-mine", "r-shop"], "the other nodes' rules are removed: %s" % ids("rules"))
-ok(ids("backends") == ["b-mine", "b-shop"], "and their pools: %s" % ids("backends"))
-ok(ids("servers") == ["s-mine", "s-shop"], "and their servers")
-ok(sorted(ids("conditions")) == ["c-mine", "c-shared", "c-shop"],
-   "and the conditions only they used: %s" % ids("conditions"))
-ok(hp["frontends"][0]["rules"] == ["r-mine", "r-shop"],
-   "the listener no longer names what was removed: %s" % hp["frontends"][0]["rules"])
-mine = [x for x in hp["rules"] if x["id"] == "r-mine"][0]
-ok(mine.get(LOCAL_ONLY) is True, "this node's own rule is marked as its own")
-ok([x for x in hp["conditions"] if x["id"] == "c-shared"][0].get(LOCAL_ONLY) is True,
-   "including the condition for the shared address, which every node has its own copy of")
-ok([x for x in hp["rules"] if x["id"] == "r-shop"][0].get(LOCAL_ONLY) is None,
-   "an ordinary rule is not marked")
+ok(ids("rules") == ["r-mine", "r-2", "r-4", "r-shop"],
+   "nothing is removed -- deleting from a configuration that is already "
+   "inconsistent is what took a rule out of the listener: %s" % ids("rules"))
+ok(hp["frontends"][0]["rules"] == ["r-mine", "r-2", "r-4", "r-shop"],
+   "the listener still names everything it named before")
+marked = {x["id"] for coll in ("rules", "backends", "conditions", "servers", "healthchecks")
+          for x in hp[coll] if x.get(LOCAL_ONLY)}
+ok({"r-mine", "r-2", "r-4", "b-mine", "b-2", "b-4"} <= marked,
+   "every UI object is marked, including the numbered ones")
+ok({"c-mine", "c-shared", "c-1", "c-shared-1", "c-3"} <= marked,
+   "and the conditions those rules test")
+ok("r-shop" not in marked and "b-shop" not in marked and "c-shop" not in marked,
+   "an ordinary service is left alone")
 
-# and with everything marked, the three nodes' listeners finally match
+# marking alone is what makes the nodes agree, which is the point
 a, b = three_node_mess(), three_node_mess()
-b["local"]["web_ui"]["rule_id"] = "r-2"      # a different node, a different rule
-b["haproxy"]["rules"][1]["id"] = "r-2"
+b["local"]["web_ui"]["rule_id"] = "r-2"
 _migrate_webui_objects(a); _migrate_webui_objects(b)
 sa = strip_local_only(a["haproxy"], local_only_ids(a))
 sb = strip_local_only(b["haproxy"], local_only_ids(b))
 ok(sa["frontends"] == sb["frontends"],
-   "two nodes that kept different UI rules now show the same listener")
-ok(sa["rules"] == sb["rules"], "and the same rules")
+   "two nodes with different UI rules now show the same listener")
+ok(sa["rules"] == sb["rules"] == [x for x in sa["rules"] if x["id"] == "r-shop"],
+   "and the same rules -- only the real service is left to compare")
 
 cfg = three_node_mess()
-cfg["local"]["web_ui"] = {"enabled": True, "url": "https://haproxy2.example.com"}
 _migrate_webui_objects(cfg)
-ok(len(cfg["haproxy"]["rules"]) == 4,
-   "a node that cannot tell which rule is its own removes nothing")
-ok(all(x.get(LOCAL_ONLY) for x in cfg["haproxy"]["rules"] if x["id"] != "r-shop"),
-   "but still marks them, so they stop travelling")
+before = json.dumps(cfg, sort_keys=True)
+_migrate_webui_objects(cfg)
+ok(json.dumps(cfg, sort_keys=True) == before, "running it twice changes nothing")
 
 print()
 print("the revision counts what it should" if not fails else "%d failed" % len(fails))

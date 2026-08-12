@@ -5,6 +5,7 @@ import copy
 import hashlib
 import json
 import os
+import shutil
 import uuid
 
 from .base import CONF_PATH, DATA_DIR, _lock, log
@@ -174,109 +175,79 @@ def _looks_configured(cfg):
 
 
 def _migrate_webui_certs(cfg):
-    """Take the management UI certificates out of the shared configuration.
+    """Take the management UI certificates out of what the nodes compare.
 
     Every node publishes its own UI under the same service name, so each makes
-    a certificate for its own host name. Those certificates were not marked as
-    belonging to the node, so they travelled with every sync: each node kept
-    the ones it was sent and made its own alongside, and no two nodes held the
-    same configuration again -- which the Cluster page now reports as a
-    disagreement that never settles.
+    a certificate for its own host name. Those were not marked as belonging to
+    the node, so they travelled with every sync: each node kept the ones it was
+    sent and made its own alongside, and no two nodes held the same
+    configuration again.
 
-    Ours is marked. Removed, along with the listener's reference to them, are
-    the ones that are plainly another node's -- named for this service but
-    covering a host this node does not answer for -- and any duplicate for
-    names a certificate here already covers.
+    Marked, not removed, for the same reason as the rest of the service: a
+    certificate this node no longer needs is clutter, and a certificate removed
+    by mistake is a listener that cannot serve. A certificate that merely
+    covers this host and was reused -- a wildcard -- is not the UI service's
+    and is left shared.
     """
-    ours = {h for h in ((cfg["local"].get("web_ui") or {}).get("url", ""),
-                        cfg["cluster"].get("ui_url", ""))
-            for h in [urlsplit(h if "//" in h else "//" + h).hostname or ""] if h}
-    keep, drop, seen = [], [], set()
+    marked = 0
     for cert in cfg["acme"]["certificates"]:
-        if not is_webui_cert(cert):
-            keep.append(cert)
-            continue
-        hosts = frozenset(d.strip().lower() for d in
-                          (cert.get("domains") or "").replace(",", " ").split())
-        if ours and not hosts & ours:
-            drop.append(cert)            # another node's, and unusable here
-        elif hosts in seen:
-            drop.append(cert)            # a duplicate for the same names
-        else:
-            seen.add(hosts)
-            cert[LOCAL_ONLY] = True      # ours, and it stays here
-            keep.append(cert)
-    if not drop:
-        return
-    cfg["acme"]["certificates"] = keep
-    gone = {c.get("id") for c in drop}
-    for fe in cfg["haproxy"]["frontends"]:
-        if isinstance(fe.get("certificates"), list):
-            fe["certificates"] = [x for x in fe["certificates"] if x not in gone]
-    log.info("removed %d management-UI certificate(s) that were duplicates or "
-             "belonged to another node: %s",
-             len(drop), ", ".join(c.get("name", "?") for c in drop))
+        if is_webui_cert(cert) and not cert.get(LOCAL_ONLY):
+            cert[LOCAL_ONLY] = True
+            marked += 1
+    if marked:
+        _say_once("webui-certs",
+                  "marked %d management UI certificate(s) as belonging to this node",
+                  marked)
 
 
 def _migrate_webui_objects(cfg):
-    """Take the UI service out of the shared configuration, and tidy what it left.
+    """Take the UI service out of what the nodes compare.
 
     Only the pool named exactly for the service, and one rule pointing at it,
     used to be marked as belonging to this node. Anything the wizard had to
     number -- "...-2", "...-4" -- was left shared, so it travelled to the other
     nodes; there it collided with theirs, which made another numbered copy, and
-    so on. Every node ended up holding a handful of other nodes' UI rules and
-    the listener that named them, which is why no two nodes agreed.
+    so on. Every node ended up holding a handful of other nodes' UI rules, and
+    the listener that named them differed everywhere.
 
-    Everything the service is built from is marked here. What is not this
-    node's is then removed: the rule this node actually uses is recorded in
-    local.web_ui.rule_id, and anything not reachable from it was only ever
-    another node's. Without that id nothing is removed -- a node that cannot
-    tell which is its own must not guess.
+    Marking is the whole fix: a marked object is not sent and not compared, so
+    the spiral stops and the nodes agree. Nothing is deleted. An earlier version
+    of this also removed what it judged to be another node's, which is a
+    judgement made from a configuration that is already inconsistent -- and
+    getting it wrong takes a rule out of the listener and answers the UI with
+    503. Objects left behind are inert: they route a host this node does not
+    answer for to this node's own UI. Untidy beats an outage, and the Services
+    page shows them for anyone who wants them gone.
     """
     ids = webui_object_ids(cfg)
     if not ids:
         return
     hp = cfg["haproxy"]
+    marked = 0
     for coll in ("servers", "backends", "conditions", "rules", "healthchecks"):
         for item in hp.get(coll) or []:
-            if item.get("id") in ids:
+            if item.get("id") in ids and not item.get(LOCAL_ONLY):
                 item[LOCAL_ONLY] = True
+                marked += 1
+    if marked:
+        _say_once("webui-objects",
+                  "marked %d web UI object(s) as belonging to this node, so they "
+                  "are no longer sent to the other nodes", marked)
 
-    mine = (cfg["local"].get("web_ui") or {}).get("rule_id") or ""
-    rule = next((r for r in hp.get("rules") or [] if r.get("id") == mine), None)
-    if not rule:
-        return
-    keep = {rule.get("id")} | set(rule.get("conditions") or [])
-    pool = next((b for b in hp.get("backends") or []
-                 if b.get("id") == rule.get("backend")), None)
-    if pool:
-        keep |= {pool.get("id")} | set(pool.get("servers") or [])
-        if pool.get("healthcheck"):
-            keep.add(pool["healthcheck"])
-    gone = {i for i in ids - keep if i}
-    if not gone:
-        return
-    names = []
-    for coll in ("servers", "backends", "conditions", "rules", "healthchecks"):
-        if not isinstance(hp.get(coll), list):
-            continue
-        names += [x.get("name", "?") for x in hp[coll] if x.get("id") in gone]
-        hp[coll] = [x for x in hp[coll] if x.get("id") not in gone]
-    for fe in hp.get("frontends") or []:
-        for key in ("rules", "certificates"):
-            if isinstance(fe.get(key), list):
-                fe[key] = [x for x in fe[key] if x not in gone]
-        if fe.get("default_backend") in gone:
-            fe["default_backend"] = ""
 
-    # Back to the names the service expects, so the next rebuild finds these
-    # rather than making yet another numbered copy beside them.
-    if pool:
-        pool["name"] = WEBUI_NAME
-    rule["name"] = "to-" + WEBUI_NAME
-    log.info("removed %d UI object(s) belonging to other nodes: %s",
-             len(gone), ", ".join(sorted(names)))
+# _migrate runs on every read, and a read happens on every request and every
+# loop. A migration that changes something in memory finds the same thing to
+# change on the next read, and would say so every time -- which turned one
+# upgrade into thousands of identical log lines a minute. Said once per
+# process instead; the change itself is cheap and idempotent.
+_said = set()
+
+
+def _say_once(key, msg, *args):
+    if key in _said:
+        return
+    _said.add(key)
+    log.info(msg, *args)
 
 
 def _migrate(cfg):
@@ -415,6 +386,16 @@ def save_config(cfg):
             meta["shared_fp"] = fp
             meta["shared_rev"] = int(meta.get("shared_rev") or 0) + 1
         DATA_DIR.mkdir(parents=True, exist_ok=True)
+        # The previous configuration, kept beside the current one. haproxy.cfg
+        # has had this from the start and config.json has not, which is the
+        # wrong way round: haproxy.cfg is generated and can be produced again,
+        # while this file is the only copy of everything. A migration that gets
+        # something wrong was, until now, not undoable.
+        if CONF_PATH.exists():
+            try:
+                shutil.copy2(CONF_PATH, str(CONF_PATH) + ".bak")
+            except OSError as e:
+                log.warning("could not keep a backup of %s: %s", CONF_PATH, e)
         tmp = CONF_PATH.with_suffix(".tmp")
         tmp.write_text(json.dumps(cfg, indent=2))
         # It holds the API key, the session secret, the peers' keys and the

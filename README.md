@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.68.0_all.deb
+sudo apt-get install -y ./haproxy-manager_1.68.1_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -586,6 +586,26 @@ a fork or a private mirror.
 > login — the same login that can run arbitrary commands through an ACME
 > automation — but if you would rather not have that path at all, leave the
 > button alone and update with `install.sh --update` over SSH.
+
+### If a configuration change goes wrong
+
+`config.json` is written by rename, so it is never half-written, and the
+previous version is kept beside it as `config.json.bak`. `haproxy.cfg` and
+`keepalived.conf` keep a `.bak` too, written before each Apply.
+
+The management UI is served by the app itself on port 8080, not through
+HAProxy, so **`http://<node-address>:8080` reaches it even when HAProxy is
+misrouting** — which is the way back in if a published address stops
+answering. To put HAProxy back the way it was:
+
+```bash
+cp /etc/haproxy/haproxy.cfg.bak /etc/haproxy/haproxy.cfg
+systemctl reload haproxy
+```
+
+If the UI's own service is what is broken, **Settings → Web UI access → Save**
+rebuilds it from the stored setting — the pool, the rule, the conditions for
+both its addresses and the certificate — and re-attaches it to the listener.
 
 ## Backup & Export
 
