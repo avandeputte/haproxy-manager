@@ -517,7 +517,7 @@ of its peers.
 ## Upgrades and the browser cache
 
 The page is served with `no-cache`, and everything it loads lives under a path
-that contains the version — `/static/v/1.68.2/js/main.js`. Those files are then
+that contains the version — `/static/v/1.69.0/js/main.js`. Those files are then
 cached for a year, which is safe because the URL changes whenever the version
 does.
 
@@ -584,13 +584,10 @@ configuration travels to the other nodes, where it collides with theirs; the
 wizard then makes a numbered copy, which travels in turn, and the cluster never
 agrees with itself again.
 
-The objects are found from the object graph rather than by name, so the
-numbered copies are covered too. Upgrading marks them and nothing else: marking
-is what stops them travelling, and a marked object is not compared, so the
-nodes agree. Nothing is deleted. Objects a node was only ever sent are left in
-place — they route a host that node does not answer for to that node's own UI,
-which is untidy rather than harmful, and the Services page shows them for
-anyone who wants them gone.
+The objects are found from the object graph rather than by name, so the copies
+the wizard had to number are covered too. They are marked when the service is
+built, which is every time Web UI access is saved and every time a
+configuration arrives from another node.
 
 ## Environment variables
 

@@ -1,12 +1,10 @@
 """The configuration store: defaults, migrations, atomic save."""
 
-from urllib.parse import urlsplit
 import copy
 import hashlib
 import json
 import os
 import shutil
-import uuid
 
 from .base import CONF_PATH, DATA_DIR, _lock, log
 
@@ -129,10 +127,6 @@ DEFAULT_CONFIG = {
             # prevent, and it only ever does anything once peers are added.
             # An existing installation keeps whatever it was set to.
             "auto_sync": True,
-            # Legacy single-peer fields, migrated into "peers" on load.
-            "peer_url": "",
-            "peer_api_key": "",
-            "verify_tls": False,
         },
     },
     "_meta": {"applied_hash": ""},
@@ -157,129 +151,6 @@ CLUSTER_KEYS = ("vrid", "vips", "auth_pass", "advert_int", "state",
                 "nopreempt", "track_haproxy", "track_mode", "custom")
 
 
-def _looks_configured(cfg):
-    """Has this node been set up already, by any route?
-
-    The setup wizard records a flag, but every install that predates it has
-    none -- and a node that was configured by hand, or that received its
-    configuration from a peer, must not be greeted as if it were brand new.
-    """
-    hp = cfg["haproxy"]
-    return bool(
-        cfg["local"]["sync"].get("peers")
-        or (cfg["cluster"].get("vips") or "").strip()
-        or cfg["local"]["keepalived"].get("enabled")
-        or hp["frontends"] or hp["backends"] or hp["servers"]
-        or cfg["acme"]["certificates"] or cfg["acme"]["accounts"]
-    )
-
-
-def _migrate_webui_certs(cfg):
-    """Take the management UI certificates out of what the nodes compare.
-
-    Every node publishes its own UI under the same service name, so each makes
-    a certificate for its own host name. Those were not marked as belonging to
-    the node, so they travelled with every sync: each node kept the ones it was
-    sent and made its own alongside, and no two nodes held the same
-    configuration again.
-
-    Marked, not removed, for the same reason as the rest of the service: a
-    certificate this node no longer needs is clutter, and a certificate removed
-    by mistake is a listener that cannot serve. A certificate that merely
-    covers this host and was reused -- a wildcard -- is not the UI service's
-    and is left shared.
-    """
-    marked = 0
-    for cert in cfg["acme"]["certificates"]:
-        if is_webui_cert(cert) and not cert.get(LOCAL_ONLY):
-            cert[LOCAL_ONLY] = True
-            marked += 1
-    if marked:
-        _say_once("webui-certs",
-                  "marked %d management UI certificate(s) as belonging to this node",
-                  marked)
-
-
-def _migrate_webui_objects(cfg):
-    """Take the UI service out of what the nodes compare.
-
-    Only the pool named exactly for the service, and one rule pointing at it,
-    used to be marked as belonging to this node. Anything the wizard had to
-    number -- "...-2", "...-4" -- was left shared, so it travelled to the other
-    nodes; there it collided with theirs, which made another numbered copy, and
-    so on. Every node ended up holding a handful of other nodes' UI rules, and
-    the listener that named them differed everywhere.
-
-    Marking is the whole fix: a marked object is not sent and not compared, so
-    the spiral stops and the nodes agree. Nothing is deleted. An earlier version
-    of this also removed what it judged to be another node's, which is a
-    judgement made from a configuration that is already inconsistent -- and
-    getting it wrong takes a rule out of the listener and answers the UI with
-    503. Objects left behind are inert: they route a host this node does not
-    answer for to this node's own UI. Untidy beats an outage, and the Services
-    page shows them for anyone who wants them gone.
-    """
-    ids = webui_object_ids(cfg)
-    if not ids:
-        return
-    hp = cfg["haproxy"]
-    marked = 0
-    for coll in ("servers", "backends", "conditions", "rules", "healthchecks"):
-        for item in hp.get(coll) or []:
-            if item.get("id") in ids and not item.get(LOCAL_ONLY):
-                item[LOCAL_ONLY] = True
-                marked += 1
-    if marked:
-        _say_once("webui-objects",
-                  "marked %d web UI object(s) as belonging to this node, so they "
-                  "are no longer sent to the other nodes", marked)
-
-
-# _migrate runs on every read, and a read happens on every request and every
-# loop. A migration that changes something in memory finds the same thing to
-# change on the next read, and would say so every time -- which turned one
-# upgrade into thousands of identical log lines a minute. Said once per
-# process instead; the change itself is cheap and idempotent.
-_said = set()
-
-
-def _say_once(key, msg, *args):
-    if key in _said:
-        return
-    _said.add(key)
-    log.info(msg, *args)
-
-
-def _migrate(cfg):
-    """Bring an older config forward. Idempotent; persisted on the next save."""
-    if not cfg["_meta"].get("setup_complete") and _looks_configured(cfg):
-        cfg["_meta"]["setup_complete"] = True
-    # A passive-node unlock is per session, so any copy sitting in the stored
-    # configuration is stale by definition and is dropped.
-    cfg["local"].pop("allow_edit_when_passive", None)
-    _migrate_webui_objects(cfg)
-    _migrate_webui_certs(cfg)
-    # VRRP settings that must match across nodes moved from local.keepalived
-    # into the shared cluster section.
-    k, cl = cfg["local"]["keepalived"], cfg["cluster"]
-    if not cl.get("vips") and k.get("vips"):
-        for key in CLUSTER_KEYS:
-            if key in k:
-                cl[key] = k[key]
-
-    s = cfg["local"]["sync"]
-    if s.get("peer_url") and not s.get("peers"):
-        s["peers"] = [{
-            "id": str(uuid.uuid4()),
-            "name": urlsplit(s["peer_url"]).hostname or "peer",
-            "url": s["peer_url"].rstrip("/"),
-            "api_key": s.get("peer_api_key", ""),
-            "verify_tls": bool(s.get("verify_tls")),
-            "enabled": True,
-        }]
-    return cfg
-
-
 def load_config():
     """Read the configuration. Deliberately does NOT take _lock.
 
@@ -297,7 +168,7 @@ def load_config():
             cfg = json.loads(CONF_PATH.read_text())
         except (ValueError, OSError):
             cfg = {}
-    return _migrate(_merge_defaults(cfg, DEFAULT_CONFIG))
+    return _merge_defaults(cfg, DEFAULT_CONFIG)
 
 
 def shared_view(cfg):

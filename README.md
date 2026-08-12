@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.68.2_all.deb
+sudo apt-get install -y ./haproxy-manager_1.69.0_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -200,9 +200,7 @@ renewal happens on its own.)
   written, HAProxy is reloaded so it actually serves it — it keeps certificates
   in memory, so a new file changes nothing until it reloads — and the PEM is
   pushed to every other node, so a failover serves the current certificate
-  rather than the one that node last saw. There is nothing to configure: the
-  Automations page is gone, and any automations in an existing configuration are
-  ignored.
+  rather than the one that node last saw. There is nothing to configure.
 - **ACME** issuance/renewal shells out to [`acme.sh`](https://github.com/acmesh-official/acme.sh).
   Certificates are written as combined `fullchain + key` PEMs into the HAProxy
   certificate directory (what HAProxy's `crt` expects). HAProxy is then reloaded

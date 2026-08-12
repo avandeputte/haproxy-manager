@@ -57,7 +57,6 @@ def push_admin(cfg):
                  "error": "python3-requests is not installed on this node"}
                 for p in peers]
     admin = dict(cfg["local"].get("admin") or {})
-    admin.pop("must_change", None)
     out = []
     for peer in peers:
         url = (peer.get("url") or "").rstrip("/")

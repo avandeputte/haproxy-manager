@@ -153,140 +153,79 @@ b["acme"] = {k: (list(v) if isinstance(v, list) else v) for k, v in a["acme"].it
 ok(shared_fingerprint(a) == shared_fingerprint(b),
    "two nodes that differ only in node-local ways hold the same fingerprint")
 
-# -- the management UI certificates ----------------------------------------
-# Each node publishes its own UI under the same service name, so each makes a
-# certificate for its own host. Those have to stay with the node that made
-# them: shared, they travel to the others, which keep them and add their own,
-# and no two nodes ever hold the same configuration again.
-from ham.config import (_migrate_webui_certs, is_webui_cert,   # noqa: E402
-                        WEBUI_NAME)
-
-def damaged():
-    return {
-        "local": {"web_ui": {"enabled": True, "url": "https://proxy2.example.com"}},
-        "cluster": {"ui_url": "https://proxy.example.com"},
-        "haproxy": {"frontends": [{"id": "fe1", "name": "https-443",
-                                   "certificates": ["c-mine", "c-dup", "c-theirs"]}]},
-        "acme": {"certificates": [
-            {"id": "c-shop", "name": "shop", "domains": "shop.example.com"},
-            {"id": "c-mine", "name": WEBUI_NAME,
-             "domains": "proxy2.example.com proxy.example.com"},
-            {"id": "c-dup", "name": WEBUI_NAME + "-2",
-             "domains": "proxy2.example.com proxy.example.com"},
-            {"id": "c-theirs", "name": WEBUI_NAME + "-3",
-             "domains": "proxy1.example.com"},
-        ]},
-    }
-
-cfg = damaged()
-_migrate_webui_certs(cfg)
-names = [c["name"] for c in cfg["acme"]["certificates"]]
-ok(len(names) == 4, "the migration removes no certificate: %s" % names)
-ok(all(c.get(LOCAL_ONLY) for c in cfg["acme"]["certificates"] if is_webui_cert(c)),
-   "every management UI certificate is marked as this node's")
-ok(cfg["acme"]["certificates"][0].get(LOCAL_ONLY) is None,
-   "an ordinary certificate is untouched")
-ok(cfg["haproxy"]["frontends"][0]["certificates"] == ["c-mine", "c-dup", "c-theirs"],
-   "and the listener still names everything it named before")
-
-cfg = damaged()
-_migrate_webui_certs(cfg)
-before = [dict(c) for c in cfg["acme"]["certificates"]]
-_migrate_webui_certs(cfg)
-ok(cfg["acme"]["certificates"] == before, "running it twice changes nothing")
-
-# -- the UI service's rules and conditions ---------------------------------
-# From a real three-node cluster, which reported:
-#   haproxy.conditions  host-proxy                only on haproxy1, haproxy3
-#   haproxy.frontends   https-443                 different contents everywhere
-#   haproxy.rules       to-haproxy-manager-ui-2   only on haproxy1, haproxy3
-#   haproxy.rules       to-haproxy-manager-ui-4   only on haproxy3
-# Only the pool named exactly for the service was marked as node-local, so
-# every numbered copy travelled, collided, and made more of itself.
-from ham.config import _migrate_webui_objects, webui_object_ids   # noqa: E402
+# -- the UI service stays with the node that made it -----------------------
+# Every node publishes its own UI under the same service name, so each makes a
+# pool, a rule, the conditions for both its addresses and a certificate for its
+# own host. Anything of that sort left in the shared configuration travels to
+# the other nodes, collides with theirs, and produces a numbered copy that
+# travels in turn -- which is how a cluster stops agreeing with itself.
+from ham.config import webui_object_ids, is_webui_cert, WEBUI_NAME   # noqa: E402
 
 
-def three_node_mess():
-    """One node's configuration after the others' UI objects have arrived."""
+def with_ui_service():
+    """A node holding its own UI service and two numbered copies from others."""
     return {
         "local": {"web_ui": {"enabled": True, "url": "https://haproxy2.example.com",
                              "rule_id": "r-mine"}},
         "cluster": {"ui_url": "https://proxy.example.com"},
-        "acme": {"certificates": []},
+        "acme": {"certificates": [
+            {"id": "c-shop", "name": "shop", "domains": "shop.example.com"},
+            {"id": "c-mine", "name": WEBUI_NAME, "domains": "haproxy2.example.com"},
+            {"id": "c-2", "name": WEBUI_NAME + "-2", "domains": "haproxy1.example.com"}]},
         "haproxy": {
             "frontends": [{"id": "fe", "name": "https-443",
-                           "rules": ["r-mine", "r-2", "r-4", "r-shop"],
-                           "certificates": []}],
+                           "rules": ["r-mine", "r-2", "r-shop"], "certificates": []}],
             "backends": [
                 {"id": "b-mine", "name": WEBUI_NAME, "servers": ["s-mine"],
                  "healthcheck": "h-mine"},
                 {"id": "b-2", "name": WEBUI_NAME + "-2", "servers": ["s-2"]},
-                {"id": "b-4", "name": WEBUI_NAME + "-4", "servers": ["s-4"]},
-                {"id": "b-shop", "name": "shop", "servers": ["s-shop"]},
-            ],
+                {"id": "b-shop", "name": "shop", "servers": ["s-shop"]}],
             "servers": [{"id": "s-mine", "name": "ui"}, {"id": "s-2", "name": "ui-2"},
-                        {"id": "s-4", "name": "ui-4"}, {"id": "s-shop", "name": "web1"}],
+                        {"id": "s-shop", "name": "web1"}],
             "healthchecks": [{"id": "h-mine", "name": "ui-check"}],
             "rules": [
                 {"id": "r-mine", "name": "to-" + WEBUI_NAME, "backend": "b-mine",
-                 "conditions": ["c-mine", "c-shared"]},
+                 "conditions": ["c-host-mine", "c-host-shared"]},
                 {"id": "r-2", "name": "to-" + WEBUI_NAME + "-2", "backend": "b-2",
-                 "conditions": ["c-1", "c-shared-1"]},
-                {"id": "r-4", "name": "to-" + WEBUI_NAME + "-4", "backend": "b-4",
-                 "conditions": ["c-3"]},
+                 "conditions": ["c-host-1", "c-host-shared-1"]},
                 {"id": "r-shop", "name": "to-shop", "backend": "b-shop",
-                 "conditions": ["c-shop"]},
-            ],
-            "conditions": [{"id": "c-mine", "name": "host-haproxy2"},
-                           {"id": "c-shared", "name": "host-proxy"},
-                           {"id": "c-1", "name": "host-haproxy1"},
-                           {"id": "c-shared-1", "name": "host-proxy"},
-                           {"id": "c-3", "name": "host-haproxy3"},
-                           {"id": "c-shop", "name": "host-shop"}],
-        },
+                 "conditions": ["c-host-shop"]}],
+            "conditions": [{"id": "c-host-mine", "name": "host-haproxy2"},
+                           {"id": "c-host-shared", "name": "host-proxy"},
+                           {"id": "c-host-1", "name": "host-haproxy1"},
+                           {"id": "c-host-shared-1", "name": "host-proxy"},
+                           {"id": "c-host-shop", "name": "host-shop"}]},
     }
 
 
-cfg = three_node_mess()
+cfg = with_ui_service()
 found = webui_object_ids(cfg)
-ok("r-2" in found and "r-4" in found, "the numbered rules are recognised as the UI service's")
-ok("c-1" in found and "c-shared-1" in found, "and so are the conditions they test")
-ok("b-shop" not in found and "c-shop" not in found and "r-shop" not in found,
+ok({"r-mine", "r-2", "b-mine", "b-2"} <= found,
+   "the numbered copies are recognised as the UI service's, not only the plain one")
+ok({"c-host-shared", "c-host-shared-1"} <= found,
+   "including each node's own copy of the shared-address condition")
+ok(not {"r-shop", "b-shop", "c-host-shop", "s-shop"} & found,
    "an ordinary service is left alone")
+ok(is_webui_cert(cfg["acme"]["certificates"][1]) and
+   is_webui_cert(cfg["acme"]["certificates"][2]) and
+   not is_webui_cert(cfg["acme"]["certificates"][0]),
+   "and the certificates the service made, numbered or not")
 
-_migrate_webui_objects(cfg)
-hp = cfg["haproxy"]
-ids = lambda coll: [x["id"] for x in hp[coll]]
-ok(ids("rules") == ["r-mine", "r-2", "r-4", "r-shop"],
-   "nothing is removed -- deleting from a configuration that is already "
-   "inconsistent is what took a rule out of the listener: %s" % ids("rules"))
-ok(hp["frontends"][0]["rules"] == ["r-mine", "r-2", "r-4", "r-shop"],
-   "the listener still names everything it named before")
-marked = {x["id"] for coll in ("rules", "backends", "conditions", "servers", "healthchecks")
-          for x in hp[coll] if x.get(LOCAL_ONLY)}
-ok({"r-mine", "r-2", "r-4", "b-mine", "b-2", "b-4"} <= marked,
-   "every UI object is marked, including the numbered ones")
-ok({"c-mine", "c-shared", "c-1", "c-shared-1", "c-3"} <= marked,
-   "and the conditions those rules test")
-ok("r-shop" not in marked and "b-shop" not in marked and "c-shop" not in marked,
-   "an ordinary service is left alone")
-
-# marking alone is what makes the nodes agree, which is the point
-a, b = three_node_mess(), three_node_mess()
-b["local"]["web_ui"]["rule_id"] = "r-2"
-_migrate_webui_objects(a); _migrate_webui_objects(b)
-sa = strip_local_only(a["haproxy"], local_only_ids(a))
-sb = strip_local_only(b["haproxy"], local_only_ids(b))
-ok(sa["frontends"] == sb["frontends"],
-   "two nodes with different UI rules now show the same listener")
-ok(sa["rules"] == sb["rules"] == [x for x in sa["rules"] if x["id"] == "r-shop"],
-   "and the same rules -- only the real service is left to compare")
-
-cfg = three_node_mess()
-_migrate_webui_objects(cfg)
-before = json.dumps(cfg, sort_keys=True)
-_migrate_webui_objects(cfg)
-ok(json.dumps(cfg, sort_keys=True) == before, "running it twice changes nothing")
+# marking is the whole mechanism: a marked object is neither sent nor compared
+for coll in ("servers", "backends", "conditions", "rules", "healthchecks"):
+    for item in cfg["haproxy"][coll]:
+        if item["id"] in found:
+            item[LOCAL_ONLY] = True
+for cert in cfg["acme"]["certificates"]:
+    if is_webui_cert(cert):
+        cert[LOCAL_ONLY] = True
+view = shared_view(cfg)
+ok([r["id"] for r in view["haproxy"]["rules"]] == ["r-shop"],
+   "once marked, only the real service is left to compare")
+ok(view["haproxy"]["frontends"][0]["rules"] == ["r-shop"],
+   "and the listener stops naming what belongs to a node")
+ok([c["id"] for c in view["acme"]["certificates"]] == ["c-shop"],
+   "the same for the certificates")
 
 print()
 print("the revision counts what it should" if not fails else "%d failed" % len(fails))

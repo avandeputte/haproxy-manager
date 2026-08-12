@@ -118,12 +118,8 @@ def keep_local_only(mine, incoming, local_ids=None):
 
 def _webui_setting(cfg):
     """Node-local: each node publishes its own name for its own UI."""
-    old = (cfg["haproxy"]["settings"].pop("web_ui", None) or {})   # migrate off the shared section
-    cur = cfg["local"].setdefault(
+    return cfg["local"].setdefault(
         "web_ui", {"enabled": False, "url": "", "certificate": "auto", "rule_id": ""})
-    for k, v in old.items():
-        cur.setdefault(k, v)
-    return cur
 
 
 @app.get("/api/webui")
