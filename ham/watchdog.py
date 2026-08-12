@@ -17,7 +17,7 @@ from .base import (CLUSTER_POLL_SECONDS, HAPROXY_CFG, KEEPALIVED_CFG, PORT,
     STATS_SOCK, WATCHDOG_PROBE_TIMEOUT, WATCHDOG_SELF_TIMEOUT, _lock, app, log)
 from .config import load_config, save_config
 from .util import run
-from . import cluster, notify, sync, vrrp
+from . import apply, cluster, notify, sync, vrrp, webui
 
 #
 # `systemctl is-active` answers "is the process there", which is not the
@@ -322,6 +322,46 @@ def sd_notify(message):
         return False
 
 
+_webui_restored_at = [0.0]
+
+
+def _restore_webui_if_lost():
+    """Put the management UI back when it stops answering on a name it should.
+
+    The service is made of ordinary objects and anything that edits the
+    configuration can change them. Losing a host rule takes the node off that
+    address with nothing to see: the settings still say what was configured.
+
+    Rebuilt at most twice an hour. If it goes again inside that, something is
+    actively removing it and rebuilding on a loop would reload HAProxy every
+    round while hiding the cause -- so it is reported and left alone.
+    """
+    cfg = load_config()
+    missing = webui.webui_missing_hosts(cfg)
+    if not missing:
+        return
+    if time.time() - _webui_restored_at[0] < 1800:
+        log.error("the management UI is not answering for %s again, %d seconds after it "
+                  "was put back -- something is removing it, so it is left as it is",
+                  ", ".join(missing), int(time.time() - _webui_restored_at[0]))
+        return
+    with _lock:
+        cfg = load_config()
+        put_back = webui.restore_webui(cfg)
+        if not put_back:
+            return
+        save_config(cfg)
+    _webui_restored_at[0] = time.time()
+    notify.notify("webui", "The management UI stopped answering on %s" % ", ".join(put_back),
+                  "%s answers for that address again. It is built from ordinary HAProxy "
+                  "objects, and something editing the configuration removed one of them; "
+                  "the service has been rebuilt and applied."
+                  % socket.gethostname(), "warning", cfg)
+    res = apply.do_apply(load_config())
+    log.warning("management UI restored for %s; apply: %s",
+                ", ".join(put_back), "ok" if res.get("ok") else res.get("error"))
+
+
 def _watchdog_loop():
     """Supervise the services, and let systemd supervise us.
 
@@ -377,6 +417,10 @@ def _watchdog_loop():
                 watchdog_round(cfg)
             except Exception:
                 log.exception("watchdog: the round failed")
+            try:
+                _restore_webui_if_lost()
+            except Exception:
+                log.exception("watchdog: checking the management UI service failed")
         else:
             _watchdog["running"] = False
 

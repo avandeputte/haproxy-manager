@@ -347,7 +347,12 @@ publishes this UI as a normal service with a certificate, so you stop using
 plain HTTP.
 
 The page says which names this node **actually answers for**, read from the
-objects rather than from the setting that made them. Those come apart — a name
+objects rather than from the setting that made them. The watchdog checks the
+same thing every round: if a configured address stops being routed, it rebuilds
+the service, applies, and says so in the log and by notification. It does that
+at most twice an hour — if the address goes again inside that, something is
+actively removing it, and rebuilding on a loop would reload HAProxy every round
+while hiding the cause, so it reports and leaves it alone. Those come apart — a name
 that was never published, or one that stopped being — and when they do, the
 form still shows the address that was typed while the node no longer routes it.
 A name listed as not routed here is put back by pressing Save.
@@ -545,7 +550,7 @@ of its peers.
 ## Upgrades and the browser cache
 
 The page is served with `no-cache`, and everything it loads lives under a path
-that contains the version — `/static/v/1.73.1/js/main.js`. Those files are then
+that contains the version — `/static/v/1.74.0/js/main.js`. Those files are then
 cached for a year, which is safe because the URL changes whenever the version
 does.
 

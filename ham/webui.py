@@ -5,7 +5,7 @@ from flask import jsonify
 from flask import request
 import copy
 
-from .base import LISTEN, PORT, _lock, app
+from .base import LISTEN, PORT, _lock, app, log
 from .config import LOCAL_ONLY, WEBUI_NAME, is_webui_cert, load_config, save_config, webui_object_ids
 from .util import _by_id, cert_details, cert_path
 from . import apply, dnsapi, wizard
@@ -138,6 +138,53 @@ def current_webui_hosts(cfg):
             if c.get("type") == "host_matches" and c.get("value"):
                 out.add(c["value"].strip().lower())
     return out
+
+
+def webui_missing_hosts(cfg):
+    """Addresses this node is configured to answer for and currently does not."""
+    s = cfg["local"].get("web_ui") or {}
+    if not (s.get("enabled") and s.get("url")):
+        return []
+    want = []
+    for u in (s.get("url"), (cfg.get("cluster") or {}).get("ui_url")):
+        pu, err = wizard._split_url(u, "x", default_scheme="https", allow=("http", "https"))
+        if not err and pu.get("host"):
+            want.append(pu["host"].lower())
+    have = current_webui_hosts(cfg)
+    return [h for h in want if h not in have]
+
+
+def restore_webui(cfg):
+    """Rebuild the UI service when an address it should answer for is not routed.
+
+    The service is made of ordinary objects, and ordinary objects can be
+    changed by anything that edits the configuration. When one of its host
+    rules goes missing the symptom is that the node stops answering on that
+    name -- with nothing to see, because every page still says what it was
+    configured to be.
+
+    Rebuilding is exactly what pressing Save on Web UI access does, so this
+    cannot do anything that was not already a supported action. It returns the
+    addresses it put back.
+    """
+    missing = webui_missing_hosts(cfg)
+    if not missing:
+        return []
+    s = cfg["local"].get("web_ui") or {}
+    pub, err = wizard._split_url(s.get("url"), "x", default_scheme="https",
+                                 allow=("http", "https"))
+    if err:
+        return []
+    mode = s.get("certificate", "auto")
+    build_webui(cfg, pub, "auto" if mode == "new" else mode, True)
+    still = webui_missing_hosts(cfg)
+    if still:
+        log.error("rebuilt the management UI service but %s is still not routed here; "
+                  "something else is taking it out", ", ".join(still))
+        return []
+    log.warning("the management UI had stopped answering for %s -- rebuilt it",
+                ", ".join(missing))
+    return missing
 
 
 @app.get("/api/webui")

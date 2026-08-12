@@ -18,6 +18,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 os.environ.setdefault("HAM_DATA_DIR", tempfile.mkdtemp(prefix="ham-rev-"))
 os.environ["HAM_DRY_RUN"] = "1"
 
+import ham   # noqa: E402
+from ham import wizard   # noqa: E402
 from ham.config import (load_config, save_config, shared_fingerprint,   # noqa: E402
                         shared_view, strip_local_only, local_only_ids, LOCAL_ONLY,
                         WEBUI_NAME)
@@ -307,6 +309,53 @@ broken["haproxy"]["rules"][1]["conditions"] = ["c-not-here"]
 found = shared_dangling(shared_view(broken))
 ok(len(found) == 1 and "c-not-here" in found[0],
    "a reference to something absent is reported: %s" % found)
+
+# -- the management UI puts itself back ------------------------------------
+# The service is built from ordinary objects, and anything that edits the
+# configuration can change them. Losing one host rule takes the node off that
+# address while every page still shows what was configured -- so it is checked
+# against what is actually routed, and rebuilt when they disagree.
+from ham import webui   # noqa: E402
+
+with ham.app.test_request_context("/"):
+    cfg = load_config()
+    cfg["cluster"]["ui_url"] = "https://proxy.example.com"
+    cfg["local"]["web_ui"] = {"enabled": True, "url": "https://proxy1.example.com",
+                              "certificate": "none", "rule_id": ""}
+    pub, _ = wizard._split_url("https://proxy1.example.com", "u",
+                               default_scheme="https", allow=("http", "https"))
+    webui.build_webui(cfg, pub, "none", True)
+    save_config(cfg)
+    ok(webui.webui_missing_hosts(load_config()) == [], "with both names routed, nothing is missing")
+
+    cfg = load_config()
+    hp = cfg["haproxy"]
+    gone = {c["id"] for c in hp["conditions"] if c.get("value") == "proxy1.example.com"}
+    hp["conditions"] = [c for c in hp["conditions"] if c["id"] not in gone]
+    for r in hp["rules"]:
+        r["conditions"] = [x for x in (r.get("conditions") or []) if x not in gone]
+    save_config(cfg)
+    cfg = load_config()
+    ok(webui.webui_missing_hosts(cfg) == ["proxy1.example.com"],
+       "a name that stops being routed is noticed by name")
+    ok(sorted(webui.current_webui_hosts(cfg)) == ["proxy.example.com"],
+       "while the shared address still works, which is why nobody notices")
+
+    ok(webui.restore_webui(cfg) == ["proxy1.example.com"], "rebuilding puts it back")
+    save_config(cfg)
+    ok(sorted(webui.current_webui_hosts(load_config())) ==
+       ["proxy.example.com", "proxy1.example.com"], "both names are routed again")
+
+    before = load_config()["_meta"]["shared_rev"]
+    cfg = load_config()
+    ok(webui.restore_webui(cfg) == [], "with nothing missing it does nothing")
+    save_config(cfg)
+    ok(load_config()["_meta"]["shared_rev"] == before,
+       "so a check every twenty seconds does not churn the revision")
+
+    cfg = load_config()
+    cfg["local"]["web_ui"]["enabled"] = False
+    ok(webui.webui_missing_hosts(cfg) == [], "a node not publishing its UI is left alone")
 
 print()
 print("the revision counts what it should" if not fails else "%d failed" % len(fails))
