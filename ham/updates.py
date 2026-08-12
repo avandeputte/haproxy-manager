@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from datetime import timezone
-from flask import jsonify
+from flask import jsonify, request
 from pathlib import Path
 import base64
 import json
@@ -13,11 +13,12 @@ import time
 import urllib.parse
 import urllib.request
 
-from .base import (DATA_DIR, INSTALL_URL, UPDATE_CHECK_HOURS, UPDATE_REF, 
-    UPDATE_REPO, VERSION, VERSION_URL, _lock, app, log)
+from .base import (DATA_DIR, INSTALL_URL, PEER_CONNECT_TIMEOUT, PEER_READ_TIMEOUT,
+    UPDATE_CHECK_HOURS, UPDATE_REF, UPDATE_REPO, VERSION, VERSION_URL, _lock,
+    _requests, app, log)
 from .config import load_config, save_config
 from .util import run
-from . import notify
+from . import notify, peering, sync
 
 # --------------------------------------------------------------------------
 
@@ -123,6 +124,9 @@ def api_version():
         "repo": UPDATE_REPO, "ref": UPDATE_REF,
         "can_update": ok, "cannot_update_reason": why,
         "updating": _update_running(),
+        # How many other nodes there are, so the page can offer to update them
+        # in the same go rather than making someone visit each one.
+        "peers": len(sync.enabled_peers(cfg)),
     })
 
 
@@ -137,6 +141,54 @@ def _update_running():
     return out.strip().startswith("activ")
 
 
+def update_peers(cfg):
+    """Ask every other node to update itself.
+
+    Sent before this node starts its own: the update restarts this service, so
+    a node that has already begun cannot be the one telling the others. The
+    other nodes are told, and then this one goes.
+
+    Each node runs the same installer against the same source, so there is
+    nothing to hand over -- only the instruction. A node that does not answer
+    is named and left alone rather than retried: an update is a thing a person
+    started, and they should be the one to decide what to do about the node
+    that missed it.
+    """
+    peers = sync.enabled_peers(cfg)
+    if not peers:
+        return []
+    if _requests is None:
+        return [{"ok": False, "name": p.get("name") or p.get("url"),
+                 "error": "python3-requests is not installed on this node"}
+                for p in peers]
+    out = []
+    for peer in peers:
+        url = (peer.get("url") or "").rstrip("/")
+        name = peer.get("name") or url
+        try:
+            r = _requests.post(url + "/api/update", json={},
+                               headers={"X-API-Key": peer.get("api_key", "")},
+                               timeout=(PEER_CONNECT_TIMEOUT, PEER_READ_TIMEOUT),
+                               verify=bool(peer.get("verify_tls")))
+            body = {}
+            try:
+                body = r.json()
+            except Exception:
+                pass
+            if r.status_code == 200 and body.get("ok"):
+                out.append({"ok": True, "name": name})
+                log.info("update started on %s", name)
+            else:
+                out.append({"ok": False, "name": name,
+                            "error": body.get("error") or "HTTP %s" % r.status_code})
+                log.warning("update not started on %s: %s", name, out[-1]["error"])
+        except Exception as e:
+            out.append({"ok": False, "name": name,
+                        "error": peering.peer_error(e, url, PEER_READ_TIMEOUT)})
+            log.warning("update not started on %s: %s", name, out[-1]["error"])
+    return out
+
+
 @app.post("/api/update")
 def api_update():
     ok, why = update_supported()
@@ -144,6 +196,9 @@ def api_update():
         return jsonify({"ok": False, "error": why}), 400
     if _update_running():
         return jsonify({"ok": False, "error": "an update is already running"}), 409
+
+    # The other nodes first, while this one is still running to ask them.
+    peers = update_peers(load_config()) if (request.get_json(silent=True) or {}).get("peers") else None
 
     url = INSTALL_URL
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -168,9 +223,19 @@ def api_update():
     rc, out = run(cmd, timeout=30)
     if rc != 0:
         log.error("could not start the updater: %s", out)
-        return jsonify({"ok": False, "error": "could not start the updater: %s" % out}), 500
+        return jsonify({"ok": False, "error": "could not start the updater: %s" % out,
+                        "nodes": peers}), 500
     log.warning("update started from %s -- this service will restart", url)
-    return jsonify({"ok": True, "note": "The update is running. This service restarts when it finishes."})
+    body = {"ok": True,
+            "note": "The update is running. This service restarts when it finishes."}
+    if peers is not None:
+        body["nodes"] = peers
+        started = [p["name"] for p in peers if p["ok"]]
+        if started:
+            body["note"] = ("The update is running here and on %s. Each service restarts "
+                            "when its own finishes; the Cluster page shows the version "
+                            "each node ends up on." % ", ".join(started))
+    return jsonify(body)
 
 
 @app.get("/api/update/log")

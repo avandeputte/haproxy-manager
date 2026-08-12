@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.69.0_all.deb
+sudo apt-get install -y ./haproxy-manager_1.70.0_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -559,6 +559,18 @@ what the viewer reads.
 The app carries a version (`VERSION`, starting at **1.0**) and asks GitHub for
 the published one **once a day**. When a newer version exists, a chip appears in
 the header and **Settings → Updates** offers a one-click update.
+
+**The whole cluster from one node.** Where there are other nodes, Updates
+offers *Update the other N nodes as well*, ticked by default — visiting each
+node to press the same button is the thing worth avoiding. They are told
+first, while the node you are on is still running to tell them, and each
+restarts when its own update finishes. Every node runs the same installer
+against the same source, so there is nothing to hand over, only the
+instruction. A node that does not take it is named with the reason and stays
+on the version it had; nothing retries it, because an update is something a
+person started and the node that missed it is their decision to make. The
+Cluster page shows the version each node ends up on, and warns when they are
+not all the same.
 
 The update runs `install.sh --update --yes` on the node under `systemd-run`, in
 its own transient unit. That detail matters: as a child of the service it would

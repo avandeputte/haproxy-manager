@@ -22,6 +22,24 @@ export async function renderUpdates(){
     (v.error?" Last check failed: "+esc(v.error):"")+"</p>";
   const row=document.createElement("div");row.style.marginTop="14px";
   const msg=document.createElement("div");msg.className="hint";msg.style.marginTop="12px";
+  /* Updating a cluster one node at a time means visiting each one and waiting.
+     Offered only when there is somewhere to send it. */
+  let alsoPeers=null;
+  if(v.peers){
+    const lbl=document.createElement("label");
+    lbl.style.cssText="display:block;margin-bottom:10px";
+    alsoPeers=document.createElement("input");alsoPeers.type="checkbox";
+    alsoPeers.checked=true;alsoPeers.id="f_update_peers";
+    lbl.appendChild(alsoPeers);
+    lbl.appendChild(document.createTextNode(" Update the other "+v.peers+" node"+
+      (v.peers===1?"":"s")+" as well"));
+    const h=document.createElement("div");h.className="hint";
+    h.textContent="They are told first, while this node is still running to tell them, "+
+      "and each restarts when its own update finishes. The Cluster page shows the "+
+      "version every node ends up on.";
+    lbl.appendChild(h);
+    row.appendChild(lbl);
+  }
   row.appendChild(btn("Check now","",async()=>{
     msg.textContent="Checking...";
     try{await api("version/check","POST",{});await renderUpdates();}
@@ -29,13 +47,25 @@ export async function renderUpdates(){
   }));
   row.appendChild(document.createTextNode(" "));
   const up=btn(v.available?("Update to "+v.latest):"Update","pri",async()=>{
-    if(!confirm("Update haproxy-manager from "+v.version+" to "+(v.latest||"the published version")+"?\n\n"+
-                "The installer runs on this node and the service restarts when it finishes. "+
-                "Your configuration, certificates and login are kept. HAProxy keeps serving traffic throughout."))return;
+    const peers=!!(alsoPeers&&alsoPeers.checked);
+    if(!confirm("Update haproxy-manager from "+v.version+" to "+(v.latest||"the published version")+
+                (peers?" on this node and the other "+v.peers+"?":"?")+"\n\n"+
+                "The installer runs on each node and that node's service restarts when it "+
+                "finishes. Your configuration, certificates and login are kept. HAProxy keeps "+
+                "serving traffic throughout."))return;
     up.disabled=true;msg.textContent="Starting the updater...";
     try{
-      const r=await api("update","POST",{});
+      const r=await api("update","POST",{peers:peers});
       msg.textContent=r.note||"Update started.";
+      /* A node that did not take it is named: it stays on the old version, and
+         nothing retries it, so it has to be visible. */
+      const failed=(r.nodes||[]).filter(x=>!x.ok);
+      if(failed.length){
+        const w=document.createElement("div");w.className="err";w.style.marginTop="8px";
+        w.innerHTML="Not started on "+failed.map(x=>"<b>"+esc(x.name)+"</b>: "+
+                     esc(x.error||"")).join("; ")+". Those nodes stay on "+esc(v.version)+".";
+        msg.appendChild(w);
+      }
       watchUpdate(msg);
     }catch(e){msg.textContent=e.message;up.disabled=false;}
   });
