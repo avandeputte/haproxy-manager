@@ -24,11 +24,15 @@ js/pages/webui.js
 js/shell.js
 js/state.js
 logo.svg
+recipes/actual.json
 recipes/authelia.json
 recipes/authentik.json
+recipes/bitwarden.json
+recipes/channels-dvr.json
 recipes/clickhouse.json
 recipes/consul.json
 recipes/docker-registry.json
+recipes/dockge.json
 recipes/elasticsearch.json
 recipes/etcd.json
 recipes/galera.json
@@ -38,6 +42,7 @@ recipes/grafana.json
 recipes/guacamole.json
 recipes/harbor.json
 recipes/home-assistant.json
+recipes/homebox.json
 recipes/imap.json
 recipes/immich.json
 recipes/influxdb.json
@@ -48,6 +53,7 @@ recipes/kibana.json
 recipes/kubernetes-api.json
 recipes/ldap.json
 recipes/mattermost.json
+recipes/mealie.json
 recipes/minio.json
 recipes/mongodb.json
 recipes/mqtt.json
@@ -60,6 +66,9 @@ recipes/open-webui.json
 recipes/paperless.json
 recipes/patroni-primary.json
 recipes/patroni-replicas.json
+recipes/pgadmin.json
+recipes/photostructure.json
+recipes/phpmyadmin.json
 recipes/portainer.json
 recipes/postgresql-plain.json
 recipes/prometheus.json

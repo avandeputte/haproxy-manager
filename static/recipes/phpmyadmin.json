@@ -1,0 +1,22 @@
+{
+  "name": "phpMyAdmin",
+  "category": "Applications",
+  "summary": "HTTP 80 with the session kept on one server.",
+  "notes": "The login session lives in PHP's session storage on whichever server answered, so without stickiness a second request logs you out. Large imports and exports are what the timeout is for. Worth putting behind an authenticating proxy as well -- it reaches your database.",
+  "fields": {
+    "url": "https://phpmyadmin.example.com",
+    "target": "10.0.0.10:80",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 162
+}

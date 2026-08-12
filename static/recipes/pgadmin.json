@@ -1,0 +1,22 @@
+{
+  "name": "pgAdmin",
+  "category": "Applications",
+  "summary": "HTTP 80 checked with /misc/ping.",
+  "notes": "/misc/ping answers without a login, which the rest of pgAdmin does not. Sessions are server-side, so clients are pinned, and a long query holds the connection open for as long as it runs.",
+  "fields": {
+    "url": "https://pgadmin.example.com",
+    "target": "10.0.0.10:80",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "http",
+    "health_uri": "/misc/ping",
+    "health_status": "200",
+    "health_interval": "10s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 163
+}

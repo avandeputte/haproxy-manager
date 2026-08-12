@@ -1,0 +1,22 @@
+{
+  "name": "Actual Budget",
+  "category": "Applications",
+  "summary": "HTTP 5006 with clients pinned for sync.",
+  "notes": "The check asks for / and accepts any 2xx or 3xx, since the entry point is the web app itself. Clients sync over a connection they keep open, so they are pinned and the timeout is long.",
+  "fields": {
+    "url": "https://budget.example.com",
+    "target": "10.0.0.10:5006",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 166
+}

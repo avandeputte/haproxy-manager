@@ -1,0 +1,22 @@
+{
+  "name": "PhotoStructure",
+  "category": "Applications",
+  "summary": "HTTP 1787 with timeouts sized for a library import.",
+  "notes": "The check asks for / and accepts any 2xx or 3xx. Importing a library and streaming video are both long-running, so the server timeout is generous and clients stay on one server.",
+  "fields": {
+    "url": "https://photostructure.example.com",
+    "target": "10.0.0.10:1787",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "timeout_server": "4h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 168
+}

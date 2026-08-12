@@ -1,0 +1,22 @@
+{
+  "name": "Bitwarden (official server)",
+  "category": "Applications",
+  "summary": "HTTP 8080 for the self-hosted Bitwarden stack.",
+  "notes": "This is the official server, which runs several containers behind its own web front end; Vaultwarden has a recipe of its own. The check asks for / and accepts any 2xx or 3xx, because the entry point redirects -- point it at /alive for a deeper check if your deployment exposes it.",
+  "fields": {
+    "url": "https://bitwarden.example.com",
+    "target": "10.0.0.10:8080",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 161
+}

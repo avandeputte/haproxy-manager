@@ -1,0 +1,22 @@
+{
+  "name": "Mealie",
+  "category": "Applications",
+  "summary": "HTTP 9000 checked against its about endpoint.",
+  "notes": "/api/app/about answers without a login and reports the running version. Older Mealie containers listen on 9925 instead of 9000. Importing a recipe from a URL and uploading images are what the timeout is for.",
+  "fields": {
+    "url": "https://mealie.example.com",
+    "target": "10.0.0.10:9000",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "http",
+    "health_uri": "/api/app/about",
+    "health_status": "200",
+    "health_interval": "10s",
+    "timeout_server": "10m",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 160
+}

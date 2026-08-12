@@ -1,0 +1,22 @@
+{
+  "name": "Channels DVR",
+  "category": "Applications",
+  "summary": "HTTP 8089 with timeouts sized for streaming a recording.",
+  "notes": "/status answers with the server's own state. A stream is one connection held open for the length of what is being watched, so the server timeout has to outlast the programme rather than the request.",
+  "fields": {
+    "url": "https://dvr.example.com",
+    "target": "10.0.0.10:8089",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "http",
+    "health_uri": "/status",
+    "health_status": "200",
+    "health_interval": "10s",
+    "timeout_server": "6h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 164
+}

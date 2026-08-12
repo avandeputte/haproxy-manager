@@ -1,0 +1,21 @@
+{
+  "name": "Homebox",
+  "category": "Applications",
+  "summary": "HTTP 7745 checked against its status endpoint.",
+  "notes": "/api/v1/status answers without a login and reports that the API is up, which is a better signal than the front page. Attachments and photos are what the upload timeout is for.",
+  "fields": {
+    "url": "https://inventory.example.com",
+    "target": "10.0.0.10:7745",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/api/v1/status",
+    "health_status": "200",
+    "health_interval": "10s",
+    "timeout_server": "30m",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 167
+}

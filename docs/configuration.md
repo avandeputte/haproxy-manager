@@ -116,6 +116,15 @@ it.
 | Netdata | HTTP 19999 checked against its info endpoint |
 | Sonarr / Radarr / Lidarr | HTTP 8989 checked with /ping |
 | GitLab | HTTP with the timeouts a git push needs |
+| Mealie | HTTP 9000 checked against its about endpoint |
+| Bitwarden (official server) | HTTP 8080 for the self-hosted Bitwarden stack |
+| phpMyAdmin | HTTP 80 with the session kept on one server |
+| pgAdmin | HTTP 80 checked with /misc/ping |
+| Channels DVR | HTTP 8089 with timeouts sized for streaming a recording |
+| Dockge | HTTP 5001 with the WebSocket its interface needs |
+| Actual Budget | HTTP 5006 with clients pinned for sync |
+| Homebox | HTTP 7745 checked against its status endpoint |
+| PhotoStructure | HTTP 1787 with timeouts sized for a library import |
 | Jellyfin / Emby | HTTP 8096 with timeouts long enough to watch a film |
 | Vaultwarden / Bitwarden | HTTP with the notification WebSocket kept alive |
 | Mattermost | HTTP 8065, sticky, with WebSockets |
@@ -336,7 +345,7 @@ of its peers.
 ## Upgrades and the browser cache
 
 The page is served with `no-cache`, and everything it loads lives under a path
-that contains the version — `/static/v/1.57.0/js/main.js`. Those files are then
+that contains the version — `/static/v/1.58.0/js/main.js`. Those files are then
 cached for a year, which is safe because the URL changes whenever the version
 does.
 
