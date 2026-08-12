@@ -624,6 +624,20 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
                 cert["domains"] = extra
                 act("updated", "Certificate", "%s covers %s" % (cert["name"], ", ".join(missing)))
                 how = "extended"
+                # Listing a name is not covering it. The file on disk still
+                # holds what was last issued, so until it is issued again the
+                # new name is served the wrong certificate -- which looks like
+                # the address being down.
+                on_disk = cert_details(cert_path(cert))
+                # Whatever is on disk was issued before this name was added, so
+                # it does not cover it -- a placeholder no more than a real one.
+                if on_disk["deployed"] and not set(m.lower() for m in missing) <= set(on_disk["names"]):
+                    warns.append(
+                        "%s was extended to cover %s, but the certificate on disk was "
+                        "issued before that and does not. Press Issue on it, or those "
+                        "names will be served the wrong certificate -- which looks "
+                        "like the address being down."
+                        % (cert["name"], ", ".join(missing)))
         if cert:
             act("reused", "Certificate", cert["name"] +
                 (" (wildcard %s covers %s)" % (next((d for d in parse_domains(cert)

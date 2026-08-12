@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.70.0_all.deb
+sudo apt-get install -y ./haproxy-manager_1.71.0_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -212,10 +212,19 @@ renewal happens on its own.)
   so you can keep port 80 fronted by HAProxy and still validate.
 - Before a real certificate exists, Apply drops in a short-lived **self-signed
   placeholder** so HAProxy can start; the first successful issue replaces it.
+  It covers every name the certificate is for, and is replaced when those names
+  change — a service answering for two names with a stand-in covering one of
+  them serves the wrong certificate on the other.
 - **Certificate status** is shown on Overview and under ACME → Certificates:
   whether the PEM on disk is a real certificate or still the placeholder, its
   issuer, its expiry date with the days remaining, and the outcome, timestamp
   and full `acme.sh` log of the last issue/renew attempt (the **Log** button).
+- **The names on the record are not the names in the file.** Adding a name to a
+  certificate does not reissue it, so until it is issued again that name is
+  served whatever was issued before — which a browser reports as a failure to
+  connect, not as a certificate problem. The names are read from the PEM
+  itself, so the Certificates page says *not in the issued certificate* and
+  names them, and the publish wizard says so at the moment it extends one.
 
 ## High availability
 

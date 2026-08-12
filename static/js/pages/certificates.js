@@ -234,6 +234,14 @@ export function certStatusCell(r){
   if(s.status==="placeholder")h+='<div class=sub>self-signed stand-in — press Issue</div>';
   else if(s.status==="missing")h+='<div class=sub>no PEM on disk yet</div>';
   if(s.auto_renew===false)h+='<div class=sub>auto-renew off</div>';
+  /* A name added to a certificate is not a name the certificate covers: the
+     file on disk still holds whatever was last issued. Until it is issued
+     again, that address is served the wrong certificate, which looks to a
+     browser like the site being unreachable rather than like a certificate
+     problem -- so it is said here plainly. */
+  if((s.not_issued_for||[]).length)
+    h+='<div class=sub style="color:var(--drift)">not in the issued certificate: '+
+       s.not_issued_for.map(esc).join(", ")+" — press Issue</div>";
   return h;
 }
 export function fmtTime(t){return esc(String(t||"").replace("T"," ").replace("+00:00"," UTC"));}

@@ -15,17 +15,26 @@ from .base import (ACME_SH, CERT_DIR, HAPROXY_CFG, KEEPALIVED_CFG, VERSION, _loc
 from .config import CLUSTER_KEYS, config_hash, load_config, save_config, shared_objects, shared_parts
 from .util import _by_id, cert_details, cert_path, parse_domains, run
 from .validate import check_setting_types
-from . import acme, auth, cluster, haproxy, keepalived, notify, sync, updates, vrrp, watchdog
+from . import acme, auth, cluster, haproxy, keepalived, notify, sync, updates, vrrp, watchdog, wizard
 
 # --------------------------------------------------------------------------
 
-def _selfsigned_placeholder(path, cn):
-    """Create a throwaway self-signed cert so haproxy can start before ACME runs."""
+def _selfsigned_placeholder(path, names):
+    """Create a throwaway self-signed cert so haproxy can start before ACME runs.
+
+    Every name the certificate is for, not just the first: a service that
+    answers for two names and holds a stand-in for one of them serves the wrong
+    certificate on the other, which is indistinguishable from that address
+    being down.
+    """
+    names = [n for n in (names or []) if n] or ["placeholder"]
     with tempfile.TemporaryDirectory() as td:
         crt, key = Path(td) / "c.pem", Path(td) / "k.pem"
         rc, _ = run([
             "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "3",
-            "-subj", "/CN=%s" % (cn or "placeholder"), "-keyout", str(key), "-out", str(crt),
+            "-subj", "/CN=%s" % names[0],
+            "-addext", "subjectAltName=" + ",".join("DNS:%s" % n for n in names),
+            "-keyout", str(key), "-out", str(crt),
         ])
         if rc == 0:
             path.write_text(crt.read_text() + key.read_text())
@@ -45,10 +54,20 @@ def ensure_cert_files(cfg):
             if not c:
                 continue
             p = cert_path(c)
+            doms = parse_domains(c) or [c["name"]]
             if not p.exists():
                 CERT_DIR.mkdir(parents=True, exist_ok=True)
-                doms = parse_domains(c)
-                if _selfsigned_placeholder(p, doms[0] if doms else c["name"]):
+                if _selfsigned_placeholder(p, doms):
+                    made.append(p.name)
+                continue
+            # A stand-in that no longer covers every name is replaced. Only a
+            # stand-in: a real certificate is acme.sh's to change, and quietly
+            # overwriting one with a self-signed file would take a working site
+            # down to fix a cosmetic mismatch.
+            on_disk = cert_details(p)
+            if on_disk["self_signed"] and on_disk["names"] and \
+                    not {d.lower() for d in doms} <= set(on_disk["names"]):
+                if _selfsigned_placeholder(p, doms):
                     made.append(p.name)
     return made
 
@@ -415,6 +434,16 @@ def api_status():
         info["name"] = c["name"]
         info["domains"] = parse_domains(c)
         info["auto_renew"] = c.get("auto_renew", True)
+        # Names on the record that the issued file does not cover. Adding a
+        # name to a certificate does not reissue it, so until it is issued
+        # again those names are served the wrong certificate -- which looks
+        # like the address being down rather than like a certificate problem.
+        covered = info.get("names") or []
+        info["not_issued_for"] = [
+            d for d in info["domains"]
+            if covered and not any(n == d.lower() or
+                                   (n.startswith("*.") and wizard.domain_covers(n, d))
+                                   for n in covered)]
         last = issue_log.get(c["id"])
         if last:
             # The full acme.sh log is fetched on demand from /api/acme/log/<id>.

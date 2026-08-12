@@ -55,7 +55,7 @@ def cert_details(p):
     """
     info = {"deployed": False, "status": "missing", "file": str(p),
             "expires": None, "expires_iso": None, "days_left": None,
-            "issuer": None, "subject": None, "self_signed": False}
+            "issuer": None, "subject": None, "self_signed": False, "names": []}
     if not p.exists():
         return info
     info["deployed"] = True
@@ -71,6 +71,19 @@ def cert_details(p):
 
     info["issuer"] = _grab("issuer")
     info["subject"] = _grab("subject")
+    # The names the file actually covers, which is not the same thing as the
+    # names the certificate record lists. Adding a name to the record does not
+    # change what was issued: until it is issued again, the file covers what it
+    # covered before, and a browser asking for the new name is told the
+    # certificate is for something else.
+    rc2, ext = run(["openssl", "x509", "-noout", "-ext", "subjectAltName", "-in", str(p)])
+    if rc2 == 0:
+        info["names"] = sorted({m.strip().lower()
+                                for m in re.findall(r"DNS:([^,\s]+)", ext)})
+    if not info["names"]:
+        cn = re.search(r"CN\s*=\s*([^,/]+)", info["subject"] or "")
+        if cn:
+            info["names"] = [cn.group(1).strip().lower()]
     info["self_signed"] = bool(info["issuer"]) and info["issuer"] == info["subject"]
     info["expires"] = _grab("notAfter")
 
