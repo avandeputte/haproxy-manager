@@ -56,13 +56,9 @@ jobs:
               || { echo "packaged $f differs from the source"; exit 1; }
           done
           grep -q '^if __name__' /tmp/x/opt/haproxy-manager/app.py
-          # app.py is a few lines now; the application it starts must be there
-          # too, and be importable rather than merely present.
-          (cd /tmp/x/opt/haproxy-manager && python3 -c "
-import ast, pathlib
-for f in sorted(pathlib.Path('ham').glob('*.py')):
-    ast.parse(f.read_text())
-print('every packaged module parses')")
+          # app.py is a few lines now; what it starts has to be in there too,
+          # and has to parse rather than merely be present.
+          python3 -c "import ast,pathlib; d=pathlib.Path('/tmp/x/opt/haproxy-manager/ham'); n=[ast.parse(p.read_text()) for p in sorted(d.glob('*.py'))]; print(len(n),'packaged modules parse')"
           echo "the package matches the source"
 
       # Installing on the distribution itself is the only check that means
