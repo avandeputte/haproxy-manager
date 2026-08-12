@@ -12,7 +12,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # socat is here for acme.sh's --standalone mode. (The syslog collector that
 # once used it is now docker/syslogd.py.) supervisor runs the processes;
-# iproute2 lets the app report which addresses this node holds.
+# iproute2 lets the app report which addresses this node holds, and
+# iputils-arping lets it notice when another machine is using one of them.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 \
         python3-flask \
@@ -25,6 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         socat \
         iproute2 \
+        iputils-arping \
         procps \
         supervisor \
         tzdata \

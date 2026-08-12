@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.76.1_all.deb
+sudo apt-get install -y ./haproxy-manager_1.77.0_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -528,6 +528,23 @@ It restarts deliberately, not reflexively:
 - **Never endlessly.** Three restarts per fifteen minutes by default; after that
   it stops and reports, so a failing service stays visible instead of flapping.
 - Everything it does is logged, so the **Logs** page carries the history.
+
+### Two machines using one address
+
+Every few minutes the watchdog asks the network whether anything else answers
+for the addresses this node holds — `arping -D`, which asks without claiming,
+so a reply can only come from somebody else. If one does, the Watchdog page
+says so and a notification goes out.
+
+It is worth checking because it is invisible from every layer above the
+network: the address is configured on this node, the socket is listening on
+this node, and a client reaches whichever machine won the last ARP exchange.
+The symptom is a node that answers from some places and not others, and comes
+and goes for no visible reason — which looks like almost anything except two
+machines claiming one address. A cluster that deliberately moves addresses
+between machines is exactly where it happens.
+
+Nothing here can fix it: one of the two has to stop using the address.
 
 ### Watching the app itself
 

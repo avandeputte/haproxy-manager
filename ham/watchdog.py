@@ -7,6 +7,7 @@ from flask import request
 import json
 import os
 import re
+import shutil
 import socket
 import threading
 import time
@@ -362,6 +363,78 @@ def _restore_webui_if_lost():
                 ", ".join(put_back), "ok" if res.get("ok") else res.get("error"))
 
 
+_addr_checked = [0.0]
+ADDRESS_CHECK_SECONDS = 300
+
+
+def probe_duplicate_addresses():
+    """Is another machine on this network answering for one of our addresses?
+
+    A cluster that moves addresses between machines is exactly where this goes
+    wrong, and when it does nothing above the network can see it: the address
+    is configured here, the socket is listening here, and a client reaches
+    whichever machine won the last ARP exchange. The symptom is a name that
+    works from one place and not another, or works until something re-ARPs --
+    which looks like anything except two machines claiming one address.
+
+    arping -D asks the network who claims an address without claiming it, so a
+    reply can only come from somebody else. It is not always installed; then
+    there is nothing to report, rather than a false all-clear.
+    """
+    if not shutil.which("arping"):
+        return []
+    found = []
+    for iface in apply.node_interfaces():
+        if iface["name"] == "lo" or not iface.get("up"):
+            continue
+        for cidr in iface.get("addresses") or []:
+            ip = cidr.split("/")[0]
+            if ":" in ip or ip.startswith("127."):
+                continue          # ARP is IPv4, and loopback answers itself
+            rc, out = run(["arping", "-D", "-q", "-c", "2", "-w", "3",
+                           "-I", iface["name"], ip], timeout=15)
+            # iputils-arping exits 1 when somebody else answers for it.
+            if rc == 1:
+                found.append({"address": ip, "interface": iface["name"],
+                              "detail": out.strip()[-200:]})
+    return found
+
+
+def _check_addresses(cfg):
+    """Every few minutes, not every round: each address takes a few seconds."""
+    if time.time() - _addr_checked[0] < ADDRESS_CHECK_SECONDS:
+        return
+    _addr_checked[0] = time.time()
+    try:
+        dupes = probe_duplicate_addresses()
+    except Exception:
+        log.exception("watchdog: checking for duplicate addresses failed")
+        return
+    with _watchdog_lock:
+        _watchdog["duplicate_addresses"] = dupes
+    for d in dupes:
+        log.error("another machine on %s answers for %s -- traffic for this node "
+                  "reaches whichever of them won the last ARP exchange",
+                  d["interface"], d["address"])
+    seen = {d["address"] for d in dupes}
+    for d in dupes:
+        notify.notify_transition(
+            "address:" + d["address"], "duplicate", "cluster",
+            "Another machine is using %s" % d["address"],
+            "%s answers for %s on %s as well as this node. Traffic for that address "
+            "reaches whichever machine won the last ARP exchange, so this node will "
+            "appear to work from some places and not others, and to come and go for "
+            "no visible reason. Nothing here can fix it: one of the two has to stop "
+            "using the address."
+            % ("Another machine", d["address"], d["interface"]), "error", cfg)
+    for old_addr in [a for a in _watchdog.get("_addr_seen") or [] if a not in seen]:
+        notify.notify_transition("address:" + old_addr, "ok", "cluster",
+                                 "%s is this node's alone again" % old_addr,
+                                 "Nothing else on the network answers for it now.",
+                                 "info", cfg)
+    _watchdog["_addr_seen"] = sorted(seen)
+
+
 def _watchdog_loop():
     """Supervise the services, and let systemd supervise us.
 
@@ -421,6 +494,7 @@ def _watchdog_loop():
                 _restore_webui_if_lost()
             except Exception:
                 log.exception("watchdog: checking the management UI service failed")
+            _check_addresses(cfg)
         else:
             _watchdog["running"] = False
 
@@ -453,6 +527,8 @@ def api_watchdog():
         state = json.loads(json.dumps(_watchdog))
     state["settings"] = cfg["local"].get("watchdog") or {}
     state["systemd"] = bool(os.environ.get("NOTIFY_SOCKET"))
+    state["arping"] = bool(shutil.which("arping"))
+    state.pop("_addr_seen", None)
     return jsonify(state)
 
 

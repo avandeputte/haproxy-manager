@@ -41,7 +41,25 @@ export async function renderWatchdog(){
       : "systemd is not watching this process (no WatchdogSec in the unit), so a hang here "+
         "is reported but not repaired.")+"</div>"+
     (wd.last_run?'<div class=hint style="margin-top:4px">Last round '+esc(wd.last_run)+".</div>":"");
+  /* Two machines using one address is invisible from every layer above it:
+     the address is configured here, the socket is listening here, and a client
+     reaches whichever machine won the last ARP exchange. */
+  const dupes=wd.duplicate_addresses||[];
+  const addr=document.createElement("div");addr.className="bd";
+  if(dupes.length)
+    addr.innerHTML='<div class=hint style="color:var(--down)"><b>Another machine is using '+
+      dupes.map(d=>'<span class=mono>'+esc(d.address)+"</span> (on "+esc(d.interface)+")").join(", ")+
+      ".</b> Traffic for that address reaches whichever of the two won the last ARP exchange, so "+
+      "this node works from some places and not others, and comes and goes for no visible reason. "+
+      "Nothing here can fix it: one of the two has to stop using the address.</div>";
+  else if(wd.arping===false)
+    addr.innerHTML='<div class=hint>Duplicate address detection needs <span class=mono>arping</span>, '+
+      "which is not installed here, so nothing is being checked.</div>";
+  else
+    addr.innerHTML='<div class=hint><b>Addresses:</b> nothing else on the network answers for '+
+      "this node's addresses.</div>";
   card.appendChild(self);
+  card.appendChild(addr);
   c.appendChild(card);
 
   /* --- settings --- */

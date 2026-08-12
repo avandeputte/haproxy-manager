@@ -207,6 +207,43 @@ ok(merged(cfg)["haproxy"]["frontends"][0]["rules"] == ["r-shop", "r-ui"],
 ok(merged(cfg)["haproxy"]["frontends"][0]["certificates"] == ["c-ui"],
    "and the certificate that was first is still first")
 
+# -- two machines using one address ----------------------------------------
+# Invisible from every layer above the network: the address is configured
+# here, the socket is listening here, and a client reaches whichever machine
+# won the last ARP exchange. It cost two days of looking at the proxy.
+from ham import watchdog   # noqa: E402
+
+_calls = []
+
+
+def _fake_run(cmd, **kw):
+    _calls.append(cmd)
+    if cmd[0] == "arping" and cmd[-1] == "192.168.1.87":
+        return 1, "Unicast reply from 192.168.1.87 [AA:BB:CC:DD:EE:FF]"
+    return 0, ""
+
+
+watchdog.run = _fake_run
+watchdog.shutil.which = lambda n: "/usr/sbin/arping" if n == "arping" else None
+ham.apply.node_interfaces = lambda: [
+    {"name": "lo", "up": True, "addresses": ["127.0.0.1/8"]},
+    {"name": "eth0", "up": True,
+     "addresses": ["192.168.1.87/24", "192.168.1.89/24", "fe80::1/64"]},
+    {"name": "eth1", "up": False, "addresses": ["10.0.0.1/24"]}]
+found = watchdog.probe_duplicate_addresses()
+ok([f["address"] for f in found] == ["192.168.1.87"],
+   "the address another machine answers for is reported")
+ok(found[0]["interface"] == "eth0" and "AA:BB:CC" in found[0]["detail"],
+   "with the interface and what the other machine said")
+asked = sorted(c[-1] for c in _calls if c[0] == "arping")
+ok(asked == ["192.168.1.87", "192.168.1.89"],
+   "every address the node holds is asked about, and nothing else: %s" % asked)
+ok(all("-D" in c for c in _calls if c[0] == "arping"),
+   "asked without claiming it, so a reply can only come from somebody else")
+watchdog.shutil.which = lambda n: None
+ok(watchdog.probe_duplicate_addresses() == [],
+   "with arping missing it reports nothing rather than an all-clear")
+
 print()
 print("the revision counts what it should" if not fails else "%d failed" % len(fails))
 sys.exit(1 if fails else 0)

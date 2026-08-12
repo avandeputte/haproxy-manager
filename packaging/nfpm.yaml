@@ -48,6 +48,9 @@ overrides:
       - curl
       - socat
       - iproute2
+      # Two machines using one address is invisible from every layer above it,
+      # and a cluster that moves addresses about is where it happens.
+      - iputils-arping
       - procps
       - keepalived
   rpm:
@@ -64,6 +67,8 @@ overrides:
       - curl
       - socat
       - iproute
+      # arping lives in iputils on this family, not a package of its own.
+      - iputils
       - procps-ng
       - keepalived
 
