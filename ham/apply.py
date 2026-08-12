@@ -76,6 +76,32 @@ def node_interfaces():
                   key=lambda i: (i["name"] == "lo", not i["addresses"], not i["up"], i["name"]))
 
 
+def _haproxy_hint(output):
+    """Turn the checker's own words into the thing to go and do.
+
+    haproxy -c says what is wrong precisely and says nothing about how to fix
+    it, and its output is the last place someone looks when a button has just
+    said "failed". The cases here are the ones that leave a node stuck:
+    validation refuses, so nothing is written, so the fault stays until it is
+    understood.
+    """
+    if "no SSL certificate specified for bind" in output:
+        names = re.findall(r"Proxy '([^']+)': no SSL certificate specified", output)
+        return (" %s listens for HTTPS with no certificate to serve it with. Add one "
+                "under Advanced > HAProxy > Public Services, or -- if this is the "
+                "listener your management UI hangs off -- open Settings > Web UI "
+                "access, set Certificate to request a new one, and Save."
+                % (", ".join(n.replace("fe_", "") for n in names) or "A Public Service"))
+    if "unable to load SSL certificate" in output or "cannot open the file" in output:
+        return (" A certificate file named by a Public Service is missing from the "
+                "certificate directory. Issue it under Certificates, or remove it "
+                "from the listener.")
+    if "backend" in output and "not found" in output:
+        return (" A rule points at a Backend Pool that is not there. That happens when "
+                "an object was deleted while something still referred to it.")
+    return ""
+
+
 def _keepalived_hint(output, k):
     """Turn keepalived's own complaint into the thing to actually go fix."""
     text = (output or "").lower()
@@ -265,7 +291,8 @@ def do_apply(cfg=None, allow_push=True):
             result["steps"].append("haproxy binary not found -- validation skipped")
         elif rc != 0:
             os.unlink(staging)
-            result["error"] = "HAProxy configuration failed validation. Nothing was changed."
+            result["error"] = ("HAProxy configuration failed validation. Nothing was "
+                               "changed." + _haproxy_hint(out))
             log.error("apply refused: haproxy -c rejected the rendered configuration: %s",
                       out.strip()[-400:])
             notify.notify("apply", "Apply was refused on this node",

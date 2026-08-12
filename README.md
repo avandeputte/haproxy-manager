@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.68.1_all.deb
+sudo apt-get install -y ./haproxy-manager_1.68.2_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -606,6 +606,10 @@ systemctl reload haproxy
 If the UI's own service is what is broken, **Settings → Web UI access → Save**
 rebuilds it from the stored setting — the pool, the rule, the conditions for
 both its addresses and the certificate — and re-attaches it to the listener.
+Set **Certificate** to request a new one if the listener has lost the one it
+was serving: an HTTPS listener with no certificate fails validation, and Apply
+refuses rather than writing it, which leaves the node showing unapplied changes
+until it is put right. Apply names that case when it happens.
 
 ## Backup & Export
 
