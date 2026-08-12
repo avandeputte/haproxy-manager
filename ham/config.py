@@ -243,6 +243,18 @@ def shared_parts(cfg):
     return out
 
 
+# save_config runs on every write and this would otherwise repeat the same
+# sentence for as long as the fault lasts.
+_said = set()
+
+
+def _say_once(key, msg, *args):
+    if key in _said:
+        return
+    _said.add(key)
+    log.warning(msg, *args)
+
+
 def save_config(cfg):
     with _lock:
         # The revision counts changes to the shared configuration, and is what
@@ -252,6 +264,22 @@ def save_config(cfg):
         # a configuration from a peer sets both fields first, so adopting is
         # not itself counted as a change.
         meta = cfg.setdefault("_meta", {})
+        # Done here rather than by whoever made the object: this is the one
+        # place every change passes through, so an object that belongs to this
+        # node cannot reach the other nodes by being forgotten.
+        close_local_only(cfg)
+        # And what is left has to make sense on a node that has none of this
+        # node's objects. If it does not, that is a fault in what is shared,
+        # and it is recorded rather than sent quietly.
+        dangling = shared_dangling(shared_view(cfg))
+        if dangling:
+            meta["shared_dangling"] = dangling
+            _say_once("dangling",
+                      "the shared configuration refers to %d object(s) that are not in it: "
+                      "%s -- the other nodes would receive rules that cannot work",
+                      len(dangling), "; ".join(dangling[:4]))
+        else:
+            meta.pop("shared_dangling", None)
         fp = shared_fingerprint(cfg)
         if fp != meta.get("shared_fp"):
             meta["shared_fp"] = fp
@@ -326,6 +354,79 @@ def is_webui_cert(cert):
     return name == WEBUI_NAME or name.startswith(WEBUI_NAME + "-")
 
 
+# What refers to what, so a reference can be followed without hard-coding the
+# same list in four places.
+REFERENCES = (
+    ("frontends", "rules", "rules"),
+    ("frontends", "certificates", "certificates"),
+    ("frontends", "default_backend", "backends"),
+    ("backends", "servers", "servers"),
+    ("backends", "healthcheck", "healthchecks"),
+    ("rules", "conditions", "conditions"),
+    ("rules", "backend", "backends"),
+)
+
+
+def close_local_only(cfg):
+    """Mark what exists only for something already marked.
+
+    An object belongs to one node when everything that uses it does. A
+    condition testing this node's own host name is used by this node's own
+    rule and by nothing else; leaving it shared sends it to nodes that have no
+    rule for it, where it either sits unused or -- worse -- is referred to by a
+    rule that came with it and now tests a host that node does not answer for.
+
+    Marking is what keeps an object out of what is shared, so this closes the
+    marking over the object graph rather than relying on whoever created the
+    object to have thought of it.
+    """
+    hp = cfg.get("haproxy") or {}
+    marked = {i.get("id") for coll in hp.values() if isinstance(coll, list)
+              for i in coll if isinstance(i, dict) and i.get(LOCAL_ONLY)}
+    if not marked:
+        return 0
+    added = 0
+    for owner, field, target in REFERENCES:
+        if target not in hp or owner not in hp:
+            continue
+        users = {}                      # target id -> is every user node-local?
+        for item in hp.get(owner) or []:
+            refs = item.get(field)
+            refs = refs if isinstance(refs, list) else ([refs] if refs else [])
+            for rid in refs:
+                users[rid] = users.get(rid, True) and bool(item.get(LOCAL_ONLY))
+        for item in hp.get(target) or []:
+            if item.get(LOCAL_ONLY) or item.get("id") not in users:
+                continue                # unreferenced objects are nobody's business
+            if users[item["id"]]:
+                item[LOCAL_ONLY] = True
+                added += 1
+    return added
+
+
+def shared_dangling(view):
+    """References in the shared configuration that point at nothing.
+
+    The shared configuration has to stand on its own: whatever is sent has to
+    make sense on a node that has none of this node's objects. Anything left
+    pointing at something that is not there is a fault in what is shared, not
+    in the node that receives it.
+    """
+    hp = view.get("haproxy") or {}
+    ids = {coll: {i.get("id") for i in (hp.get(coll) or [])} for _, _, coll in REFERENCES}
+    ids["certificates"] = {c.get("id") for c in (view.get("acme") or {}).get("certificates") or []}
+    out = []
+    for owner, field, target in REFERENCES:
+        for item in hp.get(owner) or []:
+            refs = item.get(field)
+            refs = refs if isinstance(refs, list) else ([refs] if refs else [])
+            for rid in refs:
+                if rid and rid not in ids.get(target, set()):
+                    out.append("%s %r -> %s %s" % (owner[:-1], item.get("name", rid),
+                                                   target[:-1], rid))
+    return out
+
+
 def local_only_ids(cfg):
     """Every id this node owns alone, across all the shared sections.
 
@@ -362,7 +463,11 @@ def strip_local_only(section, dropped=None):
             else:
                 keep.append(item)
         out[coll] = keep
-    # drop references to anything removed
+    # Every reference to something removed goes with it. A reference left
+    # pointing at nothing is worse than the object being absent: a rule that
+    # names a condition the node does not have renders with that test simply
+    # missing, so it matches everything or nothing instead of the one host it
+    # was for -- and nothing says so.
     for fe in out.get("frontends") or []:
         for key in ("rules", "certificates"):
             if isinstance(fe.get(key), list):
@@ -372,6 +477,25 @@ def strip_local_only(section, dropped=None):
     for be in out.get("backends") or []:
         if isinstance(be.get("servers"), list):
             be["servers"] = [x for x in be["servers"] if x not in dropped]
+        if be.get("healthcheck") in dropped:
+            be["healthcheck"] = ""
+    kept_rules = []
+    for rule in out.get("rules") or []:
+        if isinstance(rule.get("conditions"), list):
+            rule["conditions"] = [x for x in rule["conditions"] if x not in dropped]
+        # A rule whose pool is gone has nowhere to send anything. Keeping it
+        # would render a use_backend naming a backend that is not there, which
+        # HAProxy refuses outright -- so the whole configuration would fail to
+        # validate on the node that received it.
+        if rule.get("backend") in dropped:
+            dropped.add(rule.get("id"))
+            continue
+        kept_rules.append(rule)
+    if "rules" in out:
+        out["rules"] = kept_rules
+        for fe in out.get("frontends") or []:
+            if isinstance(fe.get("rules"), list):
+                fe["rules"] = [x for x in fe["rules"] if x not in dropped]
     return out
 
 

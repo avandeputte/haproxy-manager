@@ -220,6 +220,7 @@ def _node_summary(st):
         "config_parts": st.get("config_parts") or {},
         "config_objects": st.get("config_objects") or {},
         "config_leak": st.get("config_leak") or None,
+        "config_dangling": st.get("config_dangling") or [],
         "update_available": bool(st.get("update_available")),
         "certs_total": len(certs),
         "certs_bad": sum(1 for c in certs if c.get("status") in ("expired", "expiring", "placeholder", "missing")),

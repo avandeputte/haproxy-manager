@@ -486,6 +486,9 @@ def api_status():
         # Set when this node took a configuration and then did not match it,
         # which can only mean something node-specific travelled with it.
         "config_leak": cfg["_meta"].get("config_leak") or None,
+        # References in the shared configuration that point at nothing. The
+        # other nodes would receive rules that cannot do what they say.
+        "config_dangling": cfg["_meta"].get("shared_dangling") or [],
         "certs": certs,
         "acme_installed": Path(ACME_SH).exists(),
         "renews_here": acme.renewal_runs_here(cfg)[0],

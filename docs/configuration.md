@@ -429,6 +429,28 @@ minute old, so anything that changes or pushes the configuration throws the
 collected copy away — the next look asks the nodes again rather than repeating
 a verdict from before the change.
 
+**What is shared has to stand on its own.** Marking an object as this node's
+own is what keeps it out of the shared configuration, and two rules make that
+reliable rather than a matter of remembering:
+
+- **The marking closes over the object graph.** An object every user of which
+  is node-local is node-local too — a condition only this node's rule tests, a
+  server only its pool uses, the health monitor behind it. Applied at save
+  time, so an object cannot reach the other nodes by having been forgotten.
+  An object a *shared* rule also uses stays shared, so a service that
+  deliberately points every node at its own `127.0.0.1` is untouched.
+- **References go with what they point at.** A rule that travels while a
+  condition it tests does not would arrive with that test missing — matching
+  everything or nothing instead of the one host it was written for, silently.
+  So stripping removes the reference too, and a rule whose pool is node-local
+  is not sent at all, since HAProxy refuses a `use_backend` naming a backend
+  that is not there.
+
+After stripping, what is left is checked for references pointing at nothing.
+That should never happen; if it does it is recorded and the Cluster page names
+the node and the references, because the fault is in what is being sent rather
+than in the node receiving it.
+
 **How node-local settings are kept out of it.** The fingerprint is taken over
 the same value that is sent to the other nodes, not a second derivation of it,
 so what is compared and what is shared cannot drift apart. That value excludes
@@ -523,7 +545,7 @@ of its peers.
 ## Upgrades and the browser cache
 
 The page is served with `no-cache`, and everything it loads lives under a path
-that contains the version — `/static/v/1.72.0/js/main.js`. Those files are then
+that contains the version — `/static/v/1.73.0/js/main.js`. Those files are then
 cached for a year, which is safe because the URL changes whenever the version
 does.
 

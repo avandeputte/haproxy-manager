@@ -227,6 +227,87 @@ ok(view["haproxy"]["frontends"][0]["rules"] == ["r-shop"],
 ok([c["id"] for c in view["acme"]["certificates"]] == ["c-shop"],
    "the same for the certificates")
 
+# -- what is shared has to stand on its own --------------------------------
+# The failure this prevents: a rule is shared while the condition it tests
+# belongs to one node. The other nodes receive the rule, cannot find the
+# condition, and render it with that test simply missing -- so it matches
+# everything or nothing instead of the one host it was written for, and
+# nothing anywhere says so.
+from ham.config import close_local_only, shared_dangling   # noqa: E402
+
+
+def two_services():
+    return {"local": {}, "cluster": {}, "notify": {},
+            "acme": {"certificates": [{"id": "c-shop", "name": "shop"}]},
+            "haproxy": {
+                "frontends": [{"id": "fe", "name": "https-443",
+                               "rules": ["r-ui", "r-shop"], "certificates": ["c-shop"],
+                               "default_backend": ""}],
+                "backends": [
+                    {"id": "b-ui", "name": "ui", "servers": ["s-ui"],
+                     "healthcheck": "h-ui", LOCAL_ONLY: True},
+                    {"id": "b-shop", "name": "shop", "servers": ["s-shop"]}],
+                "servers": [{"id": "s-ui", "name": "ui-srv"},
+                            {"id": "s-shop", "name": "web1"}],
+                "healthchecks": [{"id": "h-ui", "name": "ui-check"}],
+                "rules": [
+                    {"id": "r-ui", "name": "to-ui", "backend": "b-ui",
+                     "conditions": ["c-mine"], LOCAL_ONLY: True},
+                    {"id": "r-shop", "name": "to-shop", "backend": "b-shop",
+                     "conditions": ["c-shop-host"]}],
+                "conditions": [{"id": "c-mine", "name": "host-proxy1"},
+                               {"id": "c-shop-host", "name": "host-shop"}]}}
+
+
+cfg = two_services()
+n = close_local_only(cfg)
+by = {i["id"]: i for coll in cfg["haproxy"].values() if isinstance(coll, list) for i in coll}
+ok(n >= 3, "marking spreads to what exists only for something marked (%d objects)" % n)
+ok(by["c-mine"].get(LOCAL_ONLY) is True,
+   "a condition only a node-local rule tests belongs to that node")
+ok(by["s-ui"].get(LOCAL_ONLY) is True, "so does its server")
+ok(by["h-ui"].get(LOCAL_ONLY) is True, "and its health monitor")
+ok(by["c-shop-host"].get(LOCAL_ONLY) is None, "a condition a shared rule tests is untouched")
+ok(by["s-shop"].get(LOCAL_ONLY) is None, "and so is a shared service's server")
+
+view = shared_view(cfg)
+ok([r["id"] for r in view["haproxy"]["rules"]] == ["r-shop"], "the node's rule is not shared")
+ok(view["haproxy"]["frontends"][0]["rules"] == ["r-shop"],
+   "and the listener does not name it")
+ok(shared_dangling(view) == [],
+   "what is left refers to nothing that is missing: %s" % shared_dangling(view))
+
+# The hole this closes: a rule that is shared while one of the conditions it
+# tests belongs to a node. The pool is shared, so the rule travels -- and used
+# to travel with a reference to a condition the receiving node does not have.
+cfg = two_services()
+cfg["haproxy"]["conditions"].append({"id": "c-node", "name": "host-proxy1",
+                                     LOCAL_ONLY: True})
+cfg["haproxy"]["rules"][1]["conditions"] = ["c-shop-host", "c-node"]
+view = strip_local_only(cfg["haproxy"], local_only_ids(cfg))
+kept = [r for r in view["rules"] if r["id"] == "r-shop"]
+ok(kept and kept[0]["conditions"] == ["c-shop-host"],
+   "stripping takes the reference out rather than leaving it pointing at nothing: %s"
+   % (kept[0]["conditions"] if kept else None))
+ok(shared_dangling({"haproxy": view, "acme": cfg["acme"]}) == [], "so nothing dangles")
+
+# a rule whose pool is node-local cannot be shared at all: HAProxy refuses a
+# use_backend naming a backend that is not there, so the receiving node's whole
+# configuration would fail to validate
+cfg = two_services()
+cfg["haproxy"]["rules"][0].pop(LOCAL_ONLY)
+view = strip_local_only(cfg["haproxy"], local_only_ids(cfg))
+ok([r["id"] for r in view["rules"]] == ["r-shop"],
+   "a rule pointing at a node-local pool is dropped, not sent broken")
+ok(view["frontends"][0]["rules"] == ["r-shop"], "and the listener stops naming it")
+
+# and the check reports a genuine dangling reference rather than staying quiet
+broken = two_services()
+broken["haproxy"]["rules"][1]["conditions"] = ["c-not-here"]
+found = shared_dangling(shared_view(broken))
+ok(len(found) == 1 and "c-not-here" in found[0],
+   "a reference to something absent is reported: %s" % found)
+
 print()
 print("the revision counts what it should" if not fails else "%d failed" % len(fails))
 sys.exit(1 if fails else 0)
