@@ -346,6 +346,12 @@ The login is node-local: set it on each node.
 publishes this UI as a normal service with a certificate, so you stop using
 plain HTTP.
 
+The page says which names this node **actually answers for**, read from the
+objects rather than from the setting that made them. Those come apart — a name
+that was never published, or one that stopped being — and when they do, the
+form still shows the address that was typed while the node no longer routes it.
+A name listed as not routed here is put back by pressing Save.
+
 Two addresses, and they do different jobs:
 
 | | |
@@ -517,7 +523,7 @@ of its peers.
 ## Upgrades and the browser cache
 
 The page is served with `no-cache`, and everything it loads lives under a path
-that contains the version — `/static/v/1.71.0/js/main.js`. Those files are then
+that contains the version — `/static/v/1.72.0/js/main.js`. Those files are then
 cached for a year, which is safe because the URL changes whenever the version
 does.
 

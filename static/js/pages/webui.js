@@ -41,6 +41,26 @@ export async function renderWebui(){
   bd.innerHTML='<p class=hint style="margin-bottom:14px">'+blurb(cur)+' It builds the same objects the '+
     'publish wizard would: a pool pointing at <span class=mono>127.0.0.1:'+esc(cur.port)+'</span>, a host rule, the HTTPS '+
     'listener and a certificate.</p>';
+  /* The setting says what should be published; this says what is. They come
+     apart -- a name that stopped being published looks like the node being
+     down, and the form still shows the address that was typed. */
+  if(cur.enabled){
+    const state=document.createElement("p");state.className="hint";
+    state.style.marginBottom="14px";
+    const want=[cur.url,cur.shared_url].filter(Boolean)
+      .map(u=>String(u).replace(/^https?:\/\//,"").replace(/\/.*$/,"").toLowerCase());
+    const have=cur.hosts||[];
+    const missing=want.filter(h=>have.indexOf(h)<0);
+    state.innerHTML="This node answers for "+
+      (have.length?have.map(h=>'<span class=mono>'+esc(h)+"</span>").join(", ")
+                  :"<b>nothing</b>")+".";
+    if(missing.length)
+      state.innerHTML+=' <b style="color:var(--drift)">'+
+        missing.map(esc).join(", ")+(missing.length===1?" is":" are")+
+        " not routed here</b> — Save rebuilds the service and adds "+
+        (missing.length===1?"it":"them")+".";
+    bd.appendChild(state);
+  }
   const frm=document.createElement("div");frm.className="frm";
   const rows={};
   WEBUI_FIELDS.forEach(f=>{

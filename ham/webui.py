@@ -28,6 +28,8 @@ def webui_pubs(cfg, pub):
     sp, err = wizard._split_url(shared, "The shared UI address", default_scheme="https",
                          allow=("http", "https"))
     if err or sp["host"].lower() == pub["host"].lower():
+        # Both addresses the same: the node has no name of its own left, and
+        # is reachable only through whichever node holds the virtual IP.
         return pubs
     if sp["scheme"] != pub["scheme"] or sp["port"] != pub["port"]:
         return pubs          # one listener cannot serve both; validated on save
@@ -122,6 +124,22 @@ def _webui_setting(cfg):
         "web_ui", {"enabled": False, "url": "", "certificate": "auto", "rule_id": ""})
 
 
+def current_webui_hosts(cfg):
+    """The host names the UI service is routed by, from the object graph."""
+    hp = cfg["haproxy"]
+    pools = {b["id"] for b in hp.get("backends") or [] if b.get("name") == WEBUI_NAME}
+    conds = _by_id(hp.get("conditions") or [])
+    out = set()
+    for rule in hp.get("rules") or []:
+        if rule.get("backend") not in pools:
+            continue
+        for cid in rule.get("conditions") or []:
+            c = conds.get(cid) or {}
+            if c.get("type") == "host_matches" and c.get("value"):
+                out.add(c["value"].strip().lower())
+    return out
+
+
 @app.get("/api/webui")
 def api_webui_get():
     cfg = load_config()
@@ -132,6 +150,11 @@ def api_webui_get():
         "certificate": s.get("certificate", "auto"), "rule_id": s.get("rule_id", ""),
         "port": PORT, "listen": LISTEN,
         "exposed_directly": LISTEN not in ("127.0.0.1", "localhost", "::1"),
+        # What this node actually answers for right now, read from the objects
+        # rather than from the setting that made them. The two can differ --
+        # a name that was never published, or one that stopped being published
+        # -- and the setting alone cannot show that.
+        "hosts": sorted(current_webui_hosts(cfg)),
     })
 
 
