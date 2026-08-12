@@ -61,6 +61,15 @@ export async function renderWebui(){
         (missing.length===1?"it":"them")+".";
     bd.appendChild(state);
   }
+  /* Where the names point. A name resolving somewhere this node is not looks
+     exactly like the node being down, and no amount of looking at HAProxy
+     shows it. */
+  (cur.address_checks||[]).forEach(c=>{
+    const el=document.createElement("p");el.className="hint";
+    el.style.cssText="margin-bottom:14px;color:var(--drift)";
+    el.innerHTML="! <b>"+esc(c.which)+":</b> "+esc(c.message);
+    bd.appendChild(el);
+  });
   const frm=document.createElement("div");frm.className="frm";
   const rows={};
   WEBUI_FIELDS.forEach(f=>{

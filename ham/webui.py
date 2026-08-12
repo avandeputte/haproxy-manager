@@ -3,12 +3,13 @@
 from flask import abort
 from flask import jsonify
 from flask import request
+from urllib.parse import urlsplit
 import copy
 
 from .base import LISTEN, PORT, _lock, app, log
 from .config import WEBUI_NAME, is_webui_cert, load_config, merged, move_to_local, promote_local, save_config, webui_object_ids
 from .util import _by_id, cert_details, cert_path
-from . import apply, dnsapi, wizard
+from . import apply, dnsapi, vrrp, wizard
 
 # --------------------------------------------------------------------------
 
@@ -102,6 +103,38 @@ def current_webui_hosts(cfg):
     return out
 
 
+def webui_address_checks(cfg):
+    """Do the two addresses point where they have to?
+
+    This node's own name must resolve to an address this node holds -- if it
+    resolves anywhere else, nothing here can answer it however well HAProxy is
+    running, and the failure looks exactly like the node being down. The shared
+    name must resolve to the virtual IP, which is what makes it reach whichever
+    node is active.
+    """
+    out = []
+    s = cfg["local"].get("web_ui") or {}
+    vips = vrrp.cluster_vips(cfg)
+    if s.get("enabled") and s.get("url"):
+        level, msg = vrrp.check_node_url(s["url"], vips)
+        if level != "ok":
+            out.append({"which": "This node's address", "level": level, "message": msg})
+    shared = (cfg.get("cluster") or {}).get("ui_url") or ""
+    if shared and vips:
+        host = urlsplit(shared if "//" in shared else "//" + shared).hostname or ""
+        ips = vrrp.resolve_host(host)
+        if not ips:
+            out.append({"which": "Shared address", "level": "warn",
+                        "message": "%s does not resolve here." % host})
+        elif not set(ips) & set(vips):
+            out.append({"which": "Shared address", "level": "warn",
+                        "message": "%s resolves to %s, which is not the virtual IP (%s). "
+                                   "It will keep reaching whichever node that address "
+                                   "belongs to rather than whichever node is active."
+                                   % (host, ", ".join(ips), ", ".join(vips))})
+    return out
+
+
 def webui_missing_hosts(cfg):
     """Addresses this node is configured to answer for and currently does not."""
     s = cfg["local"].get("web_ui") or {}
@@ -164,6 +197,10 @@ def api_webui_get():
         # a name that was never published, or one that stopped being published
         # -- and the setting alone cannot show that.
         "hosts": sorted(current_webui_hosts(cfg)),
+        # Where these names actually point. HAProxy answering on one address
+        # and not another is not a proxy problem: it is a name resolving
+        # somewhere this node is not.
+        "address_checks": webui_address_checks(cfg),
     })
 
 
