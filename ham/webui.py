@@ -6,7 +6,7 @@ from flask import request
 import copy
 
 from .base import LISTEN, PORT, _lock, app
-from .config import LOCAL_ONLY, WEBUI_NAME, is_webui_cert, load_config, save_config
+from .config import LOCAL_ONLY, WEBUI_NAME, is_webui_cert, load_config, save_config, webui_object_ids
 from .util import _by_id, cert_details, cert_path
 from . import apply, dnsapi, wizard
 
@@ -42,13 +42,10 @@ def build_webui(cfg, pub, mode="auto", http_redirect=True):
                                  want_cert=(mode != "none"), new_certificate=(mode == "new"),
                                  http_redirect=http_redirect,
                                  health={"type": "http", "interval": "5s", "uri": "/", "status": "200"})
-    hp = cfg["haproxy"]
-    pool = wizard._find(hp["backends"], lambda b: b.get("name") == WEBUI_NAME)
-    rule = wizard._find(hp["rules"], lambda r: r.get("backend") == (pool or {}).get("id"))
-    ids = {(pool or {}).get("id"), (rule or {}).get("id"), (pool or {}).get("healthcheck")}
-    ids |= set((pool or {}).get("servers") or [])
-    ids |= set((rule or {}).get("conditions") or [])
-    _tag_local(hp, {i for i in ids if i})
+    # Everything the service is built from, found from the object graph. Naming
+    # the pool exactly and taking one rule from it missed every copy the wizard
+    # had to number, and those then travelled to the other nodes.
+    _tag_local(cfg["haproxy"], webui_object_ids(cfg))
     # The certificate too. Every node needs one for its own name, so a
     # certificate left in the shared configuration travels to the others, which
     # keep it and add their own -- and no two nodes ever hold the same

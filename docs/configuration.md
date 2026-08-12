@@ -517,7 +517,7 @@ of its peers.
 ## Upgrades and the browser cache
 
 The page is served with `no-cache`, and everything it loads lives under a path
-that contains the version — `/static/v/1.67.0/js/main.js`. Those files are then
+that contains the version — `/static/v/1.68.0/js/main.js`. Those files are then
 cached for a year, which is safe because the URL changes whenever the version
 does.
 
@@ -577,12 +577,19 @@ The JSON backup contains secrets. Store it accordingly.
 
 The UI's own service is the reason the right-hand column matters more than it
 looks. Every node publishes it under the same name, for a different host, so
-everything it is made of — the pool, the server, the rule, and the certificate
-for that node's own name — belongs to the node that made it. Anything of that
-sort left in the shared configuration travels to the other nodes, which keep it
-and add their own, and the cluster never agrees with itself again. Upgrading
-marks those certificates as node-local and removes the ones a node was only
-ever sent.
+everything it is made of — the pool, the server, the health monitor, the rule,
+the conditions it tests and the certificate for that node's own name — belongs
+to the node that made it. Anything of that sort left in the shared
+configuration travels to the other nodes, where it collides with theirs; the
+wizard then makes a numbered copy, which travels in turn, and the cluster never
+agrees with itself again.
+
+The objects are found from the object graph rather than by name, so the
+numbered copies are covered too. Upgrading marks them, removes the ones a node
+was only ever sent — recognised by not being reachable from the rule that node
+actually uses — and puts the names back, so the next rebuild reuses what is
+there instead of making yet another copy. A node that cannot tell which rule is
+its own marks everything and removes nothing.
 
 ## Environment variables
 

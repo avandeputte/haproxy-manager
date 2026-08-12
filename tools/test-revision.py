@@ -18,7 +18,8 @@ os.environ.setdefault("HAM_DATA_DIR", tempfile.mkdtemp(prefix="ham-rev-"))
 os.environ["HAM_DRY_RUN"] = "1"
 
 from ham.config import (load_config, save_config, shared_fingerprint,   # noqa: E402
-                        shared_view, LOCAL_ONLY)
+                        shared_view, strip_local_only, local_only_ids, LOCAL_ONLY,
+                        WEBUI_NAME)
 
 fails = []
 
@@ -198,6 +199,101 @@ cfg["cluster"]["ui_url"] = ""
 _migrate_webui_certs(cfg)
 ok(len(cfg["acme"]["certificates"]) == 3,
    "with no UI address configured it drops only the duplicate")
+
+# -- the UI service's rules and conditions ---------------------------------
+# From a real three-node cluster, which reported:
+#   haproxy.conditions  host-proxy                only on haproxy1, haproxy3
+#   haproxy.frontends   https-443                 different contents everywhere
+#   haproxy.rules       to-haproxy-manager-ui-2   only on haproxy1, haproxy3
+#   haproxy.rules       to-haproxy-manager-ui-4   only on haproxy3
+# Only the pool named exactly for the service was marked as node-local, so
+# every numbered copy travelled, collided, and made more of itself.
+from ham.config import _migrate_webui_objects, webui_object_ids   # noqa: E402
+
+
+def three_node_mess():
+    """One node's configuration after the others' UI objects have arrived."""
+    return {
+        "local": {"web_ui": {"enabled": True, "url": "https://haproxy2.example.com",
+                             "rule_id": "r-mine"}},
+        "cluster": {"ui_url": "https://proxy.example.com"},
+        "acme": {"certificates": []},
+        "haproxy": {
+            "frontends": [{"id": "fe", "name": "https-443",
+                           "rules": ["r-mine", "r-2", "r-4", "r-shop"],
+                           "certificates": []}],
+            "backends": [
+                {"id": "b-mine", "name": WEBUI_NAME, "servers": ["s-mine"],
+                 "healthcheck": "h-mine"},
+                {"id": "b-2", "name": WEBUI_NAME + "-2", "servers": ["s-2"]},
+                {"id": "b-4", "name": WEBUI_NAME + "-4", "servers": ["s-4"]},
+                {"id": "b-shop", "name": "shop", "servers": ["s-shop"]},
+            ],
+            "servers": [{"id": "s-mine", "name": "ui"}, {"id": "s-2", "name": "ui-2"},
+                        {"id": "s-4", "name": "ui-4"}, {"id": "s-shop", "name": "web1"}],
+            "healthchecks": [{"id": "h-mine", "name": "ui-check"}],
+            "rules": [
+                {"id": "r-mine", "name": "to-" + WEBUI_NAME, "backend": "b-mine",
+                 "conditions": ["c-mine", "c-shared"]},
+                {"id": "r-2", "name": "to-" + WEBUI_NAME + "-2", "backend": "b-2",
+                 "conditions": ["c-1", "c-shared-1"]},
+                {"id": "r-4", "name": "to-" + WEBUI_NAME + "-4", "backend": "b-4",
+                 "conditions": ["c-3"]},
+                {"id": "r-shop", "name": "to-shop", "backend": "b-shop",
+                 "conditions": ["c-shop"]},
+            ],
+            "conditions": [{"id": "c-mine", "name": "host-haproxy2"},
+                           {"id": "c-shared", "name": "host-proxy"},
+                           {"id": "c-1", "name": "host-haproxy1"},
+                           {"id": "c-shared-1", "name": "host-proxy"},
+                           {"id": "c-3", "name": "host-haproxy3"},
+                           {"id": "c-shop", "name": "host-shop"}],
+        },
+    }
+
+
+cfg = three_node_mess()
+found = webui_object_ids(cfg)
+ok("r-2" in found and "r-4" in found, "the numbered rules are recognised as the UI service's")
+ok("c-1" in found and "c-shared-1" in found, "and so are the conditions they test")
+ok("b-shop" not in found and "c-shop" not in found and "r-shop" not in found,
+   "an ordinary service is left alone")
+
+_migrate_webui_objects(cfg)
+hp = cfg["haproxy"]
+ids = lambda coll: [x["id"] for x in hp[coll]]
+ok(ids("rules") == ["r-mine", "r-shop"], "the other nodes' rules are removed: %s" % ids("rules"))
+ok(ids("backends") == ["b-mine", "b-shop"], "and their pools: %s" % ids("backends"))
+ok(ids("servers") == ["s-mine", "s-shop"], "and their servers")
+ok(sorted(ids("conditions")) == ["c-mine", "c-shared", "c-shop"],
+   "and the conditions only they used: %s" % ids("conditions"))
+ok(hp["frontends"][0]["rules"] == ["r-mine", "r-shop"],
+   "the listener no longer names what was removed: %s" % hp["frontends"][0]["rules"])
+mine = [x for x in hp["rules"] if x["id"] == "r-mine"][0]
+ok(mine.get(LOCAL_ONLY) is True, "this node's own rule is marked as its own")
+ok([x for x in hp["conditions"] if x["id"] == "c-shared"][0].get(LOCAL_ONLY) is True,
+   "including the condition for the shared address, which every node has its own copy of")
+ok([x for x in hp["rules"] if x["id"] == "r-shop"][0].get(LOCAL_ONLY) is None,
+   "an ordinary rule is not marked")
+
+# and with everything marked, the three nodes' listeners finally match
+a, b = three_node_mess(), three_node_mess()
+b["local"]["web_ui"]["rule_id"] = "r-2"      # a different node, a different rule
+b["haproxy"]["rules"][1]["id"] = "r-2"
+_migrate_webui_objects(a); _migrate_webui_objects(b)
+sa = strip_local_only(a["haproxy"], local_only_ids(a))
+sb = strip_local_only(b["haproxy"], local_only_ids(b))
+ok(sa["frontends"] == sb["frontends"],
+   "two nodes that kept different UI rules now show the same listener")
+ok(sa["rules"] == sb["rules"], "and the same rules")
+
+cfg = three_node_mess()
+cfg["local"]["web_ui"] = {"enabled": True, "url": "https://haproxy2.example.com"}
+_migrate_webui_objects(cfg)
+ok(len(cfg["haproxy"]["rules"]) == 4,
+   "a node that cannot tell which rule is its own removes nothing")
+ok(all(x.get(LOCAL_ONLY) for x in cfg["haproxy"]["rules"] if x["id"] != "r-shop"),
+   "but still marks them, so they stop travelling")
 
 print()
 print("the revision counts what it should" if not fails else "%d failed" % len(fails))

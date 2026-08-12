@@ -218,6 +218,67 @@ def _migrate_webui_certs(cfg):
              len(drop), ", ".join(c.get("name", "?") for c in drop))
 
 
+def _migrate_webui_objects(cfg):
+    """Take the UI service out of the shared configuration, and tidy what it left.
+
+    Only the pool named exactly for the service, and one rule pointing at it,
+    used to be marked as belonging to this node. Anything the wizard had to
+    number -- "...-2", "...-4" -- was left shared, so it travelled to the other
+    nodes; there it collided with theirs, which made another numbered copy, and
+    so on. Every node ended up holding a handful of other nodes' UI rules and
+    the listener that named them, which is why no two nodes agreed.
+
+    Everything the service is built from is marked here. What is not this
+    node's is then removed: the rule this node actually uses is recorded in
+    local.web_ui.rule_id, and anything not reachable from it was only ever
+    another node's. Without that id nothing is removed -- a node that cannot
+    tell which is its own must not guess.
+    """
+    ids = webui_object_ids(cfg)
+    if not ids:
+        return
+    hp = cfg["haproxy"]
+    for coll in ("servers", "backends", "conditions", "rules", "healthchecks"):
+        for item in hp.get(coll) or []:
+            if item.get("id") in ids:
+                item[LOCAL_ONLY] = True
+
+    mine = (cfg["local"].get("web_ui") or {}).get("rule_id") or ""
+    rule = next((r for r in hp.get("rules") or [] if r.get("id") == mine), None)
+    if not rule:
+        return
+    keep = {rule.get("id")} | set(rule.get("conditions") or [])
+    pool = next((b for b in hp.get("backends") or []
+                 if b.get("id") == rule.get("backend")), None)
+    if pool:
+        keep |= {pool.get("id")} | set(pool.get("servers") or [])
+        if pool.get("healthcheck"):
+            keep.add(pool["healthcheck"])
+    gone = {i for i in ids - keep if i}
+    if not gone:
+        return
+    names = []
+    for coll in ("servers", "backends", "conditions", "rules", "healthchecks"):
+        if not isinstance(hp.get(coll), list):
+            continue
+        names += [x.get("name", "?") for x in hp[coll] if x.get("id") in gone]
+        hp[coll] = [x for x in hp[coll] if x.get("id") not in gone]
+    for fe in hp.get("frontends") or []:
+        for key in ("rules", "certificates"):
+            if isinstance(fe.get(key), list):
+                fe[key] = [x for x in fe[key] if x not in gone]
+        if fe.get("default_backend") in gone:
+            fe["default_backend"] = ""
+
+    # Back to the names the service expects, so the next rebuild finds these
+    # rather than making yet another numbered copy beside them.
+    if pool:
+        pool["name"] = WEBUI_NAME
+    rule["name"] = "to-" + WEBUI_NAME
+    log.info("removed %d UI object(s) belonging to other nodes: %s",
+             len(gone), ", ".join(sorted(names)))
+
+
 def _migrate(cfg):
     """Bring an older config forward. Idempotent; persisted on the next save."""
     if not cfg["_meta"].get("setup_complete") and _looks_configured(cfg):
@@ -225,6 +286,7 @@ def _migrate(cfg):
     # A passive-node unlock is per session, so any copy sitting in the stored
     # configuration is stale by definition and is dropped.
     cfg["local"].pop("allow_edit_when_passive", None)
+    _migrate_webui_objects(cfg)
     _migrate_webui_certs(cfg)
     # VRRP settings that must match across nodes moved from local.keepalived
     # into the shared cluster section.
@@ -364,6 +426,41 @@ def save_config(cfg):
 
 LOCAL_ONLY = "local_only"       # this object belongs to this node alone
 WEBUI_NAME = "haproxy-manager-ui"   # the service each node publishes its own UI as
+
+
+def is_webui_name(name, prefix=""):
+    """Is this the name the UI service uses, or one of its numbered variants?
+
+    When an object of that name already exists the wizard makes another called
+    "...-2", "...-4" and so on. Matching only the plain name is what let those
+    escape being marked as node-local, so they travelled to the other nodes,
+    collided there, and produced more of themselves.
+    """
+    name = name or ""
+    base = prefix + WEBUI_NAME
+    return name == base or name.startswith(base + "-")
+
+
+def webui_object_ids(cfg):
+    """Every HAProxy object that is part of a node's own UI service.
+
+    Found from the object graph rather than by name alone: the pools named for
+    the service, everything they are built from, the rules that route to them
+    and the conditions those rules test. A user's own object is only included
+    if one of those rules actually refers to it.
+    """
+    hp = cfg.get("haproxy") or {}
+    pools = [b for b in hp.get("backends") or [] if is_webui_name(b.get("name"))]
+    ids = {p.get("id") for p in pools}
+    for pool in pools:
+        ids |= set(pool.get("servers") or [])
+        if pool.get("healthcheck"):
+            ids.add(pool["healthcheck"])
+    for rule in hp.get("rules") or []:
+        if rule.get("backend") in ids or is_webui_name(rule.get("name"), "to-"):
+            ids.add(rule.get("id"))
+            ids |= set(rule.get("conditions") or [])
+    return {i for i in ids if i}
 
 
 def is_webui_cert(cert):
