@@ -434,39 +434,28 @@ minute old, so anything that changes or pushes the configuration throws the
 collected copy away — the next look asks the nodes again rather than repeating
 a verdict from before the change.
 
-**What is shared has to stand on its own.** Marking an object as this node's
-own is what keeps it out of the shared configuration, and two rules make that
-reliable rather than a matter of remembering:
+**What is shared, and what is this node's.** They are separate containers in
+the configuration, not one container with some objects marked. The shared
+sections hold what every node has; `local` holds what only this node has — and
+that includes whole objects, not only settings: the pool, server, health
+monitor, rule, conditions and certificate that publish this node's own
+management UI.
 
-- **The marking closes over the object graph.** An object every user of which
-  is node-local is node-local too — a condition only this node's rule tests, a
-  server only its pool uses, the health monitor behind it. Applied at save
-  time, so an object cannot reach the other nodes by having been forgotten.
-  An object a *shared* rule also uses stays shared, so a service that
-  deliberately points every node at its own `127.0.0.1` is untouched.
-- **References go with what they point at.** A rule that travels while a
-  condition it tests does not would arrive with that test missing — matching
-  everything or nothing instead of the one host it was written for, silently.
-  So stripping removes the reference too, and a rule whose pool is node-local
-  is not sent at all, since HAProxy refuses a `use_backend` naming a backend
-  that is not there.
+That makes sharing a copy rather than a filter. What is sent to the other
+nodes is the shared sections as they are, and what is compared is the same
+value, so the two cannot drift apart. There is no marking to honour and
+nothing that has to remember to honour it — which is where four separate
+faults came from.
 
-After stripping, what is left is checked for references pointing at nothing.
-That should never happen; if it does it is recorded and the Cluster page names
-the node and the references, because the fault is in what is being sent rather
-than in the node receiving it.
+A listener is shared while the rule attaching this node's UI to it is not, so
+`local.attach` records that by the listener's **name** (every node has one
+called `https-443`, with a different id) and by position — HAProxy takes the
+first matching `use_backend`, and serves the first certificate to clients that
+send no SNI. Rendering merges the two; nothing else needs to know.
 
-**How node-local settings are kept out of it.** The fingerprint is taken over
-the same value that is sent to the other nodes, not a second derivation of it,
-so what is compared and what is shared cannot drift apart. That value excludes
-the whole `local` section and every object marked as belonging to one node.
-
-There is one failure it cannot see from the outside: an object that is
-node-specific but is *not* marked, sitting inside a shared collection. So each
-node checks itself — after taking a configuration it compares its own
-fingerprint with the one that arrived, and if they differ it records it and the
-Cluster page names the node and says what it means. Two nodes cannot end up
-disagreeing forever with no reason given.
+Each node still checks itself after taking a configuration: it compares its own
+fingerprint with the one that arrived, and records a mismatch. That should now
+be impossible, which is exactly why it is worth reporting if it happens.
 
 **What counts as HAProxy being up.** Keepalived gives the virtual IP up when
 its tracking script fails. The default script asks HAProxy through its admin
@@ -550,7 +539,7 @@ of its peers.
 ## Upgrades and the browser cache
 
 The page is served with `no-cache`, and everything it loads lives under a path
-that contains the version — `/static/v/1.74.0/js/main.js`. Those files are then
+that contains the version — `/static/v/1.75.0/js/main.js`. Those files are then
 cached for a year, which is safe because the URL changes whenever the version
 does.
 
@@ -651,10 +640,10 @@ configuration travels to the other nodes, where it collides with theirs; the
 wizard then makes a numbered copy, which travels in turn, and the cluster never
 agrees with itself again.
 
-The objects are found from the object graph rather than by name, so the copies
-the wizard had to number are covered too. They are marked when the service is
-built, which is every time Web UI access is saved and every time a
-configuration arrives from another node.
+None of that can happen now: those objects are not in the shared sections at
+all, so there is nothing to send. Upgrading moves what was there into place,
+once, and the generated `haproxy.cfg` is unchanged by the move apart from where
+one `backend` block sits in the file — which HAProxy resolves by name.
 
 ## Environment variables
 

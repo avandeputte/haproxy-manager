@@ -14,7 +14,7 @@ import uuid
 
 from .base import (CERT_DIR, PEER_CONNECT_TIMEOUT, PEER_READ_TIMEOUT,
     PUSH_READ_TIMEOUT, _lock, _requests, app, log)
-from .config import DEFAULT_CONFIG, _merge_defaults, load_config, local_only_ids, save_config, shared_fingerprint, shared_view
+from .config import DEFAULT_CONFIG, _merge_defaults, load_config, save_config, shared_fingerprint, shared_view
 from . import apply, auth, cluster, peering, webui
 
 # --------------------------------------------------------------------------
@@ -428,15 +428,12 @@ def _receive_locked(cfg, data, conf, source=None):
                      % (socket.gethostname(), mine, theirs, socket.gethostname(),
                         socket.gethostname())}), 409
 
-    # Gathered before anything is replaced: it is what this node owns.
-    mine_ids = local_only_ids(cfg)
+    # A straight replacement. This node's own objects are not in these sections
+    # -- they live under local -- so there is nothing to rescue afterwards.
     if "haproxy" in conf:
-        cfg["haproxy"] = webui.keep_local_only(
-            cfg["haproxy"], _merge_defaults(conf["haproxy"], DEFAULT_CONFIG["haproxy"]),
-            mine_ids)
+        cfg["haproxy"] = _merge_defaults(conf["haproxy"], DEFAULT_CONFIG["haproxy"])
     if "acme" in conf:
-        cfg["acme"] = webui.keep_local_only(
-            cfg["acme"], _merge_defaults(conf["acme"], DEFAULT_CONFIG["acme"]), mine_ids)
+        cfg["acme"] = _merge_defaults(conf["acme"], DEFAULT_CONFIG["acme"])
     if isinstance(conf.get("cluster"), dict):
         # Cluster-wide VRRP settings. Anything per node -- interface, priority,
         # unicast addresses -- lives in local and is deliberately untouched.

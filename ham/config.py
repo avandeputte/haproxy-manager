@@ -107,6 +107,16 @@ DEFAULT_CONFIG = {
             "track_haproxy": True,
             "custom": "",
         },
+        # Objects this node owns. Not a copy of the shared ones and not a
+        # filtered view of them: the shared sections hold what every node has,
+        # these hold what only this node has, and nothing has to decide which
+        # is which after the fact. The management UI's own service lives here.
+        "haproxy": {"servers": [], "backends": [], "healthchecks": [],
+                    "conditions": [], "rules": []},
+        "acme": {"certificates": []},
+        # How they hook onto shared listeners, keyed by listener name -- names
+        # are the same on every node, ids are not.
+        "attach": {},
         "watchdog": {
             # Supervises the services this node runs. Node-local: each node
             # watches its own, and a passive node still restarts its HAProxy.
@@ -151,6 +161,32 @@ CLUSTER_KEYS = ("vrid", "vips", "auth_pass", "advert_int", "state",
                 "nopreempt", "track_haproxy", "track_mode", "custom")
 
 
+def _move_node_objects_into_local(cfg):
+    """One move: put what belongs to this node where it belongs.
+
+    Until now an object in the shared sections carried a flag saying it was
+    this node's, and everything that shared, compared or received a
+    configuration had to honour that flag. Four separate faults came from a
+    place that did not. Where an object lives says it now, so there is nothing
+    left to honour.
+
+    Objects are moved, never dropped, and what a listener referred to it still
+    refers to -- through an attachment recorded by the listener's name, because
+    the other nodes give that listener a different id.
+    """
+    ids = {i.get("id") for sec in LOCAL_SECTIONS
+           for coll in (cfg.get(sec) or {}).values() if isinstance(coll, list)
+           for i in coll if isinstance(i, dict) and i.get("local_only")}
+    ids |= webui_object_ids(cfg)
+    ids |= {c["id"] for c in (cfg.get("acme") or {}).get("certificates") or []
+            if is_webui_cert(c)}
+    moved = move_to_local(cfg, ids)
+    if moved:
+        log.info("moved %d object(s) belonging to this node out of the shared "
+                 "configuration; they are no longer sent to the other nodes", moved)
+    return moved
+
+
 def load_config():
     """Read the configuration. Deliberately does NOT take _lock.
 
@@ -168,7 +204,142 @@ def load_config():
             cfg = json.loads(CONF_PATH.read_text())
         except (ValueError, OSError):
             cfg = {}
-    return _merge_defaults(cfg, DEFAULT_CONFIG)
+    cfg = _merge_defaults(cfg, DEFAULT_CONFIG)
+    _move_node_objects_into_local(cfg)
+    return cfg
+
+
+LOCAL_SECTIONS = ("haproxy", "acme")
+
+
+def merged(cfg):
+    """The configuration as this node sees it: shared plus its own.
+
+    Everything that reads the configuration to do something -- render it,
+    validate it, list it -- wants this. Only what is sent to the other nodes
+    wants the shared sections alone, and that is simply those sections, with
+    nothing to strip.
+    """
+    out = copy.deepcopy(cfg)
+    loc = cfg.get("local") or {}
+    for sec in LOCAL_SECTIONS:
+        for coll, items in (loc.get(sec) or {}).items():
+            if isinstance(items, list) and isinstance(out.get(sec, {}).get(coll), list):
+                have = {i.get("id") for i in out[sec][coll]}
+                out[sec][coll] = out[sec][coll] + [copy.deepcopy(i) for i in items
+                                                   if i.get("id") not in have]
+    for name, att in (loc.get("attach") or {}).items():
+        for fe in out.get("haproxy", {}).get("frontends") or []:
+            if fe.get("name") != name:
+                continue
+            for key in ("rules", "certificates"):
+                extra = [x for x in (att.get(key) or []) if x not in (fe.get(key) or [])]
+                if not extra:
+                    continue
+                have = list(fe.get(key) or [])
+                for x in extra:
+                    where = (att.get("at") or {}).get(x)
+                    if where is None or where > len(have):
+                        have.append(x)
+                    else:
+                        have.insert(where, x)
+                fe[key] = have
+    return out
+
+
+def move_to_local(cfg, ids):
+    """Move objects out of the shared configuration into this node's own.
+
+    Used when the management UI's service is built, and once on an existing
+    configuration to put what was there in the right place. Objects are moved,
+    never dropped: what a listener referred to it still refers to, through an
+    attachment recorded by the listener's name rather than by an id the other
+    nodes do not have.
+    """
+    ids = {i for i in (ids or []) if i}
+    if not ids:
+        return 0
+    loc = cfg.setdefault("local", {})
+    moved = 0
+    for sec in LOCAL_SECTIONS:
+        dest = loc.setdefault(sec, {})
+        for coll, items in list((cfg.get(sec) or {}).items()):
+            if not isinstance(items, list):
+                continue
+            take = [i for i in items if i.get("id") in ids]
+            if not take:
+                continue
+            cfg[sec][coll] = [i for i in items if i.get("id") not in ids]
+            here = dest.setdefault(coll, [])
+            have = {i.get("id") for i in here}
+            for i in take:
+                i.pop("local_only", None)      # where it lives is what says so now
+                if i.get("id") not in have:
+                    here.append(i)
+                    moved += 1
+    attach = loc.setdefault("attach", {})
+    for fe in cfg.get("haproxy", {}).get("frontends") or []:
+        for key in ("rules", "certificates"):
+            if not isinstance(fe.get(key), list):
+                continue
+            mine = [x for x in fe[key] if x in ids]
+            if not mine:
+                continue
+            # Where they sat, not just that they were there. HAProxy takes the
+            # first use_backend that matches, and the first crt is what a
+            # client that sends no SNI is given -- so putting them back at the
+            # end would be a change of behaviour, not of formatting.
+            slot = attach.setdefault(fe.get("name") or "", {})
+            at = slot.setdefault("at", {})
+            for x in mine:
+                at[x] = fe[key].index(x)
+            fe[key] = [x for x in fe[key] if x not in ids]
+            slot[key] = [x for x in (slot.get(key) or []) if x not in mine] + mine
+    return moved
+
+
+def promote_local(cfg):
+    """Put this node's objects back into the shared collections, temporarily.
+
+    The publish wizard finds what a service already consists of by looking in
+    the shared collections, and updates it in place -- that is what makes it an
+    editor rather than something that builds a second set every time. Objects
+    it cannot find, it creates.
+
+    So building this node's own service is: put its objects where the wizard
+    looks, let it work, then move them back. Both halves happen inside one call
+    and nothing is saved in between, so the shared configuration is never
+    written with them in it.
+    """
+    loc = cfg.get("local") or {}
+    moved = set()
+    for sec in LOCAL_SECTIONS:
+        for coll, items in list((loc.get(sec) or {}).items()):
+            if not isinstance(items, list) or not items:
+                continue
+            dest = cfg.setdefault(sec, {}).setdefault(coll, [])
+            have = {i.get("id") for i in dest}
+            for i in items:
+                if i.get("id") not in have:
+                    dest.append(i)
+                moved.add(i.get("id"))
+            loc[sec][coll] = []
+    for name, att in list((loc.get("attach") or {}).items()):
+        for fe in cfg.get("haproxy", {}).get("frontends") or []:
+            if fe.get("name") != name:
+                continue
+            for key in ("rules", "certificates"):
+                extra = [x for x in (att.get(key) or []) if x not in (fe.get(key) or [])]
+                have = list(fe.get(key) or [])
+                for x in extra:
+                    where = (att.get("at") or {}).get(x)
+                    if where is None or where > len(have):
+                        have.append(x)
+                    else:
+                        have.insert(where, x)
+                fe[key] = have
+    loc["attach"] = {}
+    return moved
 
 
 def shared_view(cfg):
@@ -178,9 +349,8 @@ def shared_view(cfg):
     alone, because two nodes that differ only in those two respects are in
     agreement.
     """
-    mine = local_only_ids(cfg)
-    return {"haproxy": strip_local_only(cfg["haproxy"], mine),
-            "acme": strip_local_only(cfg["acme"], mine),
+    return {"haproxy": cfg["haproxy"],
+            "acme": cfg["acme"],
             "cluster": cfg["cluster"],
             "notify": cfg.get("notify", {})}
 
@@ -243,18 +413,6 @@ def shared_parts(cfg):
     return out
 
 
-# save_config runs on every write and this would otherwise repeat the same
-# sentence for as long as the fault lasts.
-_said = set()
-
-
-def _say_once(key, msg, *args):
-    if key in _said:
-        return
-    _said.add(key)
-    log.warning(msg, *args)
-
-
 def save_config(cfg):
     with _lock:
         # The revision counts changes to the shared configuration, and is what
@@ -264,22 +422,6 @@ def save_config(cfg):
         # a configuration from a peer sets both fields first, so adopting is
         # not itself counted as a change.
         meta = cfg.setdefault("_meta", {})
-        # Done here rather than by whoever made the object: this is the one
-        # place every change passes through, so an object that belongs to this
-        # node cannot reach the other nodes by being forgotten.
-        close_local_only(cfg)
-        # And what is left has to make sense on a node that has none of this
-        # node's objects. If it does not, that is a fault in what is shared,
-        # and it is recorded rather than sent quietly.
-        dangling = shared_dangling(shared_view(cfg))
-        if dangling:
-            meta["shared_dangling"] = dangling
-            _say_once("dangling",
-                      "the shared configuration refers to %d object(s) that are not in it: "
-                      "%s -- the other nodes would receive rules that cannot work",
-                      len(dangling), "; ".join(dangling[:4]))
-        else:
-            meta.pop("shared_dangling", None)
         fp = shared_fingerprint(cfg)
         if fp != meta.get("shared_fp"):
             meta["shared_fp"] = fp
@@ -356,148 +498,6 @@ def is_webui_cert(cert):
 
 # What refers to what, so a reference can be followed without hard-coding the
 # same list in four places.
-REFERENCES = (
-    ("frontends", "rules", "rules"),
-    ("frontends", "certificates", "certificates"),
-    ("frontends", "default_backend", "backends"),
-    ("backends", "servers", "servers"),
-    ("backends", "healthcheck", "healthchecks"),
-    ("rules", "conditions", "conditions"),
-    ("rules", "backend", "backends"),
-)
-
-
-def close_local_only(cfg):
-    """Mark what exists only for something already marked.
-
-    An object belongs to one node when everything that uses it does. A
-    condition testing this node's own host name is used by this node's own
-    rule and by nothing else; leaving it shared sends it to nodes that have no
-    rule for it, where it either sits unused or -- worse -- is referred to by a
-    rule that came with it and now tests a host that node does not answer for.
-
-    Marking is what keeps an object out of what is shared, so this closes the
-    marking over the object graph rather than relying on whoever created the
-    object to have thought of it.
-    """
-    hp = cfg.get("haproxy") or {}
-    marked = {i.get("id") for coll in hp.values() if isinstance(coll, list)
-              for i in coll if isinstance(i, dict) and i.get(LOCAL_ONLY)}
-    if not marked:
-        return 0
-    added = 0
-    for owner, field, target in REFERENCES:
-        if target not in hp or owner not in hp:
-            continue
-        users = {}                      # target id -> is every user node-local?
-        for item in hp.get(owner) or []:
-            refs = item.get(field)
-            refs = refs if isinstance(refs, list) else ([refs] if refs else [])
-            for rid in refs:
-                users[rid] = users.get(rid, True) and bool(item.get(LOCAL_ONLY))
-        for item in hp.get(target) or []:
-            if item.get(LOCAL_ONLY) or item.get("id") not in users:
-                continue                # unreferenced objects are nobody's business
-            if users[item["id"]]:
-                item[LOCAL_ONLY] = True
-                added += 1
-    return added
-
-
-def shared_dangling(view):
-    """References in the shared configuration that point at nothing.
-
-    The shared configuration has to stand on its own: whatever is sent has to
-    make sense on a node that has none of this node's objects. Anything left
-    pointing at something that is not there is a fault in what is shared, not
-    in the node that receives it.
-    """
-    hp = view.get("haproxy") or {}
-    ids = {coll: {i.get("id") for i in (hp.get(coll) or [])} for _, _, coll in REFERENCES}
-    ids["certificates"] = {c.get("id") for c in (view.get("acme") or {}).get("certificates") or []}
-    out = []
-    for owner, field, target in REFERENCES:
-        for item in hp.get(owner) or []:
-            refs = item.get(field)
-            refs = refs if isinstance(refs, list) else ([refs] if refs else [])
-            for rid in refs:
-                if rid and rid not in ids.get(target, set()):
-                    out.append("%s %r -> %s %s" % (owner[:-1], item.get("name", rid),
-                                                   target[:-1], rid))
-    return out
-
-
-def local_only_ids(cfg):
-    """Every id this node owns alone, across all the shared sections.
-
-    Gathered across sections because a certificate lives under acme while the
-    listener that names it lives under haproxy: dropping the first without the
-    second would leave a reference to something that is not there.
-    """
-    out = set()
-    for name in ("haproxy", "acme"):
-        for items in (cfg.get(name) or {}).values():
-            if not isinstance(items, list):
-                continue
-            out |= {i.get("id") for i in items if isinstance(i, dict) and i.get(LOCAL_ONLY)}
-    return {i for i in out if i}
-
-
-def strip_local_only(section, dropped=None):
-    """A copy of a config section with this node's own objects removed.
-
-    Some objects belong to one node alone -- the service that publishes this
-    node's own management UI points at 127.0.0.1 and carries this node's host
-    name. They are marked, and this is what takes them out, both of what is
-    sent to the other nodes and of what the nodes compare.
-    """
-    out = copy.deepcopy(section)
-    dropped = set(dropped or ())
-    for coll, items in list(out.items()):
-        if not isinstance(items, list):
-            continue
-        keep = []
-        for item in items:
-            if item.get(LOCAL_ONLY):
-                dropped.add(item.get("id"))
-            else:
-                keep.append(item)
-        out[coll] = keep
-    # Every reference to something removed goes with it. A reference left
-    # pointing at nothing is worse than the object being absent: a rule that
-    # names a condition the node does not have renders with that test simply
-    # missing, so it matches everything or nothing instead of the one host it
-    # was for -- and nothing says so.
-    for fe in out.get("frontends") or []:
-        for key in ("rules", "certificates"):
-            if isinstance(fe.get(key), list):
-                fe[key] = [x for x in fe[key] if x not in dropped]
-        if fe.get("default_backend") in dropped:
-            fe["default_backend"] = ""
-    for be in out.get("backends") or []:
-        if isinstance(be.get("servers"), list):
-            be["servers"] = [x for x in be["servers"] if x not in dropped]
-        if be.get("healthcheck") in dropped:
-            be["healthcheck"] = ""
-    kept_rules = []
-    for rule in out.get("rules") or []:
-        if isinstance(rule.get("conditions"), list):
-            rule["conditions"] = [x for x in rule["conditions"] if x not in dropped]
-        # A rule whose pool is gone has nowhere to send anything. Keeping it
-        # would render a use_backend naming a backend that is not there, which
-        # HAProxy refuses outright -- so the whole configuration would fail to
-        # validate on the node that received it.
-        if rule.get("backend") in dropped:
-            dropped.add(rule.get("id"))
-            continue
-        kept_rules.append(rule)
-    if "rules" in out:
-        out["rules"] = kept_rules
-        for fe in out.get("frontends") or []:
-            if isinstance(fe.get("rules"), list):
-                fe["rules"] = [x for x in fe["rules"] if x not in dropped]
-    return out
-
 
 def config_hash(cfg):
     payload = json.dumps(

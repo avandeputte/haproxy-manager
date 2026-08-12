@@ -6,7 +6,7 @@ from flask import request
 import uuid
 
 from .base import _lock, app
-from .config import LOCAL_ONLY, VALID_COLLECTIONS, load_config, save_config
+from .config import VALID_COLLECTIONS, load_config, merged, save_config
 from .util import _by_id
 from .validate import check_setting_types
 from . import apply
@@ -84,14 +84,21 @@ def collection(sec, col):
     if sec not in VALID_COLLECTIONS or col not in VALID_COLLECTIONS[sec]:
         abort(404)
     if request.method == "GET":
-        cfg = load_config()
-        items = cfg[sec][col]
+        stored = load_config()
+        # The advanced pages list everything this node serves, its own objects
+        # included -- leaving them out would make the configuration look
+        # incomplete next to the generated haproxy.cfg. They are marked, and
+        # editing one is refused with a pointer to where it is managed.
+        mine = {i.get("id") for coll in ((stored["local"].get(sec) or {}).values())
+                if isinstance(coll, list) for i in coll}
+        items = merged(stored)[sec][col]
         if sec == "haproxy":
             # Say which of these a published service is responsible for, so the
             # advanced pages can warn before someone edits one by hand.
-            owned = service_owned(cfg)
+            owned = service_owned(merged(stored))
             items = [dict(i, managed_by=owned[i["id"]]) if i.get("id") in owned else i
                      for i in items]
+        items = [dict(i, node_local=True) if i.get("id") in mine else i for i in items]
         return jsonify(items)
     if request.method == "POST":
         item = request.get_json(force=True) or {}
@@ -112,15 +119,17 @@ def collection_item(sec, col, iid):
         abort(404)
     with _lock:
         cfg = load_config()
+        mine = (cfg["local"].get(sec) or {}).get(col) or []
+        for x in mine:
+            if x.get("id") == iid:
+                return jsonify({"error":
+                                "\"%s\" is part of this node's web UI service and is managed from "
+                                "Settings > Web UI access. Change it there, or turn it off."
+                                % x.get("name", iid)}), 409
         items = cfg[sec][col]
         for i, x in enumerate(items):
             if x.get("id") != iid:
                 continue
-            if x.get(LOCAL_ONLY):
-                return jsonify({"error":
-                                "\"%s\" is part of this node's web UI service and is managed from "
-                                "System > Web UI access. Change it there, or turn it off."
-                                % x.get("name", iid)}), 409
             if request.method == "PUT":
                 data = request.get_json(force=True) or {}
                 data["id"] = iid

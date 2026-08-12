@@ -4,6 +4,7 @@ from datetime import datetime
 from datetime import timezone
 
 from .base import CERT_DIR
+from .config import merged
 from .util import _by_id, _sec, cert_path
 
 # --------------------------------------------------------------------------
@@ -67,6 +68,13 @@ MAX_INLINE_CERTS = 20
 
 
 def render_haproxy(cfg):
+    """What this node serves: the shared configuration plus its own objects.
+
+    Merged here rather than by every caller, so nothing can render a
+    configuration that leaves out the service publishing this node's own
+    management UI.
+    """
+    cfg = merged(cfg)
     hp = cfg["haproxy"]
     st = hp["settings"]
     ac = cfg["acme"]["settings"]

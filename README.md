@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.74.0_all.deb
+sudo apt-get install -y ./haproxy-manager_1.75.0_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -247,6 +247,24 @@ It calls out the conditions that are otherwise invisible until traffic stops:
 - Nodes with **unapplied changes**, nodes running **different versions**, and
   nodes that **did not answer** (with the reason: unreachable, or the API key
   this node holds for it was rejected).
+
+### What is shared, and what is each node's own
+
+The configuration has two containers, not one container with some objects
+marked. The shared sections are what every node has. `local` is what only this
+node has — and that includes whole objects, not just settings: the pool,
+server, health monitor, rule, conditions and certificate that publish this
+node's own management UI live there.
+
+Sharing is therefore a copy rather than a filter: what is sent is the shared
+sections as they are, and what is compared is the same value. Nothing has to
+decide, on the way past, which objects belong to whom.
+
+A listener is shared while the rule attaching this node's UI to it is not, so
+`local.attach` records that by the listener's name — every node has one called
+`https-443`, with a different id — and by position, since HAProxy takes the
+first matching `use_backend` and serves the first certificate to clients that
+send no SNI. Rendering merges the two.
 
 ### The nodes agree, or they do not
 

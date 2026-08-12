@@ -6,7 +6,7 @@ from flask import request
 import copy
 
 from .base import LISTEN, PORT, _lock, app, log
-from .config import LOCAL_ONLY, WEBUI_NAME, is_webui_cert, load_config, save_config, webui_object_ids
+from .config import WEBUI_NAME, is_webui_cert, load_config, merged, move_to_local, promote_local, save_config, webui_object_ids
 from .util import _by_id, cert_details, cert_path
 from . import apply, dnsapi, wizard
 
@@ -38,24 +38,28 @@ def webui_pubs(cfg, pub):
 
 
 def build_webui(cfg, pub, mode="auto", http_redirect=True):
-    """Create (or re-attach) this node's own UI service and mark it node-local."""
+    """Create (or re-attach) this node's own UI service, and keep it this node's.
+
+    The wizard edits what it can find in the shared collections, so this node's
+    objects are put back there for the length of the call and moved out again
+    at the end. Without that the wizard would find nothing, build a second set
+    every time, and a node would gain another copy of its own UI service on
+    every configuration it received.
+    """
+    promote_local(cfg)
     target = {"scheme": "http", "host": "127.0.0.1", "port": PORT, "path": "", "label": WEBUI_NAME}
     acts, warns = dnsapi.wizard_publish(cfg, webui_pubs(cfg, pub), [target], name=WEBUI_NAME,
                                  want_cert=(mode != "none"), new_certificate=(mode == "new"),
                                  http_redirect=http_redirect,
                                  health={"type": "http", "interval": "5s", "uri": "/", "status": "200"})
-    # Everything the service is built from, found from the object graph. Naming
-    # the pool exactly and taking one rule from it missed every copy the wizard
-    # had to number, and those then travelled to the other nodes.
-    _tag_local(cfg["haproxy"], webui_object_ids(cfg))
-    # The certificate too. Every node needs one for its own name, so a
-    # certificate left in the shared configuration travels to the others, which
-    # keep it and add their own -- and no two nodes ever hold the same
-    # configuration again. A certificate that merely covers this host and was
-    # reused (a wildcard, say) is not ours to claim and is left alone.
-    for cert in cfg["acme"]["certificates"]:
-        if is_webui_cert(cert):
-            cert[LOCAL_ONLY] = True
+    # The wizard builds into the shared configuration like any other service.
+    # Everything it built for this one then moves into this node's own, where
+    # it cannot travel to the other nodes because it is not in what is sent.
+    # A certificate that merely covers this host and was reused -- a wildcard --
+    # was not built here and stays shared.
+    mine = webui_object_ids(cfg)
+    mine |= {c["id"] for c in cfg["acme"]["certificates"] if is_webui_cert(c)}
+    move_to_local(cfg, mine)
     return acts, warns
 
 
@@ -76,48 +80,6 @@ def rebuild_webui(cfg):
     build_webui(cfg, pub, "auto" if mode == "new" else mode, True)
 
 
-def _tag_local(hp, ids):
-    """Mark the objects the web UI service is made of as node-local."""
-    for coll in ("servers", "backends", "conditions", "rules", "healthchecks"):
-        for item in hp.get(coll) or []:
-            if item.get("id") in ids:
-                item[LOCAL_ONLY] = True
-
-
-def keep_local_only(mine, incoming, local_ids=None):
-    """Put this node's own objects back after adopting a shared configuration.
-
-    local_ids names everything this node owns alone across every section, so a
-    listener under haproxy can be re-attached to a certificate under acme.
-    """
-    for coll, items in mine.items():
-        if not isinstance(items, list):
-            continue
-        local = [i for i in items if i.get(LOCAL_ONLY)]
-        if not local:
-            continue
-        have = {i.get("id") for i in incoming.get(coll) or []}
-        incoming.setdefault(coll, []).extend(i for i in local if i.get("id") not in have)
-    # re-attach them to whatever they were bound to
-    # Match on name as well as id: each node created its own https-443, so the
-    # same listener has a different id everywhere and an id-only match found
-    # nothing -- which quietly dropped this node's UI rule from the listener.
-    by_id = {f.get("id"): f for f in mine.get("frontends") or []}
-    by_name = {f.get("name"): f for f in mine.get("frontends") or []}
-    for fe in incoming.get("frontends") or []:
-        was = by_id.get(fe.get("id")) or by_name.get(fe.get("name"))
-        if not was:
-            continue
-        ids = local_ids if local_ids is not None else {
-            i.get("id") for i in (mine.get("rules") or []) + (mine.get("certificates") or [])
-            if i.get(LOCAL_ONLY)}
-        for key in ("rules", "certificates"):
-            extra = [x for x in (was.get(key) or []) if x in ids and x not in (fe.get(key) or [])]
-            if extra:
-                fe[key] = (fe.get(key) or []) + extra
-    return incoming
-
-
 def _webui_setting(cfg):
     """Node-local: each node publishes its own name for its own UI."""
     return cfg["local"].setdefault(
@@ -126,7 +88,7 @@ def _webui_setting(cfg):
 
 def current_webui_hosts(cfg):
     """The host names the UI service is routed by, from the object graph."""
-    hp = cfg["haproxy"]
+    hp = merged(cfg)["haproxy"]
     pools = {b["id"] for b in hp.get("backends") or [] if b.get("name") == WEBUI_NAME}
     conds = _by_id(hp.get("conditions") or [])
     out = set()
@@ -219,6 +181,7 @@ def api_webui_set():
             removed = []
             rid = s.get("rule_id")
             if rid:
+                promote_local(cfg)      # where _remove_service_objects looks
                 removed = _remove_service_objects(cfg["haproxy"], rid)
             s.update({"enabled": False, "rule_id": ""})
             save_config(cfg)
@@ -304,7 +267,13 @@ def api_services():
     exactly what the wizard builds, and it also picks up equivalent rules made
     by hand on the Advanced pages.
     """
-    cfg = load_config()
+    stored = load_config()
+    # Everything this node serves, its own objects included: the Services page
+    # shows the management UI's service alongside the rest, marked as managed.
+    cfg = merged(stored)
+    local_ids = {i.get("id") for sec in ("haproxy", "acme")
+                 for coll in ((stored["local"].get(sec) or {}).values())
+                 if isinstance(coll, list) for i in coll}
     hp = cfg["haproxy"]
     conds, backends = _by_id(hp["conditions"]), _by_id(hp["backends"])
     servers, rules = _by_id(hp["servers"]), _by_id(hp["rules"])
@@ -400,7 +369,7 @@ def api_services():
 
             out.append(dict(pool_settings(pool), **{
                 "id": rule["id"],
-                "managed": "web-ui" if rule.get(LOCAL_ONLY) else "",
+                "managed": "web-ui" if rule.get("id") in local_ids else "",
                 "url": "%s://%s%s%s" % (scheme, host, shown_port, path),
                 "urls": ["%s://%s%s%s" % (scheme, h, shown_port, path) for h in all_hosts],
                 "hosts": all_hosts,
@@ -466,6 +435,9 @@ def api_service_delete(rid):
     with _lock:
         cfg = load_config()
         hp = cfg["haproxy"]
+        local_ids = {i.get("id") for sec in ("haproxy", "acme")
+                     for coll in ((cfg["local"].get(sec) or {}).values())
+                     if isinstance(coll, list) for i in coll}
 
         # "fe:<id>" is a TCP listener: the frontend itself is the service.
         if rid.startswith("fe:"):
@@ -491,7 +463,7 @@ def api_service_delete(rid):
         target = _by_id(hp["rules"]).get(rid)
         if not target:
             abort(404)
-        if target.get(LOCAL_ONLY):
+        if target.get("id") in local_ids:
             return jsonify({"ok": False, "error":
                             "This is the node's own web UI service. Turn it off under "
                             "System > Web UI access instead."}), 409
