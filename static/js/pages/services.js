@@ -76,8 +76,57 @@ export async function updateCertNote(note){
   }catch(e){note.innerHTML='<span class=sub>'+esc(e.message)+"</span>";}
 }
 
+let recipes=null;                      /* fetched once, then reused */
+export async function loadRecipes(){
+  if(recipes)return recipes;
+  try{recipes=(await api("recipes")).recipes||[];}catch(e){recipes=[];}
+  return recipes;
+}
+
 export function openWizard(prefill){
   const wrap=document.createElement("div");
+
+  /* A recipe fills in everything except the name to publish and the servers
+     behind it. Only offered for a new service: applying one to an existing
+     service would quietly rewrite settings that are already in use. */
+  let picker=null;
+  if(!prefill){
+    picker=document.createElement("div");
+    picker.className="bd";
+    picker.style.cssText="border:1px solid var(--hair);border-radius:6px;padding:10px 12px;margin-bottom:14px";
+    picker.innerHTML='<div class=fl style="margin-bottom:6px">Start from a recipe</div>';
+    const sel=document.createElement("select");sel.id="f_recipe";
+    sel.innerHTML='<option value="">Nothing — fill it in myself</option>';
+    const note=document.createElement("div");note.className="hint";note.style.marginTop="8px";
+    note.textContent="Well-known services come with the right ports, checks and timeouts already set.";
+    picker.appendChild(sel);picker.appendChild(note);
+    loadRecipes().then(list=>{
+      const byCat={};
+      list.forEach(r=>{(byCat[r.category]=byCat[r.category]||[]).push(r);});
+      Object.keys(byCat).forEach(cat=>{
+        const g=document.createElement("optgroup");g.label=cat;
+        byCat[cat].forEach(r=>{
+          const o=document.createElement("option");o.value=r.id;o.textContent=r.name;g.appendChild(o);
+        });
+        sel.appendChild(g);
+      });
+      sel.onchange=()=>{
+        const r=list.find(x=>x.id===sel.value);
+        if(!r){note.textContent="Well-known services come with the right ports, checks and timeouts already set.";return;}
+        note.innerHTML="<b>"+esc(r.summary)+"</b><br>"+esc(r.notes);
+        Object.keys(r.fields).forEach(k=>{
+          const cell=(rows[k]||[])[1];
+          const el=cell&&cell.querySelector("input,select,textarea");
+          if(!el)return;
+          if(el.type==="checkbox")el.checked=!!r.fields[k];
+          else el.value=r.fields[k];
+        });
+        syncRows();
+      };
+    });
+    wrap.appendChild(picker);
+  }
+
   const frm=document.createElement("div");frm.className="frm";
   const rows={};
   WIZ_FIELDS.forEach(f=>{
@@ -102,7 +151,11 @@ export function openWizard(prefill){
     ["cert_mode","account","challenge","http_redirect"].forEach(k=>setRow(k,!isTcp));
     const st=(document.getElementById("f_persistence")||{}).value;
     ["stick_type","stick_size","stick_expire"].forEach(k=>setRow(k,st==="source"));
-    if(isTcp&&document.getElementById("f_health")&&hsel.value==="http")hsel.value="tcp";
+    /* A raw TCP port cannot answer an HTTP check -- unless the check is aimed at
+       a different port, which is exactly how Patroni is fronted: traffic to
+       PostgreSQL on 5432, the check to its REST API on 8008. */
+    const cport=((document.getElementById("f_check_port")||{}).value||"").trim();
+    if(isTcp&&!cport&&hsel&&hsel.value==="http")hsel.value="tcp";
   };
   if(hsel)hsel.addEventListener("change",syncRows);
   ["f_url","f_persistence"].forEach(id=>{

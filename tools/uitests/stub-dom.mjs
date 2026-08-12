@@ -23,6 +23,9 @@ class El {
      -- which this used to do -- makes every lookup succeed, including the ones
      that return null in a browser. */
   matches(sel){
+    /* "input,select,textarea" is one selector to a browser; treat any of the
+       alternatives matching as a match. */
+    if (sel.includes(",")) return sel.split(",").some(part => this.matches(part));
     sel = sel.trim();
     if (sel.startsWith("#")) return this.id === sel.slice(1);
     if (sel.startsWith(".")) return (this.className||"").split(/\s+/).includes(sel.slice(1));
@@ -62,6 +65,8 @@ class El {
   }
   get parentNode(){ return this._parent || null; }
   insertBefore(c){ return this.appendChild(c); }
+  /* a <select> exposes its <option>s, and code iterates them to relabel */
+  get options(){ return this.querySelectorAll("option"); }
   /* everything a person would see: markup, text nodes and children */
   get text(){ return this._html + (this.textContent||"") + this.children.map(c=>c.text).join(""); }
   get firstChild(){ return this.children[0] || null; }

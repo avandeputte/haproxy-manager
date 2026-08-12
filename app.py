@@ -5532,6 +5532,226 @@ def api_service_delete(rid):
                     "note": "Certificates and Public Services were left in place. Press Apply."})
 
 
+# --------------------------------------------------------------------------
+# recipes
+#
+# The wizard asks for a dozen settings, and for most well-known services there
+# is one right answer for nearly all of them: which port, whether it is TCP or
+# HTTP, how to tell a working server from a broken one. A recipe fills those in
+# and leaves the two things only the operator knows -- the name to publish and
+# the servers behind it.
+#
+# Each one was written from how the service actually behaves, not from a
+# template: Patroni answers /primary with 200 on exactly one node, so the health
+# check alone routes writes to the leader; Galera accepts writes anywhere, so it
+# needs stickiness instead.
+# --------------------------------------------------------------------------
+
+RECIPES = [
+    {
+        "id": "web",
+        "name": "Web application",
+        "category": "Web",
+        "summary": "An ordinary HTTP or HTTPS site with a health check on /.",
+        "notes": "The default for anything that speaks HTTP. Change the check path "
+                 "if the application has a dedicated health endpoint.",
+        "fields": {
+            "url": "https://app.example.com", "balance": "roundrobin",
+            "persistence": "none", "health": "http", "health_uri": "/",
+            "health_status": "200", "health_interval": "5s",
+            "cert_mode": "auto", "http_redirect": True,
+        },
+    },
+    {
+        "id": "web-websockets",
+        "name": "Web application with WebSockets",
+        "category": "Web",
+        "summary": "As above, but connections are allowed to stay open for hours.",
+        "notes": "The only difference that matters is the server timeout: with the "
+                 "default, an idle WebSocket is closed after a minute or so and the "
+                 "application looks flaky rather than broken.",
+        "fields": {
+            "url": "https://app.example.com", "balance": "leastconn",
+            "persistence": "none", "health": "http", "health_uri": "/",
+            "health_status": "200", "health_interval": "5s",
+            "timeout_server": "1h", "timeout_connect": "5s",
+            "cert_mode": "auto", "http_redirect": True,
+        },
+    },
+    {
+        "id": "patroni-primary",
+        "name": "PostgreSQL — Patroni, writes",
+        "category": "Databases",
+        "summary": "TCP 5432 to whichever node is the leader, found by asking Patroni.",
+        "notes": "Patroni answers GET /primary with 200 on the leader and 503 "
+                 "everywhere else, so the health check does the routing: every "
+                 "replica is simply down for this pool, and a failover moves traffic "
+                 "without changing anything here. Traffic goes to 5432 while the "
+                 "check goes to Patroni's REST API on 8008.",
+        "fields": {
+            "url": "tcp://0.0.0.0:5432", "balance": "roundrobin",
+            "persistence": "none", "health": "http", "check_port": "8008",
+            "health_uri": "/primary", "health_status": "200",
+            "health_method": "GET", "health_interval": "3s",
+            "timeout_server": "30m", "timeout_connect": "5s",
+            "log_health_checks": True,
+        },
+    },
+    {
+        "id": "patroni-replicas",
+        "name": "PostgreSQL — Patroni, read-only",
+        "category": "Databases",
+        "summary": "TCP 5433 spread across the replicas, never the leader.",
+        "notes": "The mirror image of the writes recipe: GET /replica answers 200 on "
+                 "the followers only. Publish it on a different port from the writes "
+                 "pool so an application can choose which it wants.",
+        "fields": {
+            "url": "tcp://0.0.0.0:5433", "balance": "roundrobin",
+            "persistence": "none", "health": "http", "check_port": "8008",
+            "health_uri": "/replica", "health_status": "200",
+            "health_method": "GET", "health_interval": "3s",
+            "timeout_server": "30m", "timeout_connect": "5s",
+            "log_health_checks": True,
+        },
+    },
+    {
+        "id": "galera",
+        "name": "MariaDB / MySQL — Galera cluster",
+        "category": "Databases",
+        "summary": "TCP 3306 with every client pinned to one node.",
+        "notes": "Galera accepts writes on any node, which is exactly the problem: "
+                 "two nodes writing the same rows deadlock on commit. Stickiness by "
+                 "source address keeps a client on one node, so the cluster behaves "
+                 "like a single writer with the others ready. The check performs a "
+                 "MySQL login handshake -- no password is sent -- so create an "
+                 "unprivileged account for it.",
+        "fields": {
+            "url": "tcp://0.0.0.0:3306",
+            "target": "galera1=10.0.0.1:3306, galera2=10.0.0.2:3306, galera3=10.0.0.3:3306",
+            "balance": "source", "persistence": "source", "stick_type": "ip",
+            "stick_size": "50k", "stick_expire": "30m",
+            "health": "mysql", "health_user": "haproxy", "health_interval": "3s",
+            "timeout_server": "30m", "timeout_connect": "5s",
+            "log_health_checks": True,
+        },
+    },
+    {
+        "id": "postgresql-plain",
+        "name": "PostgreSQL — single server or streaming replica",
+        "category": "Databases",
+        "summary": "TCP 5432 with a PostgreSQL login check.",
+        "notes": "For PostgreSQL without Patroni. The check opens a real connection "
+                 "as the named user, so a server that is listening but not accepting "
+                 "queries is taken out. Use the Patroni recipes instead if something "
+                 "is managing failover.",
+        "fields": {
+            "url": "tcp://0.0.0.0:5432", "balance": "roundrobin",
+            "persistence": "source", "stick_type": "ip",
+            "health": "pgsql", "health_user": "postgres", "health_interval": "5s",
+            "timeout_server": "30m", "timeout_connect": "5s",
+        },
+    },
+    {
+        "id": "redis",
+        "name": "Redis / Valkey",
+        "category": "Databases",
+        "summary": "TCP 6379 with a connection check.",
+        "notes": "A connect check only proves something is listening -- it does not "
+                 "tell a primary from a replica, so point this at one node, or at a "
+                 "proxy that already knows which is which. Long timeouts, because "
+                 "clients hold connections open.",
+        "fields": {
+            "url": "tcp://0.0.0.0:6379", "balance": "roundrobin",
+            "persistence": "source", "stick_type": "ip",
+            "health": "tcp", "health_interval": "3s",
+            "timeout_server": "1h", "timeout_connect": "3s",
+        },
+    },
+    {
+        "id": "elasticsearch",
+        "name": "Elasticsearch / OpenSearch",
+        "category": "Applications",
+        "summary": "HTTP 9200 checked against the cluster health endpoint.",
+        "notes": "GET /_cluster/health answers 200 while the node can serve, which "
+                 "is a better signal than a connect check: a node that is joining or "
+                 "recovering is listening long before it is useful.",
+        "fields": {
+            "url": "https://search.example.com", "balance": "roundrobin",
+            "persistence": "none", "health": "http",
+            "health_uri": "/_cluster/health", "health_status": "200",
+            "health_interval": "5s", "timeout_server": "5m",
+            "cert_mode": "auto", "http_redirect": True,
+        },
+    },
+    {
+        "id": "minio",
+        "name": "MinIO / S3-compatible storage",
+        "category": "Applications",
+        "summary": "HTTP with MinIO's liveness endpoint and long timeouts.",
+        "notes": "/minio/health/live is the endpoint MinIO documents for exactly "
+                 "this. The long server timeout is for large uploads, which "
+                 "otherwise die halfway through.",
+        "fields": {
+            "url": "https://s3.example.com", "balance": "leastconn",
+            "persistence": "none", "health": "http",
+            "health_uri": "/minio/health/live", "health_status": "200",
+            "health_interval": "5s", "timeout_server": "1h",
+            "cert_mode": "auto", "http_redirect": True,
+        },
+    },
+    {
+        "id": "rabbitmq",
+        "name": "RabbitMQ (AMQP)",
+        "category": "Applications",
+        "summary": "TCP 5672 for AMQP clients.",
+        "notes": "AMQP connections are long-lived, so the server timeout is generous "
+                 "and stickiness keeps a client on the node holding its channels. "
+                 "Publish the management UI on 15672 as a separate HTTP service.",
+        "fields": {
+            "url": "tcp://0.0.0.0:5672", "balance": "leastconn",
+            "persistence": "source", "stick_type": "ip",
+            "health": "tcp", "health_interval": "5s",
+            "timeout_server": "4h", "timeout_connect": "5s",
+        },
+    },
+    {
+        "id": "kubernetes-api",
+        "name": "Kubernetes API servers",
+        "category": "Infrastructure",
+        "summary": "TCP 6443 across the control plane.",
+        "notes": "TCP rather than HTTP, because the API server speaks TLS that "
+                 "HAProxy should not terminate -- kubeconfig pins its certificate. "
+                 "Watches stay open for hours, hence the timeout.",
+        "fields": {
+            "url": "tcp://0.0.0.0:6443", "balance": "roundrobin",
+            "persistence": "none", "health": "tcp", "health_interval": "3s",
+            "timeout_server": "4h", "timeout_connect": "5s",
+            "log_health_checks": True,
+        },
+    },
+    {
+        "id": "smtp",
+        "name": "SMTP relay",
+        "category": "Infrastructure",
+        "summary": "TCP 25 to a pool of mail servers.",
+        "notes": "Plain TCP: HAProxy passes the session through, including STARTTLS. "
+                 "Use 587 instead for submission. Whatever accepts the mail sees "
+                 "HAProxy's address unless you enable the proxy protocol on both "
+                 "sides.",
+        "fields": {
+            "url": "tcp://0.0.0.0:25", "balance": "roundrobin",
+            "persistence": "none", "health": "tcp", "health_interval": "10s",
+            "timeout_server": "5m", "timeout_connect": "5s",
+        },
+    },
+]
+
+
+@app.get("/api/recipes")
+def api_recipes():
+    return jsonify({"ok": True, "recipes": RECIPES})
+
+
 @app.post("/api/wizard/publish")
 def api_wizard_publish():
     body = request.get_json(force=True, silent=True) or {}

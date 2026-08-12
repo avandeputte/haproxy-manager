@@ -53,6 +53,44 @@ reloads. A configuration that does not validate is never written.
 | Balance | round robin, least connections, source |
 | Persistence | none, or source-IP stickiness with a table size and expiry |
 
+### Recipes
+
+The wizard asks for a dozen settings, and for a well-known service there is one
+right answer for nearly all of them. **Start from a recipe** fills those in and
+leaves the two things only you know: the name to publish and the servers behind
+it.
+
+| Recipe | What it sets up |
+| --- | --- |
+| Web application | HTTP or HTTPS with a check on `/` |
+| Web application with WebSockets | as above, with a server timeout long enough that idle sockets survive |
+| PostgreSQL — Patroni, writes | TCP 5432 to the leader, found by asking Patroni's API on 8008 |
+| PostgreSQL — Patroni, read-only | TCP 5433 across the replicas only |
+| MariaDB / MySQL — Galera | TCP 3306 with source stickiness and a MySQL login check |
+| PostgreSQL — single server | TCP 5432 with a PostgreSQL login check |
+| Redis / Valkey | TCP 6379 with a connection check |
+| Elasticsearch / OpenSearch | HTTP checked against `/_cluster/health` |
+| MinIO / S3-compatible | HTTP checked against `/minio/health/live`, long upload timeout |
+| RabbitMQ | TCP 5672 with timeouts for long-lived AMQP connections |
+| Kubernetes API servers | TCP 6443, passed through rather than terminated |
+| SMTP relay | TCP 25 to a pool of mail servers |
+
+The interesting ones are the databases, because the right configuration is not
+obvious:
+
+- **Patroni** answers `GET /primary` with 200 on the leader and 503 everywhere
+  else, so the health check does the routing. Every replica is simply down for
+  that pool, and a failover moves traffic with nothing to change here. Traffic
+  goes to 5432 while the check goes to 8008 — different port, different
+  protocol.
+- **Galera** accepts writes on any node, which is the problem: two nodes writing
+  the same rows deadlock on commit. Source stickiness keeps each client on one
+  node, so the cluster behaves as a single writer with the others ready.
+
+A recipe is a starting point, not a constraint: every field stays editable, and
+recipes are only offered for a new service — applying one to an existing service
+would rewrite settings already in use.
+
 **TCP services.** Use `tcp://0.0.0.0:3306` as the public URL and the service is
 published in TCP mode — the way to front Galera, PostgreSQL or anything that is
 not HTTP.
@@ -215,7 +253,7 @@ of its peers.
 ## Upgrades and the browser cache
 
 The page is served with `no-cache`, and everything it loads lives under a path
-that contains the version — `/static/v/1.54.3/js/main.js`. Those files are then
+that contains the version — `/static/v/1.55.0/js/main.js`. Those files are then
 cached for a year, which is safe because the URL changes whenever the version
 does.
 
