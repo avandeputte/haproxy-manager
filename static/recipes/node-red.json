@@ -1,0 +1,22 @@
+{
+  "name": "Node-RED",
+  "category": "Applications",
+  "summary": "HTTP 1880 with the editor's WebSocket kept open.",
+  "notes": "The editor talks to the runtime over a WebSocket and the debug pane streams continuously, so a short timeout looks like the editor disconnecting. The check accepts any 2xx or 3xx since the front page may redirect to a login.",
+  "fields": {
+    "url": "https://nodered.example.com",
+    "target": "10.0.0.10:1880",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "4h",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 220
+}

@@ -1,0 +1,22 @@
+{
+  "name": "SABnzbd",
+  "category": "Applications",
+  "summary": "HTTP 8080 for the web interface.",
+  "notes": "The check accepts any 2xx or 3xx: most API calls need a key, and the front page does not. Like qBittorrent, SABnzbd checks the Host header, so add this name to host_whitelist.",
+  "fields": {
+    "url": "https://sabnzbd.example.com",
+    "target": "10.0.0.10:8080",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "1h",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 211
+}

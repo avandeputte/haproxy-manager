@@ -1,0 +1,21 @@
+{
+  "name": "Directus",
+  "category": "Applications",
+  "summary": "HTTP 8055 checked against /server/health.",
+  "notes": "/server/health reports the database and cache, following the standard health-check format. Asset uploads are what the timeout is for.",
+  "fields": {
+    "url": "https://directus.example.com",
+    "target": "10.0.0.10:8055",
+    "balance": "leastconn",
+    "persistence": "none",
+    "timeout_server": "1h",
+    "health": "http",
+    "health_uri": "/server/health",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 253
+}

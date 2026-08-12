@@ -1,0 +1,22 @@
+{
+  "name": "Zigbee2MQTT",
+  "category": "Applications",
+  "summary": "HTTP 8080 with the WebSocket its interface uses.",
+  "notes": "The whole front end runs over a WebSocket carrying device state, so the timeout is long and clients stay on one server.",
+  "fields": {
+    "url": "https://z2m.example.com",
+    "target": "10.0.0.10:8080",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "4h",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 221
+}

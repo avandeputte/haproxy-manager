@@ -1,0 +1,22 @@
+{
+  "name": "Homepage / Homarr",
+  "category": "Applications",
+  "summary": "HTTP 3000 for a dashboard.",
+  "notes": "The check accepts any 2xx or 3xx. Homarr keeps a WebSocket open for live tiles, hence the long timeout; Homepage listens on 3000 and Homarr on 7575.",
+  "fields": {
+    "url": "https://home.example.com",
+    "target": "10.0.0.10:3000",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "4h",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 260
+}

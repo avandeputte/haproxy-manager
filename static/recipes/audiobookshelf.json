@@ -1,0 +1,22 @@
+{
+  "name": "Audiobookshelf",
+  "category": "Applications",
+  "summary": "HTTP 13378 checked against /healthcheck.",
+  "notes": "/healthcheck is the documented endpoint. Playback and library scans both hold connections open, hence the timeout.",
+  "fields": {
+    "url": "https://audiobooks.example.com",
+    "target": "10.0.0.10:13378",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "4h",
+    "health": "http",
+    "health_uri": "/healthcheck",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 202
+}

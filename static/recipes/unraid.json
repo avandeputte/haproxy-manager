@@ -1,0 +1,22 @@
+{
+  "name": "Unraid",
+  "category": "Infrastructure",
+  "summary": "HTTP 80 passed through, with the dashboard's live updates kept open.",
+  "notes": "The dashboard streams updates over long-lived connections, so a short server timeout makes it look frozen. Unraid is usually reached over plain HTTP on the local network; if you have enabled its SSL, point the target at https:// instead and the certificate will not be verified. Restrict who can reach this -- it administers the whole machine.",
+  "fields": {
+    "url": "https://unraid.example.com",
+    "target": "tower=10.0.0.10:80",
+    "balance": "source",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "timeout_server": "4h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 286
+}

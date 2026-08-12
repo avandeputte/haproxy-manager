@@ -1,0 +1,23 @@
+{
+  "name": "Graylog",
+  "category": "Applications",
+  "summary": "HTTP 9000 checked against the endpoint meant for load balancers.",
+  "notes": "/api/system/lbstatus exists precisely for this: it answers 200 while the node is alive and 503 when it is throttled or shutting down, so traffic leaves before the node does.",
+  "fields": {
+    "url": "https://graylog.example.com",
+    "target": "graylog1=10.0.0.1:9000, graylog2=10.0.0.2:9000",
+    "balance": "leastconn",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "30m",
+    "log_health_checks": true,
+    "health": "http",
+    "health_uri": "/api/system/lbstatus",
+    "health_status": "200",
+    "health_interval": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 270
+}

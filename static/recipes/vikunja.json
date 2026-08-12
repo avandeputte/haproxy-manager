@@ -1,0 +1,21 @@
+{
+  "name": "Vikunja",
+  "category": "Applications",
+  "summary": "HTTP 3456 checked against /api/v1/info.",
+  "notes": "/api/v1/info answers without a login and reports the version.",
+  "fields": {
+    "url": "https://tasks.example.com",
+    "target": "10.0.0.10:3456",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "timeout_server": "10m",
+    "health": "http",
+    "health_uri": "/api/v1/info",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 250
+}

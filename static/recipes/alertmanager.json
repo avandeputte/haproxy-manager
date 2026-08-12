@@ -1,0 +1,21 @@
+{
+  "name": "Alertmanager",
+  "category": "Applications",
+  "summary": "HTTP 9093 checked with /-/healthy.",
+  "notes": "Publish every member of the cluster: Alertmanager gossips between them and deduplicates, so it does not matter which one receives an alert.",
+  "fields": {
+    "url": "https://alertmanager.example.com",
+    "target": "am1=10.0.0.1:9093, am2=10.0.0.2:9093, am3=10.0.0.3:9093",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "timeout_server": "10m",
+    "health": "http",
+    "health_uri": "/-/healthy",
+    "health_status": "200",
+    "health_interval": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 272
+}

@@ -73,6 +73,7 @@ it.
 | --- | --- |
 | PostgreSQL — Patroni, writes | TCP 5432 to whichever node is the leader, found by asking Patroni |
 | PostgreSQL — Patroni, read-only | TCP 5433 spread across the replicas, never the leader |
+| MariaDB / MySQL — single server | TCP 3306 with a MySQL login check |
 | MariaDB / MySQL — Galera cluster | TCP 3306 with every client pinned to one node |
 | PostgreSQL — single server or streaming replica | TCP 5432 with a PostgreSQL login check |
 | Redis / Valkey | TCP 6379 with a connection check |
@@ -129,7 +130,43 @@ it.
 | Vaultwarden / Bitwarden | HTTP with the notification WebSocket kept alive |
 | Mattermost | HTTP 8065, sticky, with WebSockets |
 | Keycloak | HTTP 8080 checked on its separate management port |
+| Plex Media Server | HTTP 32400 with timeouts long enough to watch a film |
+| Frigate NVR | HTTP 5000 with camera streams kept open |
+| Audiobookshelf | HTTP 13378 checked against /healthcheck |
+| Navidrome | HTTP 4533 checked with /ping |
+| Overseerr / Jellyseerr | HTTP 5055 checked against its status API |
+| Tautulli | HTTP 8181 checked with /status |
+| PhotoPrism | HTTP 2342 checked against its status API |
+| Kavita | HTTP 5000 checked against its health API |
 | Docker registry | HTTP 5000 with room to push a large image |
+| qBittorrent | HTTP 8080 for the web interface |
+| SABnzbd | HTTP 8080 for the web interface |
+| Transmission | HTTP 9091 for the web interface |
+| Node-RED | HTTP 1880 with the editor's WebSocket kept open |
+| Zigbee2MQTT | HTTP 8080 with the WebSocket its interface uses |
+| ESPHome | HTTP 6052 with log streaming kept alive |
+| Homebridge | HTTP 8581 for the management interface |
+| ntfy | HTTP 80 with subscriptions held open |
+| Gotify | HTTP 80 with the message WebSocket kept open |
+| BookStack | HTTP 80 checked against /status |
+| Wiki.js | HTTP 3000 checked with /healthz |
+| Outline | HTTP 3000 checked with /_health |
+| Joplin Server | HTTP 22300 checked with /api/ping |
+| Vikunja | HTTP 3456 checked against /api/v1/info |
+| Firefly III | HTTP 8080 checked with /health |
+| n8n | HTTP 5678 checked with /healthz |
+| Directus | HTTP 8055 checked against /server/health |
+| NocoDB | HTTP 8080 checked against /api/v1/health |
+| Umami | HTTP 3000 checked with /api/heartbeat |
+| Stirling PDF | HTTP 8080 for PDF tools |
+| File Browser | HTTP 80 checked with /health |
+| Roundcube | HTTP 80 with the session kept on one server |
+| Miniflux / FreshRSS | HTTP 8080 checked with /healthcheck |
+| Homepage / Homarr | HTTP 3000 for a dashboard |
+| Graylog | HTTP 9000 checked against the endpoint meant for load balancers |
+| Loki | HTTP 3100 checked with /ready |
+| Alertmanager | HTTP 9093 checked with /-/healthy |
+| Woodpecker CI | HTTP 8000 checked with /healthz |
 
 **Infrastructure**
 
@@ -146,6 +183,13 @@ it.
 | Proxmox VE | HTTPS 8006, passed through to a self-signed backend |
 | Kubernetes API servers | TCP 6443 across the control plane |
 | SMTP relay | TCP 25 to a pool of mail servers |
+| AdGuard Home | HTTP 3000 for the admin interface |
+| Pi-hole | HTTP 80 for the admin interface |
+| Syncthing (interface) | HTTP 8384 checked against its unauthenticated health endpoint |
+| Cockpit | HTTPS 9090 passed through, with the terminal WebSocket kept open |
+| TrueNAS | HTTPS passed through to the appliance |
+| OPNsense / pfSense | HTTPS passed through to the firewall's own interface |
+| Unraid | HTTP 80 passed through, with the dashboard's live updates kept open |
 
 Every one carries example servers, so the shape of the answer is visible before
 you replace it with your own.
@@ -345,7 +389,7 @@ of its peers.
 ## Upgrades and the browser cache
 
 The page is served with `no-cache`, and everything it loads lives under a path
-that contains the version — `/static/v/1.58.0/js/main.js`. Those files are then
+that contains the version — `/static/v/1.59.0/js/main.js`. Those files are then
 cached for a year, which is safe because the URL changes whenever the version
 does.
 

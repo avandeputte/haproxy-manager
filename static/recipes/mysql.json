@@ -1,0 +1,19 @@
+{
+  "name": "MariaDB / MySQL — single server",
+  "category": "Databases",
+  "summary": "TCP 3306 with a MySQL login check.",
+  "notes": "For one server, or a primary with read replicas behind their own service. The check performs a login handshake -- no password is sent -- so create an unprivileged account for it: CREATE USER 'haproxy'@'%'; with no grants is enough. Use the Galera recipe instead if every node accepts writes, because that needs stickiness to avoid deadlocks.",
+  "fields": {
+    "url": "tcp://0.0.0.0:3306",
+    "target": "10.0.0.1:3306",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "mysql",
+    "health_user": "haproxy",
+    "health_interval": "3s",
+    "timeout_server": "30m",
+    "timeout_connect": "5s"
+  },
+  "order": 45
+}

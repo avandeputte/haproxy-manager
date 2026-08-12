@@ -1,0 +1,22 @@
+{
+  "name": "Tautulli",
+  "category": "Applications",
+  "summary": "HTTP 8181 checked with /status.",
+  "notes": "Tautulli watches Plex and keeps a long-poll open for activity, so the server timeout matters more than for an ordinary page.",
+  "fields": {
+    "url": "https://tautulli.example.com",
+    "target": "10.0.0.10:8181",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "1h",
+    "health": "http",
+    "health_uri": "/status",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 205
+}

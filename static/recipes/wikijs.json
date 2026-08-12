@@ -1,0 +1,22 @@
+{
+  "name": "Wiki.js",
+  "category": "Applications",
+  "summary": "HTTP 3000 checked with /healthz.",
+  "notes": "/healthz answers without a login. The editor keeps a WebSocket open for live preview and presence.",
+  "fields": {
+    "url": "https://wikijs.example.com",
+    "target": "10.0.0.10:3000",
+    "balance": "leastconn",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "1h",
+    "health": "http",
+    "health_uri": "/healthz",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 241
+}

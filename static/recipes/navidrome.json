@@ -1,0 +1,22 @@
+{
+  "name": "Navidrome",
+  "category": "Applications",
+  "summary": "HTTP 4533 checked with /ping.",
+  "notes": "/ping answers without authentication. Streaming a long album is one connection, so the server timeout is generous.",
+  "fields": {
+    "url": "https://music.example.com",
+    "target": "10.0.0.10:4533",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "4h",
+    "health": "http",
+    "health_uri": "/ping",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 203
+}

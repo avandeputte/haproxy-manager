@@ -1,0 +1,22 @@
+{
+  "name": "PhotoPrism",
+  "category": "Applications",
+  "summary": "HTTP 2342 checked against its status API.",
+  "notes": "/api/v1/status answers without a login. Indexing a library and uploading originals are both long-running.",
+  "fields": {
+    "url": "https://photoprism.example.com",
+    "target": "10.0.0.10:2342",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "4h",
+    "health": "http",
+    "health_uri": "/api/v1/status",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 206
+}

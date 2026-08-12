@@ -1,0 +1,22 @@
+{
+  "name": "NocoDB",
+  "category": "Applications",
+  "summary": "HTTP 8080 checked against /api/v1/health.",
+  "notes": "Sessions and long queries both favour keeping a client on one server.",
+  "fields": {
+    "url": "https://nocodb.example.com",
+    "target": "10.0.0.10:8080",
+    "balance": "leastconn",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "30m",
+    "health": "http",
+    "health_uri": "/api/v1/health",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 254
+}

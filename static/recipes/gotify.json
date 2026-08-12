@@ -1,0 +1,22 @@
+{
+  "name": "Gotify",
+  "category": "Applications",
+  "summary": "HTTP 80 with the message WebSocket kept open.",
+  "notes": "/health answers without a token. Clients keep a WebSocket open for messages, which a short timeout closes repeatedly.",
+  "fields": {
+    "url": "https://gotify.example.com",
+    "target": "10.0.0.10:80",
+    "balance": "leastconn",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "24h",
+    "health": "http",
+    "health_uri": "/health",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 231
+}

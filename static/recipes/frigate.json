@@ -1,0 +1,22 @@
+{
+  "name": "Frigate NVR",
+  "category": "Applications",
+  "summary": "HTTP 5000 with camera streams kept open.",
+  "notes": "/api/version answers without a login. The live views are WebSocket and WebRTC streams held open indefinitely, so the timeout is long and clients stay on one server.",
+  "fields": {
+    "url": "https://frigate.example.com",
+    "target": "10.0.0.10:5000",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "6h",
+    "health": "http",
+    "health_uri": "/api/version",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 201
+}

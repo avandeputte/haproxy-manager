@@ -1,0 +1,21 @@
+{
+  "name": "Umami",
+  "category": "Applications",
+  "summary": "HTTP 3000 checked with /api/heartbeat.",
+  "notes": "Analytics collection is a steady stream of small POSTs from browsers, so least connections spreads it evenly.",
+  "fields": {
+    "url": "https://analytics.example.com",
+    "target": "10.0.0.10:3000",
+    "balance": "leastconn",
+    "persistence": "none",
+    "timeout_server": "10m",
+    "health": "http",
+    "health_uri": "/api/heartbeat",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 255
+}

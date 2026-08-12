@@ -1,0 +1,22 @@
+{
+  "name": "Outline",
+  "category": "Applications",
+  "summary": "HTTP 3000 checked with /_health.",
+  "notes": "Collaborative editing runs over a WebSocket, so clients are pinned and the timeout is long -- otherwise two people editing a page drift apart.",
+  "fields": {
+    "url": "https://docs.example.com",
+    "target": "10.0.0.10:3000",
+    "balance": "leastconn",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "4h",
+    "health": "http",
+    "health_uri": "/_health",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 242
+}

@@ -1,0 +1,22 @@
+{
+  "name": "Woodpecker CI",
+  "category": "Applications",
+  "summary": "HTTP 8000 checked with /healthz.",
+  "notes": "Build logs stream over a WebSocket while a pipeline runs, so the timeout outlasts a build and clients stay on one server.",
+  "fields": {
+    "url": "https://ci.example.com",
+    "target": "10.0.0.10:8000",
+    "balance": "leastconn",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "4h",
+    "health": "http",
+    "health_uri": "/healthz",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 290
+}

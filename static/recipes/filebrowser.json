@@ -1,0 +1,22 @@
+{
+  "name": "File Browser",
+  "category": "Applications",
+  "summary": "HTTP 80 checked with /health.",
+  "notes": "Uploads and downloads are single long requests, so the timeout is generous.",
+  "fields": {
+    "url": "https://files.example.com",
+    "target": "10.0.0.10:80",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "4h",
+    "health": "http",
+    "health_uri": "/health",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 257
+}

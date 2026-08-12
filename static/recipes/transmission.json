@@ -1,0 +1,22 @@
+{
+  "name": "Transmission",
+  "category": "Applications",
+  "summary": "HTTP 9091 for the web interface.",
+  "notes": "The check accepts any 2xx or 3xx, because with authentication on the RPC endpoint answers 401. Transmission's RPC also does its own host checking.",
+  "fields": {
+    "url": "https://transmission.example.com",
+    "target": "10.0.0.10:9091",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "1h",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 212
+}

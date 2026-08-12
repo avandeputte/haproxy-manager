@@ -1,0 +1,20 @@
+{
+  "name": "TrueNAS",
+  "category": "Infrastructure",
+  "summary": "HTTPS passed through to the appliance.",
+  "notes": "TrueNAS serves TLS with its own certificate and its interface runs over a WebSocket, so the connection is passed through unverified, clients are pinned and the timeout is long.",
+  "fields": {
+    "url": "https://truenas.example.com",
+    "target": "nas1=https://10.0.0.1:443",
+    "balance": "source",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "tcp",
+    "health_interval": "10s",
+    "timeout_server": "4h",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 284
+}

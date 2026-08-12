@@ -1,0 +1,22 @@
+{
+  "name": "Overseerr / Jellyseerr",
+  "category": "Applications",
+  "summary": "HTTP 5055 checked against its status API.",
+  "notes": "/api/v1/status answers without a login and reports the version, so a half-started instance is taken out.",
+  "fields": {
+    "url": "https://requests.example.com",
+    "target": "10.0.0.10:5055",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "10m",
+    "health": "http",
+    "health_uri": "/api/v1/status",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 204
+}

@@ -1,0 +1,22 @@
+{
+  "name": "Kavita",
+  "category": "Applications",
+  "summary": "HTTP 5000 checked against its health API.",
+  "notes": "/api/health answers without a login. Reading a large comic streams a lot of data in one request.",
+  "fields": {
+    "url": "https://books.example.com",
+    "target": "10.0.0.10:5000",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "1h",
+    "health": "http",
+    "health_uri": "/api/health",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 207
+}

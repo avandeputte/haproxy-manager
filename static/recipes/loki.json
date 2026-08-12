@@ -1,0 +1,21 @@
+{
+  "name": "Loki",
+  "category": "Applications",
+  "summary": "HTTP 3100 checked with /ready.",
+  "notes": "/ready answers 200 only once the ingester has joined the ring, so a starting node is not sent queries. Long range queries need the timeout.",
+  "fields": {
+    "url": "https://loki.example.com",
+    "target": "loki1=10.0.0.1:3100, loki2=10.0.0.2:3100",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "timeout_server": "30m",
+    "health": "http",
+    "health_uri": "/ready",
+    "health_status": "200",
+    "health_interval": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 271
+}

@@ -1,0 +1,22 @@
+{
+  "name": "ntfy",
+  "category": "Applications",
+  "summary": "HTTP 80 with subscriptions held open.",
+  "notes": "/v1/health is the documented endpoint. Subscribers hold a connection open indefinitely waiting for messages, so the server timeout has to be long or clients reconnect endlessly.",
+  "fields": {
+    "url": "https://ntfy.example.com",
+    "target": "10.0.0.10:80",
+    "balance": "leastconn",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "24h",
+    "health": "http",
+    "health_uri": "/v1/health",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 230
+}

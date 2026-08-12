@@ -1,0 +1,22 @@
+{
+  "name": "BookStack",
+  "category": "Applications",
+  "summary": "HTTP 80 checked against /status.",
+  "notes": "/status reports whether the database and cache are reachable. Sessions are server-side, so clients are pinned.",
+  "fields": {
+    "url": "https://wiki.example.com",
+    "target": "10.0.0.10:80",
+    "balance": "leastconn",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "10m",
+    "health": "http",
+    "health_uri": "/status",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 240
+}

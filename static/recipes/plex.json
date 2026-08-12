@@ -1,0 +1,22 @@
+{
+  "name": "Plex Media Server",
+  "category": "Applications",
+  "summary": "HTTP 32400 with timeouts long enough to watch a film.",
+  "notes": "/identity answers without a token and reports the server's identity, which makes it the right thing to check. A stream is one connection held open for as long as someone is watching.",
+  "fields": {
+    "url": "https://plex.example.com",
+    "target": "10.0.0.10:32400",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "6h",
+    "health": "http",
+    "health_uri": "/identity",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 200
+}

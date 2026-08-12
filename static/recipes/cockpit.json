@@ -1,0 +1,20 @@
+{
+  "name": "Cockpit",
+  "category": "Infrastructure",
+  "summary": "HTTPS 9090 passed through, with the terminal WebSocket kept open.",
+  "notes": "The target is https:// because Cockpit serves TLS with the host's own certificate, which is not verified. A terminal session is a WebSocket tied to one host, so clients are pinned. Cockpit also has to be told it is behind a proxy -- see its documentation on Origins.",
+  "fields": {
+    "url": "https://cockpit.example.com",
+    "target": "host1=https://10.0.0.1:9090",
+    "balance": "source",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "tcp",
+    "health_interval": "10s",
+    "timeout_server": "8h",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 283
+}

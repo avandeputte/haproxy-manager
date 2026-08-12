@@ -1,0 +1,22 @@
+{
+  "name": "Syncthing (interface)",
+  "category": "Infrastructure",
+  "summary": "HTTP 8384 checked against its unauthenticated health endpoint.",
+  "notes": "/rest/noauth/health answers without the API key. This is the interface only: synchronisation runs on TCP 22000 and wants a service of its own.",
+  "fields": {
+    "url": "https://syncthing.example.com",
+    "target": "10.0.0.10:8384",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "1h",
+    "health": "http",
+    "health_uri": "/rest/noauth/health",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 282
+}

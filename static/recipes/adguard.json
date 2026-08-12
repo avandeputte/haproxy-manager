@@ -1,0 +1,22 @@
+{
+  "name": "AdGuard Home",
+  "category": "Infrastructure",
+  "summary": "HTTP 3000 for the admin interface.",
+  "notes": "This publishes the interface only -- DNS itself is UDP 53, which a TCP proxy cannot carry. The check accepts any 2xx or 3xx because the front page redirects to a login.",
+  "fields": {
+    "url": "https://adguard.example.com",
+    "target": "10.0.0.10:3000",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "10m",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 280
+}

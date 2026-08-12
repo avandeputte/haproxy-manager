@@ -1,0 +1,21 @@
+{
+  "name": "Stirling PDF",
+  "category": "Applications",
+  "summary": "HTTP 8080 for PDF tools.",
+  "notes": "Working on a large PDF holds one request for as long as it takes, which is what the server timeout is for. The check accepts any 2xx or 3xx.",
+  "fields": {
+    "url": "https://pdf.example.com",
+    "target": "10.0.0.10:8080",
+    "balance": "leastconn",
+    "persistence": "none",
+    "timeout_server": "1h",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 256
+}

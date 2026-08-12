@@ -1,0 +1,20 @@
+{
+  "name": "OPNsense / pfSense",
+  "category": "Infrastructure",
+  "summary": "HTTPS passed through to the firewall's own interface.",
+  "notes": "The firewall serves TLS with its own certificate, which is not verified here. Think carefully before publishing a firewall's administration interface at all -- restrict who can reach this service.",
+  "fields": {
+    "url": "https://firewall.example.com",
+    "target": "fw1=https://10.0.0.1:443",
+    "balance": "source",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "tcp",
+    "health_interval": "10s",
+    "timeout_server": "1h",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 285
+}

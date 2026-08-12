@@ -1,0 +1,22 @@
+{
+  "name": "n8n",
+  "category": "Applications",
+  "summary": "HTTP 5678 checked with /healthz.",
+  "notes": "/healthz is documented for exactly this. The editor uses a WebSocket and a workflow run can take minutes, so the timeout is long and clients are pinned to the node that started their execution.",
+  "fields": {
+    "url": "https://n8n.example.com",
+    "target": "10.0.0.10:5678",
+    "balance": "leastconn",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "4h",
+    "health": "http",
+    "health_uri": "/healthz",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 252
+}

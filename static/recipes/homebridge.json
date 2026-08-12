@@ -1,0 +1,22 @@
+{
+  "name": "Homebridge",
+  "category": "Applications",
+  "summary": "HTTP 8581 for the management interface.",
+  "notes": "The interface streams logs and status over a WebSocket. Homebridge itself must stay on the same network segment as your HomeKit devices -- only its web interface is worth publishing.",
+  "fields": {
+    "url": "https://homebridge.example.com",
+    "target": "10.0.0.10:8581",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "4h",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 223
+}

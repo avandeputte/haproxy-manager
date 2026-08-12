@@ -1,0 +1,22 @@
+{
+  "name": "ESPHome",
+  "category": "Applications",
+  "summary": "HTTP 6052 with log streaming kept alive.",
+  "notes": "Compiling and flashing a device streams output over a WebSocket for minutes at a time, which is what the long timeout is for.",
+  "fields": {
+    "url": "https://esphome.example.com",
+    "target": "10.0.0.10:6052",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "4h",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 222
+}
