@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.75.0_all.deb
+sudo apt-get install -y ./haproxy-manager_1.76.0_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -210,6 +210,14 @@ renewal happens on its own.)
   "HAProxy integration" is on, every HTTP Public Service automatically routes
   `/.well-known/acme-challenge/` to it, and HTTP→HTTPS redirects skip that path —
   so you can keep port 80 fronted by HAProxy and still validate.
+- **Apply checks that HAProxy is actually serving afterwards.** `systemctl`
+  returning success means the reload was accepted, not that HAProxy came back:
+  a configuration that passes `haproxy -c` can still fail to start, because
+  `-c` never binds a socket. So Apply asks HAProxy over its stats socket, and
+  if it is not answering it puts the previous `haproxy.cfg` back, reloads
+  again, and says so — loudly, and by notification. Without that a node can be
+  left not listening at all, which looks like the node being down rather than
+  like a configuration that was just applied.
 - Before a real certificate exists, Apply drops in a short-lived **self-signed
   placeholder** so HAProxy can start; the first successful issue replaces it.
   It covers every name the certificate is for, and is replaced when those names

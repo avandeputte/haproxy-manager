@@ -9,6 +9,7 @@ import re
 import shutil
 import socket
 import tempfile
+import time
 
 from .base import (ACME_SH, CERT_DIR, HAPROXY_CFG, KEEPALIVED_CFG, VERSION, _lock, 
     _requests, app, log)
@@ -120,6 +121,44 @@ def _haproxy_hint(output):
         return (" A rule points at a Backend Pool that is not there. That happens when "
                 "an object was deleted while something still referred to it.")
     return ""
+
+
+def _haproxy_not_serving():
+    """"" if HAProxy is answering, otherwise why it is not.
+
+    Given a moment first: a reload is not instantaneous, and reporting a
+    failure because the check was quicker than the restart would be worse than
+    not checking at all.
+    """
+    for _ in range(10):
+        state, detail = watchdog.probe_haproxy(load_config())
+        if state in ("ok", "idle"):
+            return ""
+        if state == "starting":
+            time.sleep(1)
+            continue
+        time.sleep(1)
+    state, detail = watchdog.probe_haproxy(load_config())
+    return "" if state in ("ok", "idle") else detail
+
+
+def _restore_previous_haproxy_cfg():
+    """Put back the configuration that was working, and say what happened."""
+    bak = Path(str(HAPROXY_CFG) + ".bak")
+    if not bak.exists():
+        return "There is no previous configuration to go back to."
+    try:
+        shutil.copy2(bak, HAPROXY_CFG)
+    except OSError as e:
+        return "The previous configuration could not be put back: %s" % e
+    rc, out = run(["systemctl", "reload-or-restart", "haproxy"])
+    if rc != 0 or _haproxy_not_serving():
+        return ("The previous configuration was put back and HAProxy is still not "
+                "serving, so the fault is not in what was just applied.")
+    log.warning("put the previous haproxy.cfg back; HAProxy is serving again")
+    return ("The previous configuration has been put back and HAProxy is serving "
+            "again, so this node is answering -- but it is running what it had "
+            "before, not what was just applied.")
 
 
 def _keepalived_hint(output, k):
@@ -329,7 +368,27 @@ def do_apply(cfg=None, allow_push=True):
         rc, out = run(["systemctl", "reload-or-restart", "haproxy"])
         result["steps"].append("haproxy reload: " + ("ok" if rc == 0 else out))
         if rc == 0:
-            log.info("applied: haproxy.cfg written and reloaded")
+            # systemctl returning zero means the command was accepted, not that
+            # HAProxy is serving. A configuration that passes haproxy -c can
+            # still fail to start -- a port already taken is the classic one,
+            # because -c never binds anything -- and the node is then simply
+            # not listening, with nothing having reported a failure.
+            bad = _haproxy_not_serving()
+            if bad:
+                log.error("haproxy is not serving after the reload: %s", bad)
+                restored = _restore_previous_haproxy_cfg()
+                result["steps"].append("haproxy is not serving: " + bad)
+                result.setdefault("warnings", []).append(
+                    "HAProxy accepted the reload but is not serving: %s. %s This node is "
+                    "not answering on its own address; if it holds the virtual IP, "
+                    "Keepalived will hand that over. The log says why: "
+                    "journalctl -u haproxy -n 50" % (bad, restored))
+                notify.notify("apply", "HAProxy is not serving on this node",
+                       "The configuration was written and validated, and the reload was "
+                       "accepted, but HAProxy is not answering afterwards: %s\n\n%s"
+                       % (bad, restored), "error", cfg)
+            else:
+                log.info("applied: haproxy.cfg written and reloaded")
         else:
             log.error("applied haproxy.cfg but the reload failed: %s", out.strip()[:300])
             notify.notify("apply", "HAProxy did not reload on this node",
