@@ -217,6 +217,7 @@ def _node_summary(st):
         "dirty": bool(st.get("dirty")),
         "config_rev": int(st.get("config_rev") or 0),
         "config_fp": st.get("config_fp") or "",
+        "config_parts": st.get("config_parts") or {},
         "update_available": bool(st.get("update_available")),
         "certs_total": len(certs),
         "certs_bad": sum(1 for c in certs if c.get("status") in ("expired", "expiring", "placeholder", "missing")),

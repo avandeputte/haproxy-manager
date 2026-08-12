@@ -488,7 +488,7 @@ of its peers.
 ## Upgrades and the browser cache
 
 The page is served with `no-cache`, and everything it loads lives under a path
-that contains the version — `/static/v/1.63.0/js/main.js`. Those files are then
+that contains the version — `/static/v/1.64.0/js/main.js`. Those files are then
 cached for a year, which is safe because the URL changes whenever the version
 does.
 
@@ -542,9 +542,18 @@ The JSON backup contains secrets. Store it accordingly.
 | HAProxy objects: services, pools, servers, rules | API key |
 | ACME accounts, challenge types, certificates | This node's URL |
 | Cluster VRRP settings: VRID, VIPs, auth, interval | Keepalived interface, priority, state |
-| Notification settings and destinations | The UI's own HTTPS service |
+| Notification settings and destinations | The UI's own HTTPS service, and its certificate |
 | | Administrator login |
 | | Watchdog settings |
+
+The UI's own service is the reason the right-hand column matters more than it
+looks. Every node publishes it under the same name, for a different host, so
+everything it is made of — the pool, the server, the rule, and the certificate
+for that node's own name — belongs to the node that made it. Anything of that
+sort left in the shared configuration travels to the other nodes, which keep it
+and add their own, and the cluster never agrees with itself again. Upgrading
+marks those certificates as node-local and removes the ones a node was only
+ever sent.
 
 ## Environment variables
 

@@ -90,6 +90,54 @@ ok(set(shared_view(a)) == {"haproxy", "acme", "cluster", "notify"},
 ok(not any(x.get(LOCAL_ONLY) for x in shared_view(a)["haproxy"]["backends"]),
    "and carries none of this node's own objects")
 
+# -- the management UI certificates ----------------------------------------
+# Each node publishes its own UI under the same service name, so each makes a
+# certificate for its own host. Those have to stay with the node that made
+# them: shared, they travel to the others, which keep them and add their own,
+# and no two nodes ever hold the same configuration again.
+from ham.config import _migrate_webui_certs, WEBUI_NAME   # noqa: E402
+
+def damaged():
+    return {
+        "local": {"web_ui": {"enabled": True, "url": "https://proxy2.example.com"}},
+        "cluster": {"ui_url": "https://proxy.example.com"},
+        "haproxy": {"frontends": [{"id": "fe1", "name": "https-443",
+                                   "certificates": ["c-mine", "c-dup", "c-theirs"]}]},
+        "acme": {"certificates": [
+            {"id": "c-shop", "name": "shop", "domains": "shop.example.com"},
+            {"id": "c-mine", "name": WEBUI_NAME,
+             "domains": "proxy2.example.com proxy.example.com"},
+            {"id": "c-dup", "name": WEBUI_NAME + "-2",
+             "domains": "proxy2.example.com proxy.example.com"},
+            {"id": "c-theirs", "name": WEBUI_NAME + "-3",
+             "domains": "proxy1.example.com"},
+        ]},
+    }
+
+cfg = damaged()
+_migrate_webui_certs(cfg)
+names = [c["name"] for c in cfg["acme"]["certificates"]]
+ok(names == ["shop", WEBUI_NAME], "the migration keeps ours and the ordinary ones: %s" % names)
+ok(cfg["acme"]["certificates"][1].get(LOCAL_ONLY) is True, "ours is marked as this node's")
+ok(cfg["acme"]["certificates"][0].get(LOCAL_ONLY) is None, "an ordinary certificate is untouched")
+ok(cfg["haproxy"]["frontends"][0]["certificates"] == ["c-mine"],
+   "and the listener no longer names what was removed")
+
+cfg = damaged()
+_migrate_webui_certs(cfg)
+before = [dict(c) for c in cfg["acme"]["certificates"]]
+_migrate_webui_certs(cfg)
+ok(cfg["acme"]["certificates"] == before, "running it twice changes nothing")
+
+# A node that has not published its UI cannot tell whose certificate is whose,
+# so it must not throw any of them away.
+cfg = damaged()
+cfg["local"]["web_ui"] = {}
+cfg["cluster"]["ui_url"] = ""
+_migrate_webui_certs(cfg)
+ok(len(cfg["acme"]["certificates"]) == 3,
+   "with no UI address configured it drops only the duplicate")
+
 print()
 print("the revision counts what it should" if not fails else "%d failed" % len(fails))
 sys.exit(1 if fails else 0)

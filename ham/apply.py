@@ -12,7 +12,7 @@ import tempfile
 
 from .base import (ACME_SH, CERT_DIR, HAPROXY_CFG, KEEPALIVED_CFG, VERSION, _lock, 
     _requests, app, log)
-from .config import CLUSTER_KEYS, config_hash, load_config, save_config
+from .config import CLUSTER_KEYS, config_hash, load_config, save_config, shared_parts
 from .util import _by_id, cert_details, cert_path, parse_domains, run
 from .validate import check_setting_types
 from . import acme, auth, haproxy, keepalived, notify, sync, updates, vrrp, watchdog
@@ -415,6 +415,8 @@ def api_status():
         # and the revision says which.
         "config_rev": int(cfg["_meta"].get("shared_rev") or 0),
         "config_fp": cfg["_meta"].get("shared_fp") or "",
+        # One tag per collection, so a disagreement can name the part it is in.
+        "config_parts": shared_parts(cfg),
         "certs": certs,
         "acme_installed": Path(ACME_SH).exists(),
         "renews_here": acme.renewal_runs_here(cfg)[0],

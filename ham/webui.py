@@ -6,13 +6,12 @@ from flask import request
 import copy
 
 from .base import LISTEN, PORT, _lock, app
-from .config import LOCAL_ONLY, load_config, save_config
+from .config import LOCAL_ONLY, WEBUI_NAME, is_webui_cert, load_config, save_config
 from .util import _by_id, cert_details, cert_path
 from . import apply, dnsapi, wizard
 
 # --------------------------------------------------------------------------
 
-WEBUI_NAME = "haproxy-manager-ui"
 
 
 def webui_pubs(cfg, pub):
@@ -50,6 +49,14 @@ def build_webui(cfg, pub, mode="auto", http_redirect=True):
     ids |= set((pool or {}).get("servers") or [])
     ids |= set((rule or {}).get("conditions") or [])
     _tag_local(hp, {i for i in ids if i})
+    # The certificate too. Every node needs one for its own name, so a
+    # certificate left in the shared configuration travels to the others, which
+    # keep it and add their own -- and no two nodes ever hold the same
+    # configuration again. A certificate that merely covers this host and was
+    # reused (a wildcard, say) is not ours to claim and is left alone.
+    for cert in cfg["acme"]["certificates"]:
+        if is_webui_cert(cert):
+            cert[LOCAL_ONLY] = True
     return acts, warns
 
 
@@ -62,7 +69,12 @@ def rebuild_webui(cfg):
                           allow=("http", "https"))
     if err:
         return
-    build_webui(cfg, pub, s.get("certificate", "auto"), True)
+    # Never "new" here, whatever was chosen when the service was set up.
+    # Asking for a new certificate is something a person does once, by pressing
+    # Save; replaying it on every configuration that arrives would leave a node
+    # with one more certificate for the same name after every sync.
+    mode = s.get("certificate", "auto")
+    build_webui(cfg, pub, "auto" if mode == "new" else mode, True)
 
 
 def _tag_local(hp, ids):
@@ -73,8 +85,12 @@ def _tag_local(hp, ids):
                 item[LOCAL_ONLY] = True
 
 
-def keep_local_only(mine, incoming):
-    """Put this node's own objects back after adopting a shared configuration."""
+def keep_local_only(mine, incoming, local_ids=None):
+    """Put this node's own objects back after adopting a shared configuration.
+
+    local_ids names everything this node owns alone across every section, so a
+    listener under haproxy can be re-attached to a certificate under acme.
+    """
     for coll, items in mine.items():
         if not isinstance(items, list):
             continue
@@ -93,11 +109,11 @@ def keep_local_only(mine, incoming):
         was = by_id.get(fe.get("id")) or by_name.get(fe.get("name"))
         if not was:
             continue
-        local_ids = {i.get("id") for coll in ("rules", "certificates")
-                     for i in (mine.get("rules") or []) + (mine.get("certificates") or [])
-                     if i.get(LOCAL_ONLY)}
+        ids = local_ids if local_ids is not None else {
+            i.get("id") for i in (mine.get("rules") or []) + (mine.get("certificates") or [])
+            if i.get(LOCAL_ONLY)}
         for key in ("rules", "certificates"):
-            extra = [x for x in (was.get(key) or []) if x in local_ids and x not in (fe.get(key) or [])]
+            extra = [x for x in (was.get(key) or []) if x in ids and x not in (fe.get(key) or [])]
             if extra:
                 fe[key] = (fe.get(key) or []) + extra
     return incoming

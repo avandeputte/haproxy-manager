@@ -7,7 +7,7 @@ import json
 import os
 import uuid
 
-from .base import CONF_PATH, DATA_DIR, _lock
+from .base import CONF_PATH, DATA_DIR, _lock, log
 
 # --------------------------------------------------------------------------
 
@@ -173,6 +173,51 @@ def _looks_configured(cfg):
     )
 
 
+def _migrate_webui_certs(cfg):
+    """Take the management UI certificates out of the shared configuration.
+
+    Every node publishes its own UI under the same service name, so each makes
+    a certificate for its own host name. Those certificates were not marked as
+    belonging to the node, so they travelled with every sync: each node kept
+    the ones it was sent and made its own alongside, and no two nodes held the
+    same configuration again -- which the Cluster page now reports as a
+    disagreement that never settles.
+
+    Ours is marked. Removed, along with the listener's reference to them, are
+    the ones that are plainly another node's -- named for this service but
+    covering a host this node does not answer for -- and any duplicate for
+    names a certificate here already covers.
+    """
+    ours = {h for h in ((cfg["local"].get("web_ui") or {}).get("url", ""),
+                        cfg["cluster"].get("ui_url", ""))
+            for h in [urlsplit(h if "//" in h else "//" + h).hostname or ""] if h}
+    keep, drop, seen = [], [], set()
+    for cert in cfg["acme"]["certificates"]:
+        if not is_webui_cert(cert):
+            keep.append(cert)
+            continue
+        hosts = frozenset(d.strip().lower() for d in
+                          (cert.get("domains") or "").replace(",", " ").split())
+        if ours and not hosts & ours:
+            drop.append(cert)            # another node's, and unusable here
+        elif hosts in seen:
+            drop.append(cert)            # a duplicate for the same names
+        else:
+            seen.add(hosts)
+            cert[LOCAL_ONLY] = True      # ours, and it stays here
+            keep.append(cert)
+    if not drop:
+        return
+    cfg["acme"]["certificates"] = keep
+    gone = {c.get("id") for c in drop}
+    for fe in cfg["haproxy"]["frontends"]:
+        if isinstance(fe.get("certificates"), list):
+            fe["certificates"] = [x for x in fe["certificates"] if x not in gone]
+    log.info("removed %d management-UI certificate(s) that were duplicates or "
+             "belonged to another node: %s",
+             len(drop), ", ".join(c.get("name", "?") for c in drop))
+
+
 def _migrate(cfg):
     """Bring an older config forward. Idempotent; persisted on the next save."""
     if not cfg["_meta"].get("setup_complete") and _looks_configured(cfg):
@@ -180,6 +225,7 @@ def _migrate(cfg):
     # A passive-node unlock is per session, so any copy sitting in the stored
     # configuration is stale by definition and is dropped.
     cfg["local"].pop("allow_edit_when_passive", None)
+    _migrate_webui_certs(cfg)
     # VRRP settings that must match across nodes moved from local.keepalived
     # into the shared cluster section.
     k, cl = cfg["local"]["keepalived"], cfg["cluster"]
@@ -228,16 +274,38 @@ def shared_view(cfg):
     alone, because two nodes that differ only in those two respects are in
     agreement.
     """
-    return {"haproxy": strip_local_only(cfg["haproxy"]),
-            "acme": strip_local_only(cfg["acme"]),
+    mine = local_only_ids(cfg)
+    return {"haproxy": strip_local_only(cfg["haproxy"], mine),
+            "acme": strip_local_only(cfg["acme"], mine),
             "cluster": cfg["cluster"],
             "notify": cfg.get("notify", {})}
 
 
+def _fp(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()[:16]
+
+
 def shared_fingerprint(cfg):
     """A short tag for the shared configuration. Equal tags mean agreement."""
-    return hashlib.sha256(
-        json.dumps(shared_view(cfg), sort_keys=True).encode()).hexdigest()[:16]
+    return _fp(shared_view(cfg))
+
+
+def shared_parts(cfg):
+    """The same, one tag per collection.
+
+    "The nodes disagree" is not a useful thing to be told on its own: it takes
+    a byte-by-byte comparison of two configurations to find out about what.
+    These say which part differs, which is nearly always enough to see why.
+    """
+    view = shared_view(cfg)
+    out = {}
+    for section, body in view.items():
+        if not isinstance(body, dict):
+            out[section] = _fp(body)
+            continue
+        for coll, items in sorted(body.items()):
+            out["%s.%s" % (section, coll)] = _fp(items)
+    return out
 
 
 def save_config(cfg):
@@ -264,9 +332,37 @@ def save_config(cfg):
 
 
 LOCAL_ONLY = "local_only"       # this object belongs to this node alone
+WEBUI_NAME = "haproxy-manager-ui"   # the service each node publishes its own UI as
 
 
-def strip_local_only(section):
+def is_webui_cert(cert):
+    """Was this certificate created for a node's own management UI service?
+
+    Every node publishes that service under the same name, so the certificate
+    is named for it too -- and belongs to the node that made it, never to the
+    cluster.
+    """
+    name = (cert.get("name") or "")
+    return name == WEBUI_NAME or name.startswith(WEBUI_NAME + "-")
+
+
+def local_only_ids(cfg):
+    """Every id this node owns alone, across all the shared sections.
+
+    Gathered across sections because a certificate lives under acme while the
+    listener that names it lives under haproxy: dropping the first without the
+    second would leave a reference to something that is not there.
+    """
+    out = set()
+    for name in ("haproxy", "acme"):
+        for items in (cfg.get(name) or {}).values():
+            if not isinstance(items, list):
+                continue
+            out |= {i.get("id") for i in items if isinstance(i, dict) and i.get(LOCAL_ONLY)}
+    return {i for i in out if i}
+
+
+def strip_local_only(section, dropped=None):
     """A copy of a config section with this node's own objects removed.
 
     Some objects belong to one node alone -- the service that publishes this
@@ -275,7 +371,7 @@ def strip_local_only(section):
     sent to the other nodes and of what the nodes compare.
     """
     out = copy.deepcopy(section)
-    dropped = set()
+    dropped = set(dropped or ())
     for coll, items in list(out.items()):
         if not isinstance(items, list):
             continue

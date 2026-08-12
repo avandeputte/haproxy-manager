@@ -18,6 +18,18 @@ _cluster_cache = {"at": 0.0, "value": None}
 _cluster_cache_lock = threading.Lock()
 
 
+def _differing_parts(nodes):
+    """Which collections the nodes do not agree on, named."""
+    parts = [n.get("config_parts") or {} for n in nodes if n.get("config_parts")]
+    if len(parts) < 2:
+        return ""
+    keys = set().union(*(set(p) for p in parts))
+    differ = sorted(k for k in keys if len({p.get(k) for p in parts}) > 1)
+    if not differ:
+        return ""
+    return " -- they differ in " + ", ".join(differ)
+
+
 def cluster_snapshot(cfg=None):
     """Ask every node how it is. Slow by nature -- it waits on the network."""
     cfg = cfg or load_config()
@@ -77,11 +89,12 @@ def cluster_snapshot(cfg=None):
                "it" if len(behind) == 1 else "they", "s" if len(behind) == 1 else ""))
     elif not agree:
         # Same revision, different content: two nodes were changed while they
-        # could not see each other. Nothing here can decide which is right.
+        # could not see each other. Nothing here can decide which is right, but
+        # naming the part that differs usually explains it at a glance.
         warnings.append(
             "The nodes hold different configurations at the same revision (%d), "
-            "so they were changed independently. Choose the node that is right "
-            "and apply from it." % newest)
+            "so they were changed independently%s. Choose the node that is right "
+            "and apply from it." % (newest, _differing_parts(reachable)))
 
     # Each node reports what it can see, so a node that vanishes is reported
     # by each of its peers -- which also tells you who lost sight of it.
@@ -127,7 +140,8 @@ def cluster_snapshot(cfg=None):
                     # What the Cluster page needs to show agreement at a glance
                     # and to offer to fix it.
                     "config_rev": newest, "config_agreed": bool(agree and not behind),
-                    "config_behind": [n["name"] for n in behind]},
+                    "config_behind": [n["name"] for n in behind],
+                    "config_differs_in": _differing_parts(reachable)},
         "taken": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
     with _cluster_cache_lock:
