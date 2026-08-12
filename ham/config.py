@@ -290,6 +290,37 @@ def shared_fingerprint(cfg):
     return _fp(shared_view(cfg))
 
 
+def shared_objects(cfg, limit=4000):
+    """Every shared object, with a tag for its contents.
+
+    A tag per collection can only say "these differ", which leaves the reader
+    to compare two configurations by hand. This says which object: what is on
+    one node and not another, and what has the same identity but different
+    contents.
+
+    Capped, because it travels between nodes on every health check.
+    """
+    out, seen = {}, 0
+    for section, body in shared_view(cfg).items():
+        if not isinstance(body, dict):
+            continue
+        for coll, items in sorted(body.items()):
+            if not isinstance(items, list):
+                continue
+            rows = []
+            for i, item in enumerate(items):
+                if not isinstance(item, dict):
+                    continue
+                rows.append([item.get("id") or "#%d" % i,
+                             item.get("name") or item.get("id") or "#%d" % i,
+                             _fp(item)])
+            seen += len(rows)
+            if seen > limit:
+                return {}          # too many to be worth sending
+            out["%s.%s" % (section, coll)] = rows
+    return out
+
+
 def shared_parts(cfg):
     """The same, one tag per collection.
 

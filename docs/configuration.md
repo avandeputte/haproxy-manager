@@ -413,6 +413,16 @@ Reconciliation runs from the node holding the virtual IP, on the health it
 already collects, so there is no queue of pending pushes to lose: a push that
 fails is simply observed again next round.
 
+**When the nodes do not agree**, the Cluster page lists what differs: the
+object, whether it is missing from a node or present everywhere with different
+contents, and which nodes hold which version. Settings have no identity of
+their own and are compared whole.
+
+The health behind that view is collected in the background and can be up to a
+minute old, so anything that changes or pushes the configuration throws the
+collected copy away — the next look asks the nodes again rather than repeating
+a verdict from before the change.
+
 **What counts as HAProxy being up.** Keepalived gives the virtual IP up when
 its tracking script fails. The default script asks HAProxy through its admin
 socket whether it is serving, so an instance that is running but wedged fails
@@ -495,7 +505,7 @@ of its peers.
 ## Upgrades and the browser cache
 
 The page is served with `no-cache`, and everything it loads lives under a path
-that contains the version — `/static/v/1.65.0/js/main.js`. Those files are then
+that contains the version — `/static/v/1.66.0/js/main.js`. Those files are then
 cached for a year, which is safe because the URL changes whenever the version
 does.
 

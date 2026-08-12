@@ -22,7 +22,7 @@ def api_cluster_settings():
     if request.method == "GET":
         return jsonify(cfg["cluster"])
     body = request.get_json(force=True) or {}
-    ok, message = apply.check_rendered(apply.draft_with(None, body, cluster=True))   # slow: outside the lock
+    ok, message = apply.check_rendered(apply.draft_with(None, body, shared=True))   # slow: outside the lock
     if not ok:
         return jsonify({"error": "These settings were not saved -- they do not produce a working "
                                  "configuration.\n\n" + message}), 400
@@ -218,6 +218,7 @@ def _node_summary(st):
         "config_rev": int(st.get("config_rev") or 0),
         "config_fp": st.get("config_fp") or "",
         "config_parts": st.get("config_parts") or {},
+        "config_objects": st.get("config_objects") or {},
         "update_available": bool(st.get("update_available")),
         "certs_total": len(certs),
         "certs_bad": sum(1 for c in certs if c.get("status") in ("expired", "expiring", "placeholder", "missing")),

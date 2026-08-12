@@ -14,7 +14,7 @@ import uuid
 from .base import (CERT_DIR, PEER_CONNECT_TIMEOUT, PEER_READ_TIMEOUT,
     PUSH_READ_TIMEOUT, _lock, _requests, app, log)
 from .config import DEFAULT_CONFIG, _merge_defaults, load_config, local_only_ids, save_config, shared_fingerprint, shared_view
-from . import apply, auth, peering, webui
+from . import apply, auth, cluster, peering, webui
 
 # --------------------------------------------------------------------------
 
@@ -188,6 +188,9 @@ def sync_push(cfg, only=None, include_peers=True, force=False):
             log.info("synced to %s", r["name"])
         else:
             log.warning("sync to %s failed: %s", r["name"], r.get("error"))
+    # What every node holds has just changed, so the health collected before
+    # this says nothing useful about it.
+    cluster.invalidate()
     out = {"ok": not failed, "results": results,
            "error": "; ".join("%s: %s" % (r["name"], r["error"]) for r in failed) or None}
     if include_peers and not (cfg["local"].get("node_url") or "").strip():
@@ -501,6 +504,7 @@ def _receive_locked(cfg, data, conf, source=None):
                     "fingerprint (%s here, %s there) -- the Cluster page will "
                     "report these nodes as disagreeing",
                     source, cfg["_meta"]["shared_fp"], data.get("fp"))
+    cluster.invalidate()
     log.info("received configuration from %s at revision %d",
              source, cfg["_meta"]["shared_rev"])
     res = apply.do_apply(cfg, allow_push=False)  # never re-push: avoids sync loops

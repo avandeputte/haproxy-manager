@@ -18,6 +18,19 @@ _cluster_cache = {"at": 0.0, "value": None}
 _cluster_cache_lock = threading.Lock()
 
 
+def invalidate():
+    """Forget the collected health, so the next read goes and asks.
+
+    The snapshot is deliberately up to a minute old -- it is collected in the
+    background so the page does not wait on the slowest node. But after
+    something has just changed the configuration or pushed it, showing the
+    verdict from before that is worse than making the reader wait: it says the
+    nodes still disagree when they have just been put right.
+    """
+    with _cluster_cache_lock:
+        _cluster_cache["at"] = 0.0
+
+
 def _differing_parts(nodes):
     """Which collections the nodes do not agree on, named.
 

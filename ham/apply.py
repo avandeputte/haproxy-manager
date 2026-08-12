@@ -12,10 +12,10 @@ import tempfile
 
 from .base import (ACME_SH, CERT_DIR, HAPROXY_CFG, KEEPALIVED_CFG, VERSION, _lock, 
     _requests, app, log)
-from .config import CLUSTER_KEYS, config_hash, load_config, save_config, shared_parts
+from .config import CLUSTER_KEYS, config_hash, load_config, save_config, shared_objects, shared_parts
 from .util import _by_id, cert_details, cert_path, parse_domains, run
 from .validate import check_setting_types
-from . import acme, auth, haproxy, keepalived, notify, sync, updates, vrrp, watchdog
+from . import acme, auth, cluster, haproxy, keepalived, notify, sync, updates, vrrp, watchdog
 
 # --------------------------------------------------------------------------
 
@@ -213,10 +213,14 @@ def check_rendered(cfg):
     return True, "haproxy -c accepts it" + (" and keepalived -t accepts it" if vrrp.keepalived_wanted(cfg) else "")
 
 
-def draft_with(section, settings, cluster=False):
-    """This configuration as it would be with those settings in place."""
+def draft_with(section, settings, shared=False):
+    """This configuration as it would be with those settings in place.
+
+    shared=True puts them in the cluster-wide section instead of a
+    section's own settings.
+    """
     draft = copy.deepcopy(load_config())
-    if cluster:
+    if shared:
         draft["cluster"].update({k: v for k, v in settings.items() if k in CLUSTER_KEYS})
     else:
         draft[section]["settings"].update(settings)
@@ -230,7 +234,7 @@ def api_validate():
     section = body.get("section") or "haproxy"
     settings = body.get("settings") or {}
     if section == "cluster":
-        draft = draft_with(None, settings, cluster=True)
+        draft = draft_with(None, settings, shared=True)
     elif section in ("haproxy", "acme"):
         bad = check_setting_types(section, settings)
         if bad:                      # the same rules the save applies, so
@@ -332,6 +336,9 @@ def do_apply(cfg=None, allow_push=True):
     # one can hold it for the full timeout. That must happen with the lock
     # released, or this node's own UI is unusable until the slowest peer gives
     # up. cfg is already saved, so the snapshot being pushed is the applied one.
+    # This node's own revision has just moved, so the health collected before
+    # it would report this node as holding something it no longer holds.
+    cluster.invalidate()
     if allow_push and cfg["local"]["sync"].get("auto_sync") and sync.enabled_peers(cfg):
         r = sync.sync_push(cfg)
         result["steps"].append("auto-sync to %d peer(s): " % len(sync.enabled_peers(cfg)) +
@@ -417,6 +424,9 @@ def api_status():
         "config_fp": cfg["_meta"].get("shared_fp") or "",
         # One tag per collection, so a disagreement can name the part it is in.
         "config_parts": shared_parts(cfg),
+        # And one per object, so a disagreement can name the object rather
+        # than the collection it is somewhere inside.
+        "config_objects": shared_objects(cfg),
         "certs": certs,
         "acme_installed": Path(ACME_SH).exists(),
         "renews_here": acme.renewal_runs_here(cfg)[0],
