@@ -21,9 +21,9 @@ export function showLogin(setup){
   setTimeout(()=>{($("#lu").value?$("#lp"):$("#lu")).focus();},30);
 }
 export function hideLogin(){$("#login").classList.remove("show");$("#lp").value="";$("#lp2").value="";}
-/* Account settings on a gear beside the name rather than a page of their own:
-   changing a password is something you do from wherever you are, not something
-   you navigate to. */
+/* The account dialog: the username, an email and the password, opened by the
+   gear beside the name. It is reachable from every page because changing a
+   password is something you do from wherever you happen to be. */
 export function openAccount(){
   const body=document.createElement("div");body.className="frm";
   const fields=[
@@ -33,19 +33,42 @@ export function openAccount(){
     {k:"new",l:"New password",t:"password",h:"At least 8 characters. Leave empty to keep the current one."},
     {k:"new2",l:"Repeat new password",t:"password"},
   ];
+  /* The login is node-local, so this is offered rather than assumed -- but it
+     is offered, because one node with a different password is usually an
+     accident you find out about during a failover. Only shown when there is
+     somewhere to send it. */
+  const peers=state.who.peers||0;
+  if(peers)fields.push({k:"propagate",l:"Apply to the other nodes",t:"bool",d:true,
+    h:"Sends the new login to the "+peers+" other node"+(peers===1?"":"s")+
+      ". Only the stored hash travels, never the password."});
   fields.forEach(f=>fieldRow(f,f.k==="username"?(state.who.username||state.who.admin_username)
-                             :f.k==="email"?(state.who.email||""):"")
+                             :f.k==="email"?(state.who.email||"")
+                             :f.k==="propagate"?true:"")
                  .forEach(el=>body.appendChild(el)));
   const err=document.createElement("div");err.className="err";
+  const out=document.createElement("div");out.className="hint";out.style.marginTop="10px";
+  body.appendChild(out);
   openDlg("Account",body,[err,btn("Cancel","",closeDlg),
     btn("Save","pri",async()=>{
       const val=k=>{const el=fieldEl(k);return el?el.value:"";};
       const nw=val("new");
       if(nw&&nw!==val("new2")){err.textContent="The two new passwords do not match.";return;}
       if(nw&&!val("current")){err.textContent="Enter the current password to change it.";return;}
+      const box=fieldEl("propagate");
       try{
-        await api("password","POST",{username:val("username").trim(),email:val("email").trim(),
-                                     current:val("current"),new:nw});
+        const r=await api("password","POST",{username:val("username").trim(),email:val("email").trim(),
+                                     current:val("current"),new:nw,
+                                     propagate:!!(box&&box.checked)});
+        const failed=(r.nodes||[]).filter(n=>!n.ok);
+        if(failed.length){
+          /* Saved here either way: the local change is done and reporting it as
+             a failure would be worse than telling you exactly which node to fix. */
+          err.innerHTML="Saved on this node, but not on "+
+            failed.map(n=>"<b>"+esc(n.name)+"</b>: "+esc(n.error||"")).join("; ")+
+            ". Those nodes keep the old login until you change it there.";
+          out.textContent="";
+          return;
+        }
         closeDlg();await refreshWho();
       }catch(e){err.textContent=e.message;}
     })]);

@@ -144,6 +144,7 @@ PUBLIC_PATHS = {"/api/login", "/api/whoami", "/api/setup"}   # /api/setup create
 LOCAL_WRITE_PREFIXES = (
     "/api/local", "/api/password", "/api/logout", "/api/peers",
     "/api/update", "/api/version", "/api/apply", "/api/sync/receive", "/api/setup",
+    "/api/admin",          # the administrator record, pushed from another node
     "/api/webui",          # this node's own UI address, not shared
     "/api/unlock",         # lifting the lock cannot itself be blocked by it
 )
@@ -286,6 +287,9 @@ def api_whoami():
         "hostname": socket.gethostname(),
         "needs_setup": False,
         "admin_username": (cfg["local"].get("admin") or {}).get("username", "admin"),
+        # How many other nodes there are, so the account dialog knows whether
+        # offering to copy the login anywhere makes sense.
+        "peers": len(sync.enabled_peers(cfg)),
     })
 
 
@@ -386,6 +390,46 @@ def api_logout():
     return resp
 
 
+@app.post("/api/admin/receive")
+def api_admin_receive():
+    """Take the administrator record from another node.
+
+    Node-local settings are never synced as a rule, and this is the deliberate
+    exception: it only runs because someone ticked the box on another node.
+    The API key is required -- a session on this node is not enough -- so it
+    cannot be reached from a browser.
+
+    What arrives is the salt and digest, not a password: this node can verify
+    the same password afterwards, and still cannot tell you what it is.
+    """
+    cfg = load_config()
+    if not key_matches(cfg["local"].get("api_key"), request.headers.get("X-API-Key")):
+        return jsonify({"ok": False, "hostname": socket.gethostname(),
+                        "error": "the administrator can only be set by a node presenting "
+                                 "this node's API key",
+                        "presented_fp": key_fingerprint(request.headers.get("X-API-Key")),
+                        "expected_fp": key_fingerprint(cfg["local"].get("api_key"))}), 401
+    rec = (request.get_json(force=True) or {}).get("admin") or {}
+    if not (rec.get("hash") and rec.get("salt") and rec.get("username")):
+        return jsonify({"ok": False, "error": "that is not an administrator record"}), 400
+    with _lock:
+        cfg = load_config()
+        cfg["local"]["admin"] = {
+            "username": str(rec["username"]).strip() or "admin",
+            "salt": str(rec["salt"]), "hash": str(rec["hash"]),
+            "iterations": int(rec.get("iterations") or PBKDF2_ITERATIONS),
+            "email": str(rec.get("email") or ""),
+            "updated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+        save_config(cfg)
+    # Sessions are signed with a secret derived from the stored hash, so every
+    # session on this node is now invalid. That is correct: the credential
+    # changed, and anyone signed in here was signed in with the old one.
+    log.info("administrator record accepted from %s", request.remote_addr)
+    return jsonify({"ok": True, "hostname": socket.gethostname(),
+                    "username": cfg["local"]["admin"]["username"]})
+
+
 @app.post("/api/password")
 def api_password():
     """Change the administrator username and/or password (session required)."""
@@ -424,10 +468,20 @@ def api_password():
         if email is not None:
             cfg["local"]["admin"]["email"] = email
         save_config(cfg)
+    # Offered rather than automatic: the login is node-local, and wanting a
+    # different administrator on one node is legitimate.
+    pushed = sync.push_admin(cfg) if body.get("propagate") else None
+    for r in (pushed or []):
+        (log.info if r.get("ok") else log.warning)(
+            "administrator %s on %s%s", "updated" if r.get("ok") else "NOT updated",
+            r.get("name"), "" if r.get("ok") else ": " + r.get("error", ""))
+    out = {"ok": True, "username": username,
+           "email": cfg["local"]["admin"].get("email", "")}
+    if pushed is not None:
+        out["nodes"] = pushed
     if new or wants_name:
-        return _login_ok(cfg, username, {"ok": True, "username": username})
-    return jsonify({"ok": True, "username": username,
-                    "email": cfg["local"]["admin"].get("email", "")})
+        return _login_ok(cfg, username, out)
+    return jsonify(out)
 
 
 # --------------------------------------------------------------------------

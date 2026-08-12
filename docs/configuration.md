@@ -328,6 +328,16 @@ and there is no reset-by-email here, so it can be set without one. It is
 offered as the default when an ACME account is created and when notifications
 are set up, so it is only typed once.
 
+**Applying it to the other nodes.** The login is stored per node, so changing
+it here changes it only here — and a node with the old password is something
+you usually find out about during a failover, at the worst possible moment. So
+when the cluster has other nodes, the dialog offers **Apply to the other
+nodes**, ticked by default. It sends the stored salt and digest — not the
+password — to each node's `/api/admin/receive`, authenticated with that node's
+API key. A browser cannot reach that endpoint: a session on the receiving node
+is not enough, only the key is. Nodes that do not take it are named, with the
+reason, and keep the login they had.
+
 The login is node-local: set it on each node.
 
 ## Serving the UI over HTTPS
@@ -449,7 +459,7 @@ of its peers.
 ## Upgrades and the browser cache
 
 The page is served with `no-cache`, and everything it loads lives under a path
-that contains the version — `/static/v/1.61.0/js/main.js`. Those files are then
+that contains the version — `/static/v/1.62.0/js/main.js`. Those files are then
 cached for a year, which is safe because the URL changes whenever the version
 does.
 

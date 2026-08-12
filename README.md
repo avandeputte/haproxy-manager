@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.61.0_all.deb
+sudo apt-get install -y ./haproxy-manager_1.62.0_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -580,7 +580,7 @@ over Sync, or are re-issued.
   Until then only the calls that create it answer — everything else returns 401 —
   so a node waiting to be set up does not hand its configuration to whoever
   reaches it first.
-- **Every API endpoint requires a session or the API key.** Of 62 routes exactly
+- **Every API endpoint requires a session or the API key.** Of 63 routes exactly
   three answer without either: `/api/login`, `/api/whoami` (which
   unauthenticated returns nothing but whether an administrator exists), and
   `/api/setup`, which refuses once an administrator exists. This is verified by
@@ -591,6 +591,14 @@ over Sync, or are re-issued.
   The sign-in page and its icons are served without a session too, because the
   page has to render before anyone can sign in; they come from a fixed list of
   filenames, not from the directory.
+- **The administrator login is node-local, but it can be copied.** Each node
+  stores its own; changing the password on one leaves the others as they were,
+  which is a problem you tend to discover during a failover. The account dialog
+  therefore offers **Apply to the other nodes** whenever there are any. What
+  travels is the stored PBKDF2 salt and digest, over the peer channel,
+  authenticated with the receiving node's API key — never the password, and
+  never from a browser. If a node does not take it, the dialog says which one
+  and why, and stays open: that node keeps the old login until you fix it.
 - **Put the UI behind TLS** (or an SSH tunnel / reverse proxy). Over plain HTTP
   both the password and the session cookie cross the network in the clear.
 - The service runs as **root** because it writes `/etc/haproxy`, `/etc/keepalived`

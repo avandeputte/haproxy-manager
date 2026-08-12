@@ -11,8 +11,8 @@ import socket
 import time
 import uuid
 
-from .base import (CERT_DIR, PEER_CONNECT_TIMEOUT, PUSH_READ_TIMEOUT, _lock, 
-    _requests, app, log)
+from .base import (CERT_DIR, PEER_CONNECT_TIMEOUT, PEER_READ_TIMEOUT,
+    PUSH_READ_TIMEOUT, _lock, _requests, app, log)
 from .config import DEFAULT_CONFIG, _merge_defaults, load_config, save_config
 from . import apply, auth, peering, webui
 
@@ -36,6 +36,49 @@ def shared_payload(cfg):
 
 def enabled_peers(cfg):
     return [p for p in (cfg["local"]["sync"].get("peers") or []) if p.get("enabled", True) and p.get("url")]
+
+
+def push_admin(cfg):
+    """Send this node's administrator record to every other node.
+
+    The record only, never the shared configuration: the login is node-local
+    by design, and this is the one case where copying it is what was asked
+    for. What travels is the PBKDF2 salt and digest, not a password -- the
+    receiving node cannot recover the password from it any more than this one
+    can.
+    """
+    peers = enabled_peers(cfg)
+    if not peers:
+        return []
+    if _requests is None:
+        return [{"ok": False, "name": p.get("name") or p.get("url"),
+                 "error": "python3-requests is not installed on this node"}
+                for p in peers]
+    admin = dict(cfg["local"].get("admin") or {})
+    admin.pop("must_change", None)
+    out = []
+    for peer in peers:
+        url = (peer.get("url") or "").rstrip("/")
+        try:
+            r = _requests.post(url + "/api/admin/receive", json={"admin": admin},
+                               headers={"X-API-Key": peer.get("api_key", "")},
+                               timeout=(PEER_CONNECT_TIMEOUT, PEER_READ_TIMEOUT),
+                               verify=bool(peer.get("verify_tls")))
+            if r.status_code != 200:
+                d = {}
+                try:
+                    d = r.json()
+                except Exception:
+                    pass
+                out.append({"ok": False, "name": peer.get("name") or url,
+                            "error": _key_verdict(d, url) if d.get("expected_fp")
+                            else (d.get("error") or "HTTP %s" % r.status_code)})
+            else:
+                out.append({"ok": True, "name": peer.get("name") or url})
+        except Exception as e:
+            out.append({"ok": False, "name": peer.get("name") or url,
+                        "error": peering.peer_error(e, url, PEER_READ_TIMEOUT)})
+    return out
 
 
 def _key_verdict(d, url):

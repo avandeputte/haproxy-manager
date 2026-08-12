@@ -44,9 +44,8 @@ jobs:
           ls -la dist/*.deb dist/*.rpm
 
       # A package that does not contain exactly what the repository contains is
-      # worse than a build failure, because it installs and then misbehaves. A
-      # truncated app.py once produced a service that started, exited zero and
-      # said nothing at all.
+      # worse than a build failure: it installs, starts, and misbehaves quietly.
+      # Every file is compared with its source before the package goes anywhere.
       - name: Check the packages contain the real files
         run: |
           set -eu

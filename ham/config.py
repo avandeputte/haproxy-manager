@@ -166,7 +166,8 @@ def _migrate(cfg):
     """Bring an older config forward. Idempotent; persisted on the next save."""
     if not cfg["_meta"].get("setup_complete") and _looks_configured(cfg):
         cfg["_meta"]["setup_complete"] = True
-    # The unlock used to be stored here and outlived every session.
+    # A passive-node unlock is per session, so any copy sitting in the stored
+    # configuration is stale by definition and is dropped.
     cfg["local"].pop("allow_edit_when_passive", None)
     # VRRP settings that must match across nodes moved from local.keepalived
     # into the shared cluster section.

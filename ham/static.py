@@ -9,11 +9,11 @@ from .base import STATIC_DIR, VERSION, app
 # --------------------------------------------------------------------------
 
 # Flask's own static route is switched off (static_folder=None), so this is the
-# only way anything is served from disk. Allowed by extension rather than by a
-# list of names, now that the UI is a directory of modules -- send_from_directory
-# refuses to escape STATIC_DIR, so the extension is the whole policy. They answer
-# without a session because the sign-in page itself has to render before anyone
-# can sign in.
+# only way anything is served from disk. The UI is a directory of modules, so
+# what may be served is decided by extension: send_from_directory refuses to
+# escape STATIC_DIR, which makes the extension the whole policy. These answer
+# without a session, because the sign-in page has to render before anyone can
+# sign in.
 STATIC_SUFFIXES = (".css", ".js", ".svg", ".png", ".ico", ".map", ".woff2")
 
 
