@@ -545,7 +545,7 @@ of its peers.
 ## Upgrades and the browser cache
 
 The page is served with `no-cache`, and everything it loads lives under a path
-that contains the version — `/static/v/1.73.0/js/main.js`. Those files are then
+that contains the version — `/static/v/1.73.1/js/main.js`. Those files are then
 cached for a year, which is safe because the URL changes whenever the version
 does.
 
@@ -580,6 +580,40 @@ rotated at 4 MB, three kept) and also goes to stdout, so
 `journalctl -u haproxy-manager` shows the same lines. Every configuration change
 is logged with who made it and from where; request bodies never are, so
 passwords and credentials do not reach the log.
+
+### "soft-stop running for too long, performing a hard-stop"
+
+Seen in the HAProxy log after an Apply, followed by a line per listener saying
+how many connections it closed:
+
+```
+[WARNING] : soft-stop running for too long, performing a hard-stop.
+[WARNING] : Proxy fe_https-443 hard-stopped (1 remaining conns will be closed).
+[WARNING] : Proxy fe_galera-listener hard-stopped (2 remaining conns will be closed).
+```
+
+Nothing is broken. A reload starts a new HAProxy and leaves the old one running
+so connections opened before it can finish; **Hard stop after** (Advanced →
+HAProxy → Settings, `60s` by default) is how long it waits. When it expires the
+old process closes what is left, and says so.
+
+What gets closed is anything longer-lived than that grace period — a database
+session, a WebSocket, a stream — so those reconnect on every Apply. The
+recipes give such services long server timeouts precisely because their
+connections are meant to last, which is why they are the ones that show up
+here.
+
+The choice is between two costs:
+
+| Setting | What it costs |
+| --- | --- |
+| `60s` (default) | long-lived connections are cut on every reload and reconnect |
+| something longer | fewer cuts, and old processes hang around that much longer |
+| empty | nothing is ever cut, and an old process lingers after every reload for as long as its longest connection — with an hour-long server timeout, potentially an hour, one per reload |
+
+For a database pool, clients reconnect and source stickiness sends them back to
+the same node, so the default is usually right. Raise it if a reconnect is
+disruptive to what is behind the proxy.
 
 ## Backup and restore
 

@@ -172,7 +172,16 @@ export const S={
   fields:[
    {k:"maxconn",l:"Maximum connections",t:"number"},
    {k:"nbthread",l:"Worker threads",t:"text",h:"Leave empty for the HAProxy default"},
-   {k:"hard_stop_after",l:"Hard stop after",t:"text",h:"Grace period for old processes on reload, e.g. 60s"},
+   {k:"hard_stop_after",l:"Hard stop after",t:"text",
+    h:"How long a reload waits for connections opened before it to finish, e.g. 60s. "+
+      "A reload starts a new HAProxy and leaves the old one running until its connections "+
+      "close; when this expires the old one closes whatever is left and logs "+
+      "\"soft-stop running for too long, performing a hard-stop\" naming each listener and "+
+      "how many connections it cut. That message is this setting working, not a fault. "+
+      "Anything longer-lived than this -- a database session, a WebSocket, a stream -- is "+
+      "dropped on every Apply and has to reconnect. Raise it to avoid that, or leave it "+
+      "empty to wait indefinitely, at the cost of an old process lingering after every "+
+      "reload for as long as its longest connection lasts."},
    {k:"ssl_min_ver",l:"Minimum TLS version",t:"select",o:["TLSv1.2","TLSv1.3"],d:"TLSv1.2"},
    {k:"ssl_ciphers",l:"SSL cipher list",t:"text",h:"Leave empty for the HAProxy default"},
    {k:"timeout_connect",l:"Connect timeout",t:"text"},
