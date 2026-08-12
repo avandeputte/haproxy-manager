@@ -17,7 +17,7 @@ from .base import (CLUSTER_POLL_SECONDS, HAPROXY_CFG, KEEPALIVED_CFG, PORT,
     STATS_SOCK, WATCHDOG_PROBE_TIMEOUT, WATCHDOG_SELF_TIMEOUT, _lock, app, log)
 from .config import load_config, save_config
 from .util import run
-from . import cluster, notify, vrrp
+from . import cluster, notify, sync, vrrp
 
 #
 # `systemctl is-active` answers "is the process there", which is not the
@@ -385,9 +385,19 @@ def _watchdog_loop():
         if cfg["local"]["sync"].get("peers") and \
                 time.time() - cluster._cluster_cache["at"] >= CLUSTER_POLL_SECONDS:
             try:
-                cluster.cluster_snapshot(cfg)
+                snap = cluster.cluster_snapshot(cfg)
             except Exception:
                 log.exception("watchdog: collecting node health failed")
+            else:
+                # The health just collected says which nodes hold an older
+                # configuration, so bringing them up to date costs nothing
+                # extra. A node that was unreachable when a change was applied
+                # is caught here rather than staying behind until someone
+                # notices.
+                try:
+                    sync.reconcile(cfg, snap.get("nodes") or [])
+                except Exception:
+                    log.exception("watchdog: bringing the other nodes up to date failed")
 
         time.sleep(interval)
 

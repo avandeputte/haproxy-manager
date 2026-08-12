@@ -34,13 +34,15 @@ import socket
 import sys
 import threading
 
-from ham.base import (CONF_PATH, DATA_DIR, LISTEN, PORT, THREADS, VERSION, _lock, 
-    app, log)
+from ham.base import (CONF_PATH, DATA_DIR, LISTEN, PORT, THREADS, VERSION,
+    _lock, app, log)
 from ham.config import load_config, save_config
 from ham.auth import key_fingerprint, set_admin
 from ham.acme import _renew_loop
-from ham.watchdog import _watchdog_loop
 from ham.updates import _update_loop
+from ham.watchdog import _watchdog_loop
+from ham import sync
+
 
 def _cli(argv):
     """Small maintenance CLI so installers do not reimplement the hashing.
@@ -119,6 +121,23 @@ def _cli(argv):
     return 2
 
 
+def _catch_up_at_start():
+    """Take the newest configuration from the cluster, once, at startup.
+
+    A node that has been reinstalled or was off while the cluster moved on
+    holds an old configuration and would wait to be pushed to. If it is the
+    node that takes the virtual IP, nothing pushes to it at all and it serves
+    what it has. Asking the other nodes settles it in one round.
+    """
+    try:
+        cfg = load_config()
+        if not cfg["local"]["sync"].get("peers"):
+            return
+        sync.catch_up(cfg)
+    except Exception:
+        log.exception("catching up with the cluster at startup failed")
+
+
 def _serve():
     """Serve with waitress, a production WSGI server.
 
@@ -157,4 +176,8 @@ if __name__ == "__main__":
     threading.Thread(target=_renew_loop, daemon=True).start()
     threading.Thread(target=_update_loop, daemon=True).start()
     threading.Thread(target=_watchdog_loop, daemon=True).start()
+    # In its own thread, so a peer that is slow to answer cannot delay the
+    # listener coming up: a node that is catching up should still be reachable
+    # while it does.
+    threading.Thread(target=_catch_up_at_start, daemon=True).start()
     _serve()

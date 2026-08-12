@@ -62,6 +62,11 @@ DEFAULT_CONFIG = {
         "state": "BACKUP",
         "nopreempt": True,
         "track_haproxy": True,
+        # How the tracking script decides HAProxy is up. "responding" asks it
+        # through its admin socket, so an instance that is running but wedged
+        # gives the virtual IP up; "process" only checks that a process by
+        # that name exists.
+        "track_mode": "responding",
         "custom": "",
     },
     "notify": {
@@ -116,7 +121,13 @@ DEFAULT_CONFIG = {
         "sync": {
             # One entry per other node: {id, name, url, api_key, verify_tls, enabled}
             "peers": [],
-            "auto_sync": False,    # push to every peer after a successful Apply
+            # Push after a successful Apply, bring a node that has fallen
+            # behind back into step, and take the newest configuration from
+            # the cluster at startup. On by default: a cluster whose nodes
+            # hold different configurations is the failure this exists to
+            # prevent, and it only ever does anything once peers are added.
+            # An existing installation keeps whatever it was set to.
+            "auto_sync": True,
             # Legacy single-peer fields, migrated into "peers" on load.
             "peer_url": "",
             "peer_api_key": "",
@@ -142,7 +153,7 @@ def _merge_defaults(dst, src):
 
 
 CLUSTER_KEYS = ("vrid", "vips", "auth_pass", "advert_int", "state",
-                "nopreempt", "track_haproxy", "custom")
+                "nopreempt", "track_haproxy", "track_mode", "custom")
 
 
 def _looks_configured(cfg):
@@ -210,8 +221,38 @@ def load_config():
     return _migrate(_merge_defaults(cfg, DEFAULT_CONFIG))
 
 
+def shared_view(cfg):
+    """The parts every node is meant to hold identically.
+
+    Node-local settings are excluded, and so are the objects a node owns
+    alone, because two nodes that differ only in those two respects are in
+    agreement.
+    """
+    return {"haproxy": strip_local_only(cfg["haproxy"]),
+            "acme": strip_local_only(cfg["acme"]),
+            "cluster": cfg["cluster"],
+            "notify": cfg.get("notify", {})}
+
+
+def shared_fingerprint(cfg):
+    """A short tag for the shared configuration. Equal tags mean agreement."""
+    return hashlib.sha256(
+        json.dumps(shared_view(cfg), sort_keys=True).encode()).hexdigest()[:16]
+
+
 def save_config(cfg):
     with _lock:
+        # The revision counts changes to the shared configuration, and is what
+        # lets a node tell "the same as mine", "older than mine" and "newer
+        # than mine" apart. It is bumped here rather than at each call site so
+        # that no change can escape being counted. A node that has just taken
+        # a configuration from a peer sets both fields first, so adopting is
+        # not itself counted as a change.
+        meta = cfg.setdefault("_meta", {})
+        fp = shared_fingerprint(cfg)
+        if fp != meta.get("shared_fp"):
+            meta["shared_fp"] = fp
+            meta["shared_rev"] = int(meta.get("shared_rev") or 0) + 1
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         tmp = CONF_PATH.with_suffix(".tmp")
         tmp.write_text(json.dumps(cfg, indent=2))
@@ -220,6 +261,42 @@ def save_config(cfg):
         # on that alone -- a backup or a loosened directory would expose it.
         os.chmod(tmp, 0o600)
         os.replace(tmp, CONF_PATH)
+
+
+LOCAL_ONLY = "local_only"       # this object belongs to this node alone
+
+
+def strip_local_only(section):
+    """A copy of a config section with this node's own objects removed.
+
+    Some objects belong to one node alone -- the service that publishes this
+    node's own management UI points at 127.0.0.1 and carries this node's host
+    name. They are marked, and this is what takes them out, both of what is
+    sent to the other nodes and of what the nodes compare.
+    """
+    out = copy.deepcopy(section)
+    dropped = set()
+    for coll, items in list(out.items()):
+        if not isinstance(items, list):
+            continue
+        keep = []
+        for item in items:
+            if item.get(LOCAL_ONLY):
+                dropped.add(item.get("id"))
+            else:
+                keep.append(item)
+        out[coll] = keep
+    # drop references to anything removed
+    for fe in out.get("frontends") or []:
+        for key in ("rules", "certificates"):
+            if isinstance(fe.get(key), list):
+                fe[key] = [x for x in fe[key] if x not in dropped]
+        if fe.get("default_backend") in dropped:
+            fe["default_backend"] = ""
+    for be in out.get("backends") or []:
+        if isinstance(be.get("servers"), list):
+            be["servers"] = [x for x in be["servers"] if x not in dropped]
+    return out
 
 
 def config_hash(cfg):

@@ -32,7 +32,11 @@ export const CLUSTER_SHARED=[
  {k:"state",l:"Initial state",t:"select",o:["MASTER","BACKUP"],d:"BACKUP"},
  {k:"nopreempt",l:"No preempt",t:"bool",d:true,h:"A recovered node does not take the virtual IP back"},
  {k:"advert_int",l:"Advertisement interval (s)",t:"number"},
- {k:"track_haproxy",l:"Track HAProxy process",t:"bool",d:true,h:"Fail over when HAProxy dies on a node"},
+ {k:"track_haproxy",l:"Track HAProxy",t:"bool",d:true,h:"Give the virtual IP up when HAProxy is not serving on this node"},
+ {k:"track_mode",l:"What counts as up",t:"select",d:"responding",o:["responding","process"],
+  h:"\"responding\" asks HAProxy through its admin socket, so an instance that is running but wedged "+
+    "hands the virtual IP over. \"process\" only checks that a process called haproxy exists, which a "+
+    "hung one still does. With no admin socket to ask, \"responding\" behaves as \"process\"."},
  {k:"custom",l:"Extra keepalived directives",t:"textarea",
   h:"Advanced, and rarely needed. Raw lines added inside the vrrp_instance block of the generated "+
     "keepalived.conf, for settings this page does not cover -- for example \"garp_master_delay 5\" or "+
@@ -195,7 +199,10 @@ export function peersCard(peers,loc){
     'reloads. Their own interface, priority, unicast addresses, login and API key are never touched, so there is no '+
     'sync loop. It also hands each node the membership list, including a way back to this one, so you only maintain '+
     'the list here.</p>';
-  const f={k:"auto_sync",l:"Sync after every Apply",t:"bool"};
+  const f={k:"auto_sync",l:"Keep the nodes in step",t:"bool",
+    h:"Pushes after every Apply, brings any node that is behind up to date in the background, "+
+      "and takes the newest configuration from the cluster when this node starts. Leave it off "+
+      "to move configuration between nodes by hand."};
   const frm=document.createElement("div");frm.className="frm";
   fieldRow(f,(loc.sync||{}).auto_sync).forEach(el=>frm.appendChild(el));
   ob.appendChild(frm);
@@ -262,6 +269,12 @@ export async function clusterCard(fresh){
   hd.appendChild(rb);
   hd.insertAdjacentHTML("beforeend",
     '<span class="pill '+(s.reachable===s.total?"up":"down")+'">'+s.reachable+"/"+s.total+" reachable</span>");
+  /* Reachable is not the same as up to date, and the difference is invisible
+     until a node with an older configuration takes the virtual IP. */
+  if(s.config_rev!==undefined&&cl.nodes.length>1)
+    hd.insertAdjacentHTML("beforeend",
+      '<span class="pill '+(s.config_agreed?"up":"warn")+'" title="Revision '+esc(s.config_rev)+
+      '">'+(s.config_agreed?"configuration agreed":"configuration differs")+"</span>");
   if(cl.nodes.length===1&&!s.warnings.length){
     bd.innerHTML='<div class=empty>This is the only node. Add the others under '+
       'Advanced &rsaquo; Keepalived &rsaquo; Peer sync to see their health here.</div>';
@@ -269,11 +282,11 @@ export async function clusterCard(fresh){
   }
   const pill=(v,good)=>'<span class="pill '+(good?"up":v==="disabled"?"off":"down")+'">'+esc(v||"—")+"</span>";
   bd.innerHTML="<table><thead><tr><th>Node</th><th>Role</th><th>HAProxy</th><th>Keepalived</th>"+
-    "<th>Virtual IP</th><th>Certificates</th><th>Version</th></tr></thead><tbody>"+
+    "<th>Virtual IP</th><th>Configuration</th><th>Certificates</th><th>Version</th></tr></thead><tbody>"+
     cl.nodes.map(n=>{
       if(!n.reachable)return "<tr><td>"+esc(n.name)+(n.self?" <span class=sub>(this node)</span>":"")+
         '<div class=sub>'+esc(n.url)+"</div></td>"+
-        '<td colspan=6><span class="pill down">unreachable</span> <span class=sub>'+esc(n.error||"")+"</span></td></tr>";
+        '<td colspan=7><span class="pill down">unreachable</span> <span class=sub>'+esc(n.error||"")+"</span></td></tr>";
       return "<tr><td>"+esc(n.hostname||n.name)+(n.self?" <span class=sub>(this node)</span>":"")+
         (n.url?'<div class=sub>'+esc(n.url)+"</div>":"")+"</td>"+
         "<td>"+pill(n.role,n.role==="active"||n.role==="standalone")+
@@ -282,6 +295,15 @@ export async function clusterCard(fresh){
         "<td>"+pill(n.keepalived,n.keepalived==="active")+"</td>"+
         "<td>"+(n.vip_held.length?'<span class=mono>'+n.vip_held.map(esc).join("<br>")+"</span>"
                                  :'<span class=sub>'+(n.vips.length?"held elsewhere":"none")+"</span>")+"</td>"+
+        "<td>"+(n.config_fp
+                 ?(n.config_rev<s.config_rev
+                    ?'<span class="pill warn">behind</span><div class=sub>revision '+esc(n.config_rev)+
+                     " of "+esc(s.config_rev)+"</div>"
+                    :(s.config_agreed
+                       ?'<span class="pill up">revision '+esc(n.config_rev)+"</span>"
+                       :'<span class="pill warn">revision '+esc(n.config_rev)+'</span><div class=sub>'+
+                        esc((n.config_fp||"").slice(0,8))+"</div>"))
+                 :'<span class=sub>not reported</span>')+"</td>"+
         "<td>"+(n.certs_total?(n.certs_bad?'<span class="pill warn">'+n.certs_bad+" of "+n.certs_total+" need attention</span>"
                                           :'<span class="pill up">'+n.certs_total+" ok</span>")
                              :'<span class=sub>none</span>')+"</td>"+
@@ -349,7 +371,13 @@ export function keepalivedDiagCard(){
     '<div class=stat><div class=k>Interface</div><div class="v" style="font-size:13px">'+
       (d.interface?pill(d.interface,d.interface_exists):'<span class="pill off">unset</span>')+"</div></div>"+
     '<div class=stat><div class=k>VRRP state</div><div class="v" style="font-size:13px">'+
-      (d.vrrp_state?pill(d.vrrp_state,d.vrrp_state==="MASTER"):'<span class="pill off">unknown</span>')+"</div></div>"+
+      (d.vrrp_state?pill(d.vrrp_state,d.vrrp_state==="MASTER"):'<span class="pill off">unknown</span>')+
+      /* Where the state came from: read from the log, or worked out from what
+         the node is actually doing. Worth showing, because only the log can
+         tell FAULT apart from BACKUP. */
+      (d.vrrp_state_source&&d.vrrp_state_source!=="journal"
+        ?'<div class=sub style="margin-top:3px">'+esc(d.vrrp_state_source)+"</div>":"")+
+      "</div></div>"+
     '<div class=stat><div class=k>Virtual IPs held</div><div class="v" style="font-size:13px">'+
       (d.vips.length?d.vips.map(v=>esc(v)+(d.vip_held.includes(v)?' <span class="pill up">here</span>'
                                                                  :' <span class="pill off">elsewhere</span>')).join("<br>")

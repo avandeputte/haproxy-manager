@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.62.0_all.deb
+sudo apt-get install -y ./haproxy-manager_1.63.0_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -236,9 +236,37 @@ It calls out the conditions that are otherwise invisible until traffic stops:
 - **No node holds the virtual IP** — nothing is being served on it.
 - **Two or more nodes hold it at once** — split brain; they are not seeing each
   other's VRRP.
+- Nodes holding an **older configuration** than the rest — see below.
 - Nodes with **unapplied changes**, nodes running **different versions**, and
   nodes that **did not answer** (with the reason: unreachable, or the API key
   this node holds for it was rejected).
+
+### The nodes agree, or they do not
+
+Reachable is not the same as up to date. A node that was unreachable when a
+change was applied keeps the configuration it had, and until it takes the
+virtual IP nothing about it looks wrong.
+
+So the shared configuration — everything except node-local settings and the
+objects a node owns alone — carries a **revision**: a counter that moves
+whenever that configuration changes, and a fingerprint of its contents. Every
+node reports both, the Cluster table shows them per node, and the header says
+**configuration agreed** or **configuration differs** at a glance.
+
+Three things follow from it:
+
+- **A node that is behind is named**, with the revision it holds and the one
+  the cluster is on.
+- **A node cannot push a configuration older than the one already there.** An
+  isolated node that was edited and then reconnected would otherwise overwrite
+  the current configuration with its own; it is refused, with both revisions in
+  the message, and can still be forced through deliberately.
+- **It heals itself.** With *Keep the nodes in step* on, the background health
+  check already asks every node how it is; any node reporting an older revision
+  is brought up to date from the node holding the newest, and a node that has
+  just started takes the newest configuration from the cluster before it can
+  serve anything stale. Nothing is queued, so nothing is lost — the next round
+  observes the same disagreement and acts on it again.
 
 ### The Cluster page
 
@@ -288,10 +316,21 @@ accident, and another browser signed in to the same node is unaffected.
   separately on each node, and they must agree on the **virtual router ID**. For
   non-preempting failover set every node to `BACKUP` with a different priority
   and enable `nopreempt`; the highest-priority node holds the VIP, and a
-  recovered node won't yank it back. "Track HAProxy process" fails over
-  automatically if HAProxy dies. The **Keepalived** page diagnoses this node:
-  whether the configured interface exists, whether the config was written,
-  the VRRP state from the journal, and the `keepalived -t` output.
+  recovered node won't yank it back.
+- **Tracking HAProxy** decides when a node should give the virtual IP up. The
+  default asks HAProxy through its admin socket whether it is serving, so an
+  instance that is running but wedged — accepting connections and answering
+  none — hands the address to a node that works. The alternative, *process*,
+  only checks that something called `haproxy` exists, which a hung one still
+  does. The check is a small script written next to `keepalived.conf` by the
+  same Apply that writes it, and where there is no admin socket to ask it falls
+  back to looking for the process rather than failing a healthy node.
+  The **Keepalived** page diagnoses this node: whether the configured interface
+  exists, whether the config was written, the VRRP state, and the
+  `keepalived -t` output. The state is read from the journal when it is there
+  to read — only the journal distinguishes FAULT from BACKUP — and otherwise
+  worked out from whether the node holds the virtual IP, with the page saying
+  which.
 - **Sync** is push-based: the node you edit pushes to the others. A renewed
   certificate is pushed automatically by the node that renewed it.
 

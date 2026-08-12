@@ -6,10 +6,10 @@ from flask import request
 import uuid
 
 from .base import _lock, app
-from .config import VALID_COLLECTIONS, load_config, save_config
+from .config import LOCAL_ONLY, VALID_COLLECTIONS, load_config, save_config
 from .util import _by_id
 from .validate import check_setting_types
-from . import apply, webui
+from . import apply
 
 # --------------------------------------------------------------------------
 
@@ -116,7 +116,7 @@ def collection_item(sec, col, iid):
         for i, x in enumerate(items):
             if x.get("id") != iid:
                 continue
-            if x.get(webui.LOCAL_ONLY):
+            if x.get(LOCAL_ONLY):
                 return jsonify({"error":
                                 "\"%s\" is part of this node's web UI service and is managed from "
                                 "System > Web UI access. Change it there, or turn it off."

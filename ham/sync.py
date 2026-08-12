@@ -13,7 +13,7 @@ import uuid
 
 from .base import (CERT_DIR, PEER_CONNECT_TIMEOUT, PEER_READ_TIMEOUT,
     PUSH_READ_TIMEOUT, _lock, _requests, app, log)
-from .config import DEFAULT_CONFIG, _merge_defaults, load_config, save_config
+from .config import DEFAULT_CONFIG, _merge_defaults, load_config, save_config, shared_fingerprint, shared_view
 from . import apply, auth, peering, webui
 
 # --------------------------------------------------------------------------
@@ -24,12 +24,13 @@ def shared_payload(cfg):
         for p in sorted(CERT_DIR.glob("*.pem")):
             certs[p.name] = base64.b64encode(p.read_bytes()).decode()
     return {
-        "config": {"haproxy": webui.strip_local_only(cfg["haproxy"]),
-                   "acme": webui.strip_local_only(cfg["acme"]),
-                   "cluster": cfg["cluster"],
-                   "notify": cfg.get("notify", {})},
+        "config": shared_view(cfg),
         "certs": certs,
         "source": socket.gethostname(),
+        # Which revision of the shared configuration this is. The receiver
+        # compares it with its own and refuses to move backwards.
+        "rev": int(cfg["_meta"].get("shared_rev") or 0),
+        "fp": cfg["_meta"].get("shared_fp") or "",
         "ts": time.time(),
     }
 
@@ -193,6 +194,111 @@ def sync_push(cfg, only=None, include_peers=True):
     return out
 
 
+def reconcile(cfg, nodes):
+    """Push to any node that is demonstrably behind this one.
+
+    Called from the watchdog with the health it has just collected, so no
+    extra queries and no queue of pending pushes to lose. A push that failed
+    is not remembered; the next round observes the same disagreement and tries
+    again, which is what makes it heal rather than merely retry.
+
+    Only from the node that holds the virtual IP, so a cluster does not have
+    every node pushing at once. Standalone nodes have nowhere to push.
+    """
+    if _requests is None or not enabled_peers(cfg):
+        return []
+    # The same setting that pushes after an Apply. Someone who keeps their
+    # nodes in step by hand does not want a background thread deciding to.
+    if not cfg["local"]["sync"].get("auto_sync"):
+        return []
+    mine = int(cfg["_meta"].get("shared_rev") or 0)
+    role, _held = auth.node_role(cfg)
+    if role == "passive":
+        return []
+    by_url = {(p.get("url") or "").rstrip("/"): p for p in enabled_peers(cfg)}
+    behind = []
+    for n in nodes:
+        if n.get("self") or not n.get("reachable"):
+            continue
+        peer = by_url.get((n.get("url") or "").rstrip("/"))
+        # Only when the node says a revision at all: an older release does not
+        # report one, and pushing at it every round would be a loop.
+        if peer and n.get("config_fp") and int(n.get("config_rev") or 0) < mine:
+            behind.append((peer, n))
+    out = []
+    for peer, n in behind:
+        log.info("reconciling %s: it holds revision %s, this node holds %d",
+                 n.get("name"), n.get("config_rev"), mine)
+        r = push_to_peer(peer, dict(shared_payload(cfg), peers=mesh_for(cfg, peer)))
+        out.append(r)
+        if not r.get("ok"):
+            log.warning("reconciling %s failed: %s", n.get("name"), r.get("error"))
+    return out
+
+
+def catch_up(cfg):
+    """At startup, take the configuration from a peer that has a newer one.
+
+    A node that has been reinstalled, or was off while the cluster moved on,
+    would otherwise wait to be pushed to -- and if it is the node that holds
+    the virtual IP, nothing pushes to it at all. Asking is cheap and happens
+    once.
+    """
+    peers = enabled_peers(cfg)
+    if _requests is None or not peers or not cfg["local"]["sync"].get("auto_sync"):
+        return None
+    mine = int(cfg["_meta"].get("shared_rev") or 0)
+    best, best_rev = None, mine
+    for peer in peers:
+        url = (peer.get("url") or "").rstrip("/")
+        try:
+            r = _requests.get(url + "/api/status",
+                              headers={"X-API-Key": peer.get("api_key", "")},
+                              timeout=(PEER_CONNECT_TIMEOUT, PEER_READ_TIMEOUT),
+                              verify=bool(peer.get("verify_tls")))
+            if r.status_code != 200:
+                continue
+            st = r.json()
+        except Exception as e:
+            log.info("catching up: %s did not answer (%s)", peer.get("name"), e)
+            continue
+        rev = int(st.get("config_rev") or 0)
+        if st.get("config_fp") and rev > best_rev:
+            best, best_rev = peer, rev
+    if not best:
+        return None
+    log.info("catching up: %s holds revision %d and this node holds %d",
+             best.get("name"), best_rev, mine)
+    try:
+        url = (best.get("url") or "").rstrip("/")
+        r = _requests.get(url + "/api/sync/pull",
+                          headers={"X-API-Key": best.get("api_key", "")},
+                          timeout=(PEER_CONNECT_TIMEOUT, PUSH_READ_TIMEOUT),
+                          verify=bool(best.get("verify_tls")))
+        if r.status_code != 200:
+            log.warning("catching up from %s failed: HTTP %s", best.get("name"), r.status_code)
+            return None
+        data = r.json()
+    except Exception as e:
+        log.warning("catching up from %s failed: %s", best.get("name"),
+                    peering.peer_error(e, url, PUSH_READ_TIMEOUT))
+        return None
+    # _receive_locked answers with a Flask response, because its usual caller
+    # is a request. Here there is none, so one is supplied.
+    with app.test_request_context("/api/sync/receive"):
+        with _lock:
+            res = _receive_locked(load_config(), data, data.get("config") or {},
+                                  source=best.get("name") or url)
+        body = res[0] if isinstance(res, tuple) else res
+        out = body.get_json()
+    if out.get("ok"):
+        log.info("caught up to revision %d from %s", best_rev, best.get("name"))
+    else:
+        log.warning("catching up from %s was refused: %s",
+                    best.get("name"), out.get("error"))
+    return out
+
+
 @app.post("/api/sync/push")
 def api_sync_push():
     body = request.get_json(silent=True) or {}
@@ -236,8 +342,27 @@ def api_sync_receive():
         return _receive_locked(cfg, data, conf)
 
 
-def _receive_locked(cfg, data, conf):
+def _receive_locked(cfg, data, conf, source=None):
     cfg = load_config()          # re-read inside the lock: it may have moved
+    # Named for the log: a push says who connected, a catch-up says who was asked.
+    source = source or request.remote_addr
+
+    # A node that was isolated, edited and then reconnected would otherwise
+    # push its old configuration over the current one and nobody would know.
+    # It is refused unless the caller says to overwrite deliberately.
+    mine = int(cfg["_meta"].get("shared_rev") or 0)
+    theirs = int(data.get("rev") or 0)
+    if theirs and theirs < mine and not data.get("force"):
+        log.warning("refused a configuration from %s: revision %d is older than %d",
+                    source, theirs, mine)
+        return jsonify({
+            "ok": False, "node": socket.gethostname(), "stale": True,
+            "their_rev": theirs, "my_rev": mine,
+            "error": "%s holds revision %d and was offered revision %d, which is "
+                     "older. Apply from the node that has the newer configuration, "
+                     "or overwrite deliberately from the Cluster page."
+                     % (socket.gethostname(), mine, theirs)}), 409
+
     if "haproxy" in conf:
         cfg["haproxy"] = webui.keep_local_only(cfg["haproxy"],
                                          _merge_defaults(conf["haproxy"], DEFAULT_CONFIG["haproxy"]))
@@ -298,7 +423,20 @@ def _receive_locked(cfg, data, conf):
             webui.rebuild_webui(cfg)
         except Exception:
             pass
+    # Take the sender's place in the sequence rather than counting this as a
+    # change of our own, so the sender and this node end up on the same
+    # revision.
+    cfg["_meta"]["shared_fp"] = shared_fingerprint(cfg)
+    cfg["_meta"]["shared_rev"] = max(theirs, mine if data.get("force") else 0)
     save_config(cfg)
-    log.info("received configuration from %s", request.remote_addr)
+    if cfg["_meta"]["shared_fp"] != (data.get("fp") or cfg["_meta"]["shared_fp"]):
+        # Both sides hash the same shared view, so this should not happen. Say
+        # so rather than leave two nodes quietly disagreeing forever.
+        log.warning("took the configuration from %s but computed a different "
+                    "fingerprint (%s here, %s there) -- the Cluster page will "
+                    "report these nodes as disagreeing",
+                    source, cfg["_meta"]["shared_fp"], data.get("fp"))
+    log.info("received configuration from %s at revision %d",
+             source, cfg["_meta"]["shared_rev"])
     res = apply.do_apply(cfg, allow_push=False)  # never re-push: avoids sync loops
     return jsonify({"ok": res.get("ok", False), "node": socket.gethostname(), "applied": res})

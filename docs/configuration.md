@@ -386,6 +386,35 @@ single session; signing out or in re-locks it.
 on the Overview, and notified if you have notifications configured. It means the
 nodes cannot see each other's VRRP.
 
+**Keeping the nodes in step.** The shared configuration carries a revision: a
+counter that moves whenever it changes, and a fingerprint of its contents. Both
+travel with every push, every node reports them, and the Cluster page shows
+which node holds what.
+
+- A node offered a configuration **older** than the one it already has refuses
+  it, and says both revisions. Without that, an isolated node that was edited
+  and later reconnected would overwrite the current configuration with its own.
+  The push can be repeated with `force` to overwrite deliberately.
+- **Keep the nodes in step** (Cluster → Nodes) does three things: pushes after
+  every Apply, brings any node reporting an older revision up to date in the
+  background, and takes the newest configuration from the cluster when this
+  node starts. It is on by default for a new installation; an existing one
+  keeps whatever it was set to. Turn it off to move configuration between nodes
+  by hand.
+
+Reconciliation runs from the node holding the virtual IP, on the health it
+already collects, so there is no queue of pending pushes to lose: a push that
+fails is simply observed again next round.
+
+**What counts as HAProxy being up.** Keepalived gives the virtual IP up when
+its tracking script fails. The default script asks HAProxy through its admin
+socket whether it is serving, so an instance that is running but wedged fails
+the check; *process* only looks for a process by that name, which a hung one
+still has. The script is written next to `keepalived.conf` by the Apply that
+writes it, and falls back to looking for the process where there is no admin
+socket to ask — a node whose HAProxy is fine should never lose the virtual IP
+to the health check itself.
+
 ## Addressing nodes
 
 **Use IP addresses for peer URLs, not DNS names.** The Cluster page marks any
@@ -459,7 +488,7 @@ of its peers.
 ## Upgrades and the browser cache
 
 The page is served with `no-cache`, and everything it loads lives under a path
-that contains the version — `/static/v/1.62.0/js/main.js`. Those files are then
+that contains the version — `/static/v/1.63.0/js/main.js`. Those files are then
 cached for a year, which is safe because the URL changes whenever the version
 does.
 

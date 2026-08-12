@@ -6,14 +6,13 @@ from flask import request
 import copy
 
 from .base import LISTEN, PORT, _lock, app
-from .config import load_config, save_config
+from .config import LOCAL_ONLY, load_config, save_config
 from .util import _by_id, cert_details, cert_path
 from . import apply, dnsapi, wizard
 
 # --------------------------------------------------------------------------
 
 WEBUI_NAME = "haproxy-manager-ui"
-LOCAL_ONLY = "local_only"       # this object belongs to this node alone
 
 
 def webui_pubs(cfg, pub):
@@ -102,38 +101,6 @@ def keep_local_only(mine, incoming):
             if extra:
                 fe[key] = (fe.get(key) or []) + extra
     return incoming
-
-
-def strip_local_only(section):
-    """A copy of a config section with this node's own objects removed.
-
-    The UI service points at 127.0.0.1, so sending it to the other nodes would
-    make each of them answer for this node's host name -- which is what
-    happened: every node inherited node1's address.
-    """
-    out = copy.deepcopy(section)
-    dropped = set()
-    for coll, items in list(out.items()):
-        if not isinstance(items, list):
-            continue
-        keep = []
-        for item in items:
-            if item.get(LOCAL_ONLY):
-                dropped.add(item.get("id"))
-            else:
-                keep.append(item)
-        out[coll] = keep
-    # drop references to anything removed
-    for fe in out.get("frontends") or []:
-        for key in ("rules", "certificates"):
-            if isinstance(fe.get(key), list):
-                fe[key] = [x for x in fe[key] if x not in dropped]
-        if fe.get("default_backend") in dropped:
-            fe["default_backend"] = ""
-    for be in out.get("backends") or []:
-        if isinstance(be.get("servers"), list):
-            be["servers"] = [x for x in be["servers"] if x not in dropped]
-    return out
 
 
 def _webui_setting(cfg):

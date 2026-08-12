@@ -1,8 +1,76 @@
-"""The keepalived.conf renderer."""
+"""The keepalived.conf renderer, and the script VRRP tracks HAProxy with."""
 
 from datetime import datetime
 from datetime import timezone
+import os
 import re
+
+from .base import KEEPALIVED_CFG, STATS_SOCK, log
+
+# Written beside keepalived.conf, by the same code that writes it, so the
+# configuration can never name a script that is not there yet.
+TRACK_SCRIPT = KEEPALIVED_CFG.parent / "ham-haproxy-alive"
+
+# A hung HAProxy -- process alive, accepting nothing -- keeps the virtual IP if
+# the only question asked is whether a process exists. This asks HAProxy
+# itself, over the admin socket, with a timeout: no answer is a failure, and
+# the node hands the address to one that works.
+#
+# With no socket to ask it answers the older question instead of failing.
+# Failing would take the virtual IP away from a node whose HAProxy is fine but
+# whose admin socket was never configured -- an outage caused by a health
+# check.
+TRACK_SCRIPT_BODY = '\n'.join([
+    "#!/usr/bin/env python3",
+    '"""Exit 0 while HAProxy is answering.',
+    "",
+    "Written by haproxy-manager; edits are overwritten on the next Apply.",
+    '"""',
+    "import os",
+    "import socket",
+    "import subprocess",
+    "import sys",
+    "",
+    "SOCK = %r",
+    "TIMEOUT = 1.5",
+    "",
+    "if not os.path.exists(SOCK):",
+    '    sys.exit(subprocess.call(["pgrep", "-x", "haproxy"],',
+    "                             stdout=subprocess.DEVNULL,",
+    "                             stderr=subprocess.DEVNULL))",
+    "try:",
+    "    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)",
+    "    s.settimeout(TIMEOUT)",
+    "    s.connect(SOCK)",
+    '    s.sendall(b"show info\\n")',
+    '    seen = b""',
+    '    while b"Name:" not in seen:',
+    "        chunk = s.recv(4096)",
+    "        if not chunk:",
+    "            break",
+    "        seen += chunk",
+    "    s.close()",
+    "except Exception:",
+    "    sys.exit(1)",
+    'sys.exit(0 if b"Name:" in seen else 1)',
+    "",
+])
+
+
+def write_track_script():
+    """Put the tracking script on disk, next to the configuration that names it.
+
+    Root-owned and not writable by anyone else: keepalived refuses to run a
+    script it does not trust once enable_script_security is set.
+    """
+    try:
+        TRACK_SCRIPT.parent.mkdir(parents=True, exist_ok=True)
+        TRACK_SCRIPT.write_text(TRACK_SCRIPT_BODY % str(STATS_SOCK))
+        os.chmod(TRACK_SCRIPT, 0o700)
+        return True
+    except OSError as e:
+        log.warning("could not write the HAProxy tracking script %s: %s", TRACK_SCRIPT, e)
+        return False
 
 
 # --------------------------------------------------------------------------
@@ -25,7 +93,12 @@ def render_keepalived(cfg):
         A("}")
         A("")
         A("vrrp_script chk_haproxy {")
-        A('    script "/usr/bin/pgrep -x haproxy"')
+        if cl.get("track_mode", "responding") == "process":
+            A('    script "/usr/bin/pgrep -x haproxy"')
+        else:
+            # Asks HAProxy whether it is serving, not merely whether it exists.
+            A('    script "%s"' % TRACK_SCRIPT)
+            A("    timeout 3")
         A("    interval 2")
         A("    fall 2")
         A("    rise 2")

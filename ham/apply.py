@@ -113,6 +113,7 @@ def api_keepalived_status():
     # Validate what Apply would write right now -- this is what names the fault.
     validation = {"ran": False, "ok": None, "output": ""}
     if vrrp.keepalived_wanted(cfg):
+        keepalived.write_track_script()
         fd, staging = tempfile.mkstemp(suffix=".conf")
         try:
             with os.fdopen(fd, "w") as f:
@@ -125,14 +126,31 @@ def api_keepalived_status():
 
     journal = ""
     if shutil.which("journalctl"):
-        lrc, lout = run(["journalctl", "-u", "keepalived", "-n", "25", "--no-pager"], timeout=20)
+        # Enough lines to still contain the last transition on a node that has
+        # been up for a while; only the tail is shown.
+        lrc, lout = run(["journalctl", "-u", "keepalived", "-n", "200", "--no-pager"],
+                        timeout=20)
         if lrc == 0:
             journal = lout[-6000:]
 
-    state = ""
+    # The journal names the state exactly, including FAULT, which nothing else
+    # can tell apart from BACKUP. But it is not always there to be read: a
+    # container has no journal, a node using plain syslog has none either, and
+    # on a node that has been up for months the transition has scrolled away.
+    # Holding the virtual IP is the same fact observed directly, so it answers
+    # when the journal cannot.
+    state, source = "", ""
     m = re.findall(r"Entering (\w+) STATE", journal)
     if m:
-        state = m[-1]
+        state, source = m[-1], "journal"
+    elif not vrrp.keepalived_wanted(cfg):
+        state, source = "disabled", "settings"
+    elif service != "active":
+        state, source = "not running", "systemd"
+    elif held:
+        state, source = "MASTER", "holds the virtual IP"
+    elif vips:
+        state, source = "BACKUP", "does not hold the virtual IP"
 
     return jsonify({
         "hostname": socket.gethostname(),
@@ -148,6 +166,7 @@ def api_keepalived_status():
         "unicast_peer": [x for x in (k.get("unicast_peer") or "").split() if x],
         "vips": vips, "vip_held": held,
         "vrrp_state": state,
+        "vrrp_state_source": source,
         "validation": validation,
         "log": journal,
     })
@@ -175,6 +194,7 @@ def check_rendered(cfg):
             os.unlink(staging)
 
     if vrrp.keepalived_wanted(cfg):
+        keepalived.write_track_script()
         fd, kstaging = tempfile.mkstemp(suffix=".conf")
         try:
             with os.fdopen(fd, "w") as f:
@@ -272,6 +292,10 @@ def do_apply(cfg=None, allow_push=True):
                 result["steps"].append(
                     "unicast peers refreshed from the node list: %s"
                     % ((k.get("unicast_peer") or "").replace("\n", ", ") or "none -- using multicast"))
+            # Before the configuration that names it is validated, so
+            # keepalived -t is checking something that exists and a reload can
+            # never land on a missing script.
+            keepalived.write_track_script()
             ktext = keepalived.render_keepalived(cfg)
             fd, kstaging = tempfile.mkstemp(suffix=".conf")
             with os.fdopen(fd, "w") as f:
@@ -386,6 +410,11 @@ def api_status():
         "vip_held": held,
         "role": ("active" if held else "passive") if vips else "standalone",
         "dirty": cfg["_meta"].get("applied_hash") != config_hash(cfg),
+        # Which shared configuration this node holds. Two nodes with the same
+        # fingerprint agree; different fingerprints mean one of them is behind,
+        # and the revision says which.
+        "config_rev": int(cfg["_meta"].get("shared_rev") or 0),
+        "config_fp": cfg["_meta"].get("shared_fp") or "",
         "certs": certs,
         "acme_installed": Path(ACME_SH).exists(),
         "renews_here": acme.renewal_runs_here(cfg)[0],
