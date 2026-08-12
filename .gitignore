@@ -12,3 +12,5 @@ tools/uitests/screenshot/*.png
 tools/uitests/screenshot/icon.svg
 tools/uitests/screenshot/nav.html
 venv/
+# Working notes on how the code is laid out -- ours, not the user's.
+docs/refactoring.md

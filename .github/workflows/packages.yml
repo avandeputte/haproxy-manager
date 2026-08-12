@@ -51,11 +51,18 @@ jobs:
         run: |
           set -eu
           mkdir -p /tmp/x && dpkg-deb -x dist/*.deb /tmp/x
-          for f in app.py static/index.html VERSION; do
+          for f in app.py static/index.html VERSION $(sed 's|^|ham/|' ham/FILES); do
             cmp "/tmp/x/opt/haproxy-manager/$f" "$f" \
               || { echo "packaged $f differs from the source"; exit 1; }
           done
           grep -q '^if __name__' /tmp/x/opt/haproxy-manager/app.py
+          # app.py is a few lines now; the application it starts must be there
+          # too, and be importable rather than merely present.
+          (cd /tmp/x/opt/haproxy-manager && python3 -c "
+import ast, pathlib
+for f in sorted(pathlib.Path('ham').glob('*.py')):
+    ast.parse(f.read_text())
+print('every packaged module parses')")
           echo "the package matches the source"
 
       # Installing on the distribution itself is the only check that means
@@ -127,6 +134,12 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -eu
+          # A tag does not imply a release: releases are cut deliberately, and
+          # most tags never get one. Nothing to attach to is not a failure.
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            echo "no release for $TAG -- the packages are on this run as artifacts"
+            exit 0
+          fi
           have=$(gh release view "$TAG" --json assets --jq '.assets[].name' || true)
           for f in dist/*.deb dist/*.rpm; do
             if printf '%s\n' "$have" | grep -qx "$(basename "$f")"; then

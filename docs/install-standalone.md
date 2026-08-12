@@ -43,16 +43,16 @@ package mirrors.
 
 ```bash
 # Debian / Ubuntu
-curl -fsSLO https://github.com/avandeputte/haproxy-manager/releases/latest/download/haproxy-manager_1.60.1_all.deb
-sudo apt-get install -y ./haproxy-manager_1.60.1_all.deb
+curl -fsSLO https://github.com/avandeputte/haproxy-manager/releases/latest/download/haproxy-manager_1.61.0_all.deb
+sudo apt-get install -y ./haproxy-manager_1.61.0_all.deb
 
 # Fedora
-curl -fsSLO https://github.com/avandeputte/haproxy-manager/releases/latest/download/haproxy-manager-1.60.1-1.noarch.rpm
-sudo dnf install -y ./haproxy-manager-1.60.1-1.noarch.rpm
+curl -fsSLO https://github.com/avandeputte/haproxy-manager/releases/latest/download/haproxy-manager-1.61.0-1.noarch.rpm
+sudo dnf install -y ./haproxy-manager-1.61.0-1.noarch.rpm
 
 # RHEL / Rocky / Alma -- python3-flask and python3-waitress live in EPEL
 sudo dnf install -y epel-release
-sudo dnf install -y ./haproxy-manager-1.60.1-1.noarch.rpm
+sudo dnf install -y ./haproxy-manager-1.61.0-1.noarch.rpm
 ```
 
 The package installs and starts the service, prints the generated
@@ -108,7 +108,8 @@ In order, so nothing is a surprise:
    individual files from `raw.githubusercontent.com`.
 5. **Installs acme.sh** into `/root/.acme.sh` at a pinned version. Skipped with
    `--skip-acme`.
-6. **Deploys** `app.py`, `static/` and `VERSION` to `/opt/haproxy-manager`.
+6. **Deploys** `app.py`, the `ham/` package, `static/` and `VERSION` to
+   `/opt/haproxy-manager`.
 7. **Enables `net.ipv4.ip_nonlocal_bind`**, so HAProxy can bind a virtual IP
    this node does not currently hold. Written to
    `/etc/sysctl.d/99-haproxy-manager.conf`.
@@ -178,7 +179,7 @@ trouble. See [configuration.md](configuration.md#addressing-nodes).
 
 ## Updating
 
-From the UI: **System → Version & updates → Update now**. It re-runs the
+From the UI: **Settings → Updates → Update now**. It re-runs the
 installer in a transient systemd unit, so the service can restart under it.
 
 From the shell, which does the same thing:
@@ -187,7 +188,7 @@ From the shell, which does the same thing:
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash -s -- --update --yes
 ```
 
-An update replaces `app.py`, `static/` and `VERSION`, and rewrites the systemd
+An update replaces `app.py`, `ham/`, `static/` and `VERSION`, and rewrites the systemd
 unit. It does not touch `config.json`, certificates or ACME account keys. If the
 download fails, nothing is replaced and the running version keeps working.
 
@@ -206,7 +207,7 @@ if you want them gone.
 
 | Path | What |
 | --- | --- |
-| `/opt/haproxy-manager` | `app.py`, `static/`, `VERSION` |
+| `/opt/haproxy-manager` | `app.py`, `ham/`, `static/`, `VERSION` |
 | `/var/lib/haproxy-manager/config.json` | every setting, mode 0600 |
 | `/var/lib/haproxy-manager/haproxy-manager.log` | the app's log, rotated at 4 MB |
 | `/var/lib/haproxy-manager/admin-credentials.txt` | generated password, mode 0600 |

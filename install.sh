@@ -326,8 +326,15 @@ fetch_individual_files() {
     log "Falling back to fetching the individual files from raw.githubusercontent.com"
     mkdir -p "$TMPDIR_/src/static"
     fetch "$raw/app.py" "$TMPDIR_/src/app.py" || return 1
-    # static/ is a tree of modules now, so the file list travels with it rather
-    # than being repeated here where it would rot.
+    # app.py is only the entry point; without ham/ it does not start. Both
+    # trees carry their own file list, so it travels with them rather than
+    # being repeated here where it would rot.
+    mkdir -p "$TMPDIR_/src/ham"
+    fetch "$raw/ham/FILES" "$TMPDIR_/src/ham/FILES" || return 1
+    while IFS= read -r rel; do
+        [ -n "$rel" ] || continue
+        fetch "$raw/ham/$rel" "$TMPDIR_/src/ham/$rel" || return 1
+    done < "$TMPDIR_/src/ham/FILES"
     fetch "$raw/static/FILES" "$TMPDIR_/src/static/FILES" || return 1
     while IFS= read -r rel; do
         [ -n "$rel" ] || continue
@@ -341,7 +348,8 @@ fetch_individual_files() {
     done < "$TMPDIR_/src/static/FILES"
     fetch "$raw/VERSION" "$TMPDIR_/src/VERSION" || true       # optional
     fetch "$raw/install.sh" "$TMPDIR_/src/install.sh" || true  # optional
-    [ -s "$TMPDIR_/src/app.py" ] && [ -s "$TMPDIR_/src/static/index.html" ] || return 1
+    [ -s "$TMPDIR_/src/app.py" ] && [ -s "$TMPDIR_/src/ham/__init__.py" ] \
+        && [ -s "$TMPDIR_/src/static/index.html" ] || return 1
     SRC="$TMPDIR_/src"
     return 0
 }
@@ -376,7 +384,8 @@ fetch_source() {
     if [ "${BASH_SOURCE[0]:-}" != "" ] && [ -f "${BASH_SOURCE[0]}" ]; then
         self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     fi
-    if [ -n "$self_dir" ] && [ -f "$self_dir/app.py" ] && [ -f "$self_dir/static/index.html" ]; then
+    if [ -n "$self_dir" ] && [ -f "$self_dir/app.py" ] && [ -f "$self_dir/ham/__init__.py" ] \
+       && [ -f "$self_dir/static/index.html" ]; then
         log "Installing from local checkout $self_dir"
         SRC="$self_dir"
         return
@@ -410,8 +419,8 @@ fetch_source() {
     tar -xzf "$tgz" -C "$TMPDIR_/src" --strip-components=1 || die "could not unpack the downloaded archive"
     SRC="$TMPDIR_/src"
 
-    [ -f "$SRC/app.py" ] && [ -f "$SRC/static/index.html" ] \
-        || die "archive does not contain app.py and static/index.html -- wrong --repo/--ref?"
+    [ -f "$SRC/app.py" ] && [ -f "$SRC/ham/__init__.py" ] && [ -f "$SRC/static/index.html" ] \
+        || die "archive does not contain app.py, ham/ and static/index.html -- wrong --repo/--ref?"
     return 0
 }
 
@@ -455,6 +464,13 @@ install_app() {
     install -d -m 0700 "$DATA"
     install -d -m 0700 "$CERTS"
     install -m 0644 "$SRC/app.py" "$DEST/app.py"
+    # The package, replaced wholesale: a module dropped upstream must not be
+    # left behind, and a stale .pyc next to a removed source is worse still.
+    rm -rf "$DEST/ham"
+    install -d -m 0755 "$DEST/ham"
+    for f in "$SRC"/ham/*.py; do
+        install -m 0644 "$f" "$DEST/ham/$(basename "$f")"
+    done
     # Keep a copy of the installer beside the app, so uninstalling and updating
     # work without fetching anything -- useful exactly when the network is the
     # problem.

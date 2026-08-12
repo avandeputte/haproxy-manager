@@ -44,6 +44,7 @@ RUN curl -fsSL "https://github.com/acmesh-official/acme.sh/archive/refs/tags/${A
 
 WORKDIR /opt/haproxy-manager
 COPY app.py ./app.py
+COPY ham/ ./ham/
 COPY VERSION ./VERSION
 COPY static/ ./static/
 

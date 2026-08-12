@@ -41,7 +41,7 @@ export const NAV=[
  ["p:watchdog","Watchdog"],
  ["p:notify","Notifications"],
  ["p:backup","Backup & Export"],
- ["p:updates","Version & updates"],
+ ["p:updates","Updates"],
 ];
 /* pages with a hand-written renderer (neither CRUD nor a settings form) */
 export function openGroups(){

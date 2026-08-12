@@ -12,14 +12,33 @@ export const WEBUI_FIELDS=[
  {k:"http_redirect",l:"Redirect HTTP to HTTPS",t:"bool",d:true},
  {k:"apply",l:"Apply immediately",t:"bool",d:true},
 ];
+/* The opening line depends on how you got here. Offering to publish the UI
+   "instead of http://<host>" reads as nonsense when <host> is the published
+   address you are already reading it through -- which is exactly the case
+   after this page has done its job. */
+export function blurb(cur){
+  const here=(location.protocol||"http:")+"//"+location.host;
+  const trim=u=>String(u||"").replace(/\/+$/,"").toLowerCase();
+  if(cur.enabled&&trim(cur.shared_url)===trim(here))
+    return 'You are reading this through the shared address <span class=mono>'+esc(here)+
+      '</span>, which reaches whichever node currently holds the virtual IP.';
+  if(cur.enabled&&trim(cur.url)===trim(here))
+    return 'You are reading this through <span class=mono>'+esc(here)+
+      '</span>, which reaches this node specifically.';
+  if(cur.enabled)
+    return 'This management UI is published over HTTPS, though you have reached it directly at '+
+      '<span class=mono>'+esc(here)+'</span> rather than through one of its names.';
+  return 'Publish this management UI as a normal service, so it is reachable by name over HTTPS '+
+    'instead of <span class=mono>'+esc(here)+'</span>.';
+}
+
 export async function renderWebui(){
   const c=$("#content");c.innerHTML="";
   const cur=await api("webui");
   const card=document.createElement("div");card.className="card";
   card.innerHTML='<div class=hd><h2>Web UI access</h2></div>';
   const bd=document.createElement("div");bd.className="bd";
-  bd.innerHTML='<p class=hint style="margin-bottom:14px">Publish this management UI as a normal service, so it is reachable '+
-    'by name over HTTPS instead of <span class=mono>http://'+esc(location.host)+'</span>. It builds the same objects the '+
+  bd.innerHTML='<p class=hint style="margin-bottom:14px">'+blurb(cur)+' It builds the same objects the '+
     'publish wizard would: a pool pointing at <span class=mono>127.0.0.1:'+esc(cur.port)+'</span>, a host rule, the HTTPS '+
     'listener and a certificate.</p>';
   const frm=document.createElement("div");frm.className="frm";

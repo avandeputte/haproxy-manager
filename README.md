@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.60.1_all.deb
+sudo apt-get install -y ./haproxy-manager_1.61.0_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -29,7 +29,6 @@ Then open `http://<node>:8080`.
 | [Installing on a server](docs/install-standalone.md) | requirements, what the installer does, options, updating, uninstalling, troubleshooting |
 | [Running in Docker](docs/install-docker.md) | images, compose, networking, volumes, capabilities, limitations |
 | [Configuration](docs/configuration.md) | every setting, what is shared between nodes, environment variables, ports |
-| [Refactoring plan](docs/refactoring.md) | how the two large files would be split up, and in what order |
 
 The rest of this file describes what each part does and why.
 
@@ -516,11 +515,11 @@ In the Docker image there is no journal, so a small collector binds `/dev/log`
 and tees it to both the container log and `/var/log/ham-syslog.log`, which is
 what the viewer reads.
 
-## Version and updates
+## Updates
 
 The app carries a version (`VERSION`, starting at **1.0**) and asks GitHub for
 the published one **once a day**. When a newer version exists, a chip appears in
-the header and **System → Version & updates** offers a one-click update.
+the header and **Settings → Updates** offers a one-click update.
 
 The update runs `install.sh --update --yes` on the node under `systemd-run`, in
 its own transient unit. That detail matters: as a child of the service it would
@@ -687,13 +686,11 @@ Two things worth knowing:
   dependency: the name may be published by the very cluster that is in trouble.
 
   DNS is **not** cached on a stock Debian or Ubuntu server unless something is
-  installed to do it — `nsswitch.conf` says `hosts: files dns`, and glibc has no
-  cache of its own, so every lookup goes to the network. Measured against a
-  local DNS server: five lookups of one name produced ten queries (an A and an
-  AAAA each), and none was reused. The defaults are `timeout:5 attempts:2`, so a
-  nameserver that does not answer costs **10 seconds per lookup, every time** —
-  which is what `[Errno -3] Temporary failure in name resolution` is. A failure
-  is precisely the thing nothing can cache.
+  installed to do it: `nsswitch.conf` says `hosts: files dns`, and glibc has no
+  cache of its own, so every lookup goes to the network. The resolver defaults
+  are `timeout:5 attempts:2`, so a nameserver that does not answer costs ten
+  seconds per lookup, every time — and a failed lookup is precisely the thing
+  nothing can cache.
 
   If you must use names, do one of these:
 

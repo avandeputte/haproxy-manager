@@ -15,9 +15,18 @@ import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-APP = (ROOT / "app.py").read_text()
+# The application is app.py plus the ham package. Everything below asks
+# questions of "the code" rather than of a particular file, so they are read as
+# one -- which also means a module added to ham/ is covered without editing
+# anything here.
+SOURCES = [ROOT / "app.py"] + sorted((ROOT / "ham").glob("*.py"))
+APP = "\n".join(p.read_text() for p in SOURCES)
 INSTALL = (ROOT / "install.sh").read_text()
-DOCS = {p.name: p.read_text() for p in [ROOT / "README.md", *(ROOT / "docs").glob("*.md")]}
+# refactoring.md is a working note that is deliberately not published, so
+# it is excluded here too -- otherwise a claim would be satisfied locally
+# by a file that does not exist in a fresh checkout.
+DOCS = {p.name: p.read_text() for p in [ROOT / "README.md", *(ROOT / "docs").glob("*.md")]
+        if p.name != "refactoring.md"}
 ALL_DOCS = "\n".join(DOCS.values())
 
 problems = []
@@ -210,6 +219,45 @@ for missing in sorted(actual - listed):
     check(False, "a static file is missing from static/FILES", missing)
 for extra in sorted(listed - actual):
     check(False, "static/FILES lists a file that is not there", extra)
+
+# The same for the package, and it matters more: a static file missing from the
+# manifest loses an icon, a module missing from it means the app does not start.
+listed = set((ROOT / "ham" / "FILES").read_text().split())
+actual = {p.name for p in (ROOT / "ham").glob("*.py")}
+for missing in sorted(actual - listed):
+    check(False, "a module is missing from ham/FILES", missing)
+for extra in sorted(listed - actual):
+    check(False, "ham/FILES lists a module that is not there", extra)
+check("__init__.py" in listed, "ham/FILES does not list __init__.py")
+
+# `from . import cluster` then `cluster.sync_push(...)` only works while nothing
+# nearer is called `cluster`. Python does not complain about the shadowing -- it
+# quietly uses the local variable and fails somewhere else entirely -- so it is
+# checked here. This is why the peers module is called `peering`.
+import ast
+for path in sorted((ROOT / "ham").glob("*.py")):
+    tree = ast.parse(path.read_text())
+    siblings = {a.name for n in tree.body
+                if isinstance(n, ast.ImportFrom) and n.level == 1 and n.module is None
+                for a in n.names}
+    for fn in [n for n in ast.walk(tree)
+               if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
+        bound = {a.arg for a in fn.args.args + fn.args.kwonlyargs}
+        for n in ast.walk(fn):
+            if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store):
+                bound.add(n.id)
+            elif isinstance(n, (ast.Import, ast.ImportFrom)):
+                bound |= {a.asname or a.name.split(".")[0] for a in n.names}
+        for clash in sorted(bound & siblings):
+            check(False, "a local variable hides an imported module",
+                  "%s: %s() binds %r" % (path.name, fn.name, clash))
+# Every module has to be imported for its routes to register, so one that
+# nothing imports is dead weight that still ships.
+init = (ROOT / "ham" / "__init__.py").read_text()
+for mod in sorted(actual - {"__init__.py", "base.py"}):
+    check(re.search(r"^\s+%s,$" % mod[:-3], init, re.M) is not None,
+          "ham/__init__.py does not import a module, so its routes never register",
+          mod)
 
 # -- claims the code has outgrown ------------------------------------------
 # The cluster was two nodes once. Wording that still says so is wrong, and

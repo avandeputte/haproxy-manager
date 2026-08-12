@@ -70,6 +70,13 @@ overrides:
 contents:
   - src: ./app.py
     dst: /opt/haproxy-manager/app.py
+  # app.py is the entry point; everything it serves lives in this package.
+  # Named by glob rather than as a directory, so a __pycache__ left behind by
+  # someone running the app in a checkout cannot travel into the package.
+  - src: ./ham/*.py
+    dst: /opt/haproxy-manager/ham/
+  - src: ./ham/FILES
+    dst: /opt/haproxy-manager/ham/FILES
   - src: ./static
     dst: /opt/haproxy-manager/static
   - src: ./VERSION

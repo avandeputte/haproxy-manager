@@ -146,7 +146,8 @@ globalThis.document = {
   createComment: () => new El("#comment"),
   addEventListener(){}, body: new El("body"), documentElement: new El("html"),
 };
-globalThis.window = { addEventListener(){}, location: { hash: "", host: "localhost:8080" } };
+globalThis.window = { addEventListener(){},
+  location: { hash: "", host: "localhost:8080", protocol: "http:" } };
 globalThis.location = globalThis.window.location;
 globalThis.localStorage = { getItem: () => null, setItem(){}, removeItem(){} };
 globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({}), text: async () => "" });
