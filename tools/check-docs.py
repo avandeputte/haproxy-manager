@@ -152,6 +152,30 @@ for path in recipe_files:
     if fields.get("health") == "http":
         check(bool(fields.get("health_interval")),
               "an http recipe does not say how often to check", rid)
+    check("order" not in r, "a recipe still carries the removed order field", rid)
+
+# The picker sorts by category, then by name; the documented table is meant to
+# be the same list in the same order, so someone reading the docs and someone
+# scrolling the dropdown are looking at the same thing.
+RANK = {"Web": 0, "Databases": 1, "Applications": 2, "Infrastructure": 3}
+by_name = {}
+for path in recipe_files:
+    try:
+        r = json.loads(path.read_text())
+    except ValueError:
+        continue
+    by_name[r.get("name", "")] = RANK.get(r.get("category", "Other"), 9)
+conf = (ROOT / "docs" / "configuration.md").read_text()
+table = conf[conf.index("**Web**\n\n| Recipe |"):conf.index("Every one carries example")]
+listed = [m for m in re.findall(r"^\| (.+?) \| .* \|$", table, re.M)
+          if m not in ("Recipe", "---")]
+check(len(listed) == len(recipe_files),
+      "the documented recipe table does not list every recipe",
+      "%d rows, %d files" % (len(listed), len(recipe_files)))
+expected = sorted(listed, key=lambda n: (by_name.get(n, 9), n.casefold()))
+check(listed == expected, "the documented recipes are not in the picker's order",
+      next((("%r comes before %r" % (a, b))
+            for a, b in zip(listed, expected) if a != b), ""))
 
 # -- strings the state refactor could have damaged --------------------------
 # Moving the shared variables into state.js rewrote every occurrence of their

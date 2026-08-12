@@ -13,6 +13,5 @@
     "timeout_server": "4h",
     "timeout_connect": "5s",
     "log_health_checks": true
-  },
-  "order": 250
+  }
 }

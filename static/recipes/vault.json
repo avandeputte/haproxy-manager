@@ -17,6 +17,5 @@
     "log_health_checks": true,
     "cert_mode": "auto",
     "http_redirect": true
-  },
-  "order": 135
+  }
 }

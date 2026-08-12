@@ -14,6 +14,5 @@
     "health_interval": "5s",
     "cert_mode": "auto",
     "http_redirect": true
-  },
-  "order": 10
+  }
 }

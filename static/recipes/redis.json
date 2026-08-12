@@ -13,6 +13,5 @@
     "health_interval": "3s",
     "timeout_server": "1h",
     "timeout_connect": "3s"
-  },
-  "order": 70
+  }
 }

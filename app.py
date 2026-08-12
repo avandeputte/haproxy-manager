@@ -5588,10 +5588,13 @@ def load_recipes():
         data.setdefault("summary", "")
         data.setdefault("notes", "")
         out.append(data)
-    # Category order is deliberate rather than alphabetical, and `order` keeps
-    # related recipes together inside one -- the two Patroni ones side by side.
+    # Category order is deliberate rather than alphabetical -- the generic ones
+    # first, the specialist ones last. Inside a category the list is long
+    # enough that the only useful order is the one you can predict, so it is
+    # sorted by name. Case is folded so "phpMyAdmin" lands under p rather than
+    # ahead of every capitalised name.
     rank = {"Web": 0, "Databases": 1, "Applications": 2, "Infrastructure": 3}
-    out.sort(key=lambda r: (rank.get(r["category"], 9), r.get("order", 1000), r["name"]))
+    out.sort(key=lambda r: (rank.get(r["category"], 9), r["name"].casefold()))
     return out
 
 

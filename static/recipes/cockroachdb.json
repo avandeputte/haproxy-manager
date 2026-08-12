@@ -16,6 +16,5 @@
     "health_uri": "/health?ready=1",
     "health_status": "200",
     "health_interval": "3s"
-  },
-  "order": 84
+  }
 }

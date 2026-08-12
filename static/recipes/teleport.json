@@ -13,6 +13,5 @@
     "timeout_connect": "5s",
     "health": "tcp",
     "health_interval": "10s"
-  },
-  "order": 331
+  }
 }

@@ -16,6 +16,5 @@
     "timeout_connect": "5s",
     "cert_mode": "auto",
     "http_redirect": true
-  },
-  "order": 210
+  }
 }

@@ -71,185 +71,185 @@ it.
 
 | Recipe | What it sets up |
 | --- | --- |
-| PostgreSQL — Patroni, writes | TCP 5432 to whichever node is the leader, found by asking Patroni |
-| PostgreSQL — Patroni, read-only | TCP 5433 spread across the replicas, never the leader |
-| MariaDB / MySQL — single server | TCP 3306 with a MySQL login check |
-| MariaDB / MySQL — Galera cluster | TCP 3306 with every client pinned to one node |
-| PostgreSQL — single server or streaming replica | TCP 5432 with a PostgreSQL login check |
-| Redis / Valkey | TCP 6379 with a connection check |
-| ClickHouse | HTTP 8123 checked with /ping |
-| InfluxDB | HTTP 8086 checked against /health |
-| etcd | HTTP 2379 checked against /health |
-| Memcached | TCP 11211 with a connection check |
-| Cassandra / ScyllaDB | TCP 9042 for CQL clients |
-| CouchDB | HTTP 5984 checked with /_up |
-| Neo4j (Bolt) | TCP 7687 for the Bolt protocol |
-| CockroachDB | TCP 26257 with the check aimed at the HTTP readiness endpoint |
-| ZooKeeper | TCP 2181 for clients |
-| Kafka (single broker) | TCP 9092 to one broker |
-| Qdrant | HTTP 6333 checked with /healthz |
-| Meilisearch | HTTP 7700 checked with /health |
-| Typesense | HTTP 8108 checked with /health |
 | Apache Solr | HTTP 8983 checked with the ping handler |
-| Weaviate | HTTP 8080 checked against its readiness endpoint |
-| VictoriaMetrics | HTTP 8428 checked with /health |
+| Cassandra / ScyllaDB | TCP 9042 for CQL clients |
+| ClickHouse | HTTP 8123 checked with /ping |
+| CockroachDB | TCP 26257 with the check aimed at the HTTP readiness endpoint |
+| CouchDB | HTTP 5984 checked with /_up |
+| etcd | HTTP 2379 checked against /health |
+| InfluxDB | HTTP 8086 checked against /health |
+| Kafka (single broker) | TCP 9092 to one broker |
+| MariaDB / MySQL — Galera cluster | TCP 3306 with every client pinned to one node |
+| MariaDB / MySQL — single server | TCP 3306 with a MySQL login check |
+| Meilisearch | HTTP 7700 checked with /health |
+| Memcached | TCP 11211 with a connection check |
 | MongoDB | TCP 27017 with a connection check |
+| Neo4j (Bolt) | TCP 7687 for the Bolt protocol |
+| PostgreSQL — Patroni, read-only | TCP 5433 spread across the replicas, never the leader |
+| PostgreSQL — Patroni, writes | TCP 5432 to whichever node is the leader, found by asking Patroni |
+| PostgreSQL — single server or streaming replica | TCP 5432 with a PostgreSQL login check |
+| Qdrant | HTTP 6333 checked with /healthz |
+| Redis / Valkey | TCP 6379 with a connection check |
+| Typesense | HTTP 8108 checked with /health |
+| VictoriaMetrics | HTTP 8428 checked with /health |
+| Weaviate | HTTP 8080 checked against its readiness endpoint |
+| ZooKeeper | TCP 2181 for clients |
 
 **Applications**
 
 | Recipe | What it sets up |
 | --- | --- |
-| Elasticsearch / OpenSearch | HTTP 9200 checked against the cluster health endpoint |
-| MinIO / S3-compatible storage | HTTP with MinIO's liveness endpoint and long timeouts |
-| RabbitMQ (AMQP) | TCP 5672 for AMQP clients |
-| Nextcloud | HTTP with long timeouts and clients pinned to one server |
-| Home Assistant | HTTP 8123, with the WebSocket the interface depends on |
-| Grafana | HTTP 3000 checked against its own health endpoint |
-| HashiCorp Vault | HTTP 8200 to the active node, found by its own health endpoint |
-| Consul | HTTP 8500 checked against the leader endpoint |
-| Jenkins | HTTP 8080, sticky, with room for long builds |
-| Prometheus | HTTP 9090 checked against /-/healthy |
-| SonarQube | HTTP 9000 checked against its system status |
-| Harbor registry | HTTP with Harbor's health endpoint and room for large layers |
-| Sonatype Nexus | HTTP 8081 checked against its status endpoint |
-| Kibana | HTTP 5601 checked against its status API |
-| authentik | HTTP 9000 checked against its liveness endpoint |
+| Actual Budget | HTTP 5006 with clients pinned for sync |
+| Alertmanager | HTTP 9093 checked with /-/healthy |
+| Apache Guacamole | HTTP 8080 with sessions pinned to one node |
+| Argo CD | HTTP 8080 checked with /healthz |
+| Audiobookshelf | HTTP 13378 checked against /healthcheck |
 | Authelia | HTTP 9091 checked against /api/health |
-| Portainer | HTTPS 9443 passed through, with the console WebSocket kept open |
-| Uptime Kuma | HTTP 3001 with the WebSocket its interface is built on |
-| Immich | HTTP 2283 with timeouts sized for uploading a phone's library |
+| authentik | HTTP 9000 checked against its liveness endpoint |
+| Bambuddy (Bambu Lab printers) | HTTP 8080 with live print status kept open |
+| Bitwarden (official server) | HTTP 8080 for the self-hosted Bitwarden stack |
+| BookStack | HTTP 80 checked against /status |
+| Calibre-Web | HTTP 8083 for the library |
+| Channels DVR | HTTP 8089 with timeouts sized for streaming a recording |
+| Checkmk | HTTP 5000 for the interface |
+| Consul | HTTP 8500 checked against the leader endpoint |
+| Directus | HTTP 8055 checked against /server/health |
+| Discourse | HTTP 3000 checked with /srv/status |
+| Docker registry | HTTP 5000 with room to push a large image |
+| Dockge | HTTP 5001 with the WebSocket its interface needs |
+| Duplicati | HTTP 8200 for the backup interface |
+| Elasticsearch / OpenSearch | HTTP 9200 checked against the cluster health endpoint |
+| ERPNext / Frappe | HTTP 8000 with sessions pinned |
+| ESPHome | HTTP 6052 with log streaming kept alive |
+| File Browser | HTTP 80 checked with /health |
+| Firefly III | HTTP 8080 checked with /health |
+| Frigate NVR | HTTP 5000 with camera streams kept open |
+| Gatus | HTTP 8080 checked with /health |
+| Gerrit | HTTP 8080 checked against its version API |
+| Ghost | HTTP 2368 for publishing |
 | Gitea / Forgejo | HTTP 3000 with room for a large clone |
-| Paperless-ngx | HTTP 8000 with WebSockets for the consumption status |
-| WordPress | HTTP with clients pinned and room for uploads |
+| GitLab | HTTP with the timeouts a git push needs |
+| Gotify | HTTP 80 with the message WebSocket kept open |
+| Grafana | HTTP 3000 checked against its own health endpoint |
+| Graylog | HTTP 9000 checked against the endpoint meant for load balancers |
+| Grocy | HTTP 80 for household management |
+| Harbor registry | HTTP with Harbor's health endpoint and room for large layers |
+| HashiCorp Vault | HTTP 8200 to the active node, found by its own health endpoint |
+| Healthchecks | HTTP 8000 for cron monitoring |
+| Home Assistant | HTTP 8123, with the WebSocket the interface depends on |
+| Homebox | HTTP 7745 checked against its status endpoint |
+| Homebridge | HTTP 8581 for the management interface |
+| Homepage / Homarr | HTTP 3000 for a dashboard |
+| Immich | HTTP 2283 with timeouts sized for uploading a phone's library |
+| Jellyfin / Emby | HTTP 8096 with timeouts long enough to watch a film |
+| Jenkins | HTTP 8080, sticky, with room for long builds |
+| JFrog Artifactory | HTTP 8082 checked with its system ping |
+| Joplin Server | HTTP 22300 checked with /api/ping |
+| Karakeep / Hoarder | HTTP 3000 for bookmarks |
+| Kavita | HTTP 5000 checked against its health API |
+| Keycloak | HTTP 8080 checked on its separate management port |
+| Kibana | HTTP 5601 checked against its status API |
+| Kimai | HTTP 8001 for time tracking |
+| Komga | HTTP 25600 checked with its actuator |
+| Kopia | HTTP 51515 for the backup interface |
+| Lemmy | HTTP 8536 for the API and federation |
+| LibreNMS | HTTP 8000 for the interface |
+| Loki | HTTP 3100 checked with /ready |
+| Mailpit | HTTP 8025 for the interface, checked with /readyz |
+| Mainsail / Fluidd (Klipper) | HTTP 80 with Moonraker's WebSocket kept open |
+| Mastodon | HTTP 3000 checked with /health |
+| Matomo | HTTP 80 for analytics |
+| Matrix (Synapse) | HTTP 8008 checked against the client API |
+| Mattermost | HTTP 8065, sticky, with WebSockets |
+| Mealie | HTTP 9000 checked against its about endpoint |
+| Miniflux / FreshRSS | HTTP 8080 checked with /healthcheck |
+| MinIO / S3-compatible storage | HTTP with MinIO's liveness endpoint and long timeouts |
+| Moodle | HTTP 80 with sessions pinned |
+| n8n | HTTP 5678 checked with /healthz |
+| Navidrome | HTTP 4533 checked with /ping |
+| Netdata | HTTP 19999 checked against its info endpoint |
+| Nextcloud | HTTP with long timeouts and clients pinned to one server |
+| NocoDB | HTTP 8080 checked against /api/v1/health |
+| Node-RED | HTTP 1880 with the editor's WebSocket kept open |
+| ntfy | HTTP 80 with subscriptions held open |
+| OctoPrint | HTTP 5000 with the print stream kept open |
+| Odoo | HTTP 8069 with sessions pinned |
 | Ollama | HTTP 11434 with timeouts long enough to generate an answer |
 | Open WebUI | HTTP 8080, sticky, with streaming replies |
-| Matrix (Synapse) | HTTP 8008 checked against the client API |
-| Apache Guacamole | HTTP 8080 with sessions pinned to one node |
-| Odoo | HTTP 8069 with sessions pinned |
-| UniFi Network controller | HTTPS 8443 passed through to a self-signed backend |
-| Netdata | HTTP 19999 checked against its info endpoint |
-| Sonarr / Radarr / Lidarr | HTTP 8989 checked with /ping |
-| GitLab | HTTP with the timeouts a git push needs |
-| Mealie | HTTP 9000 checked against its about endpoint |
-| Bitwarden (official server) | HTTP 8080 for the self-hosted Bitwarden stack |
-| phpMyAdmin | HTTP 80 with the session kept on one server |
-| pgAdmin | HTTP 80 checked with /misc/ping |
-| Channels DVR | HTTP 8089 with timeouts sized for streaming a recording |
-| Dockge | HTTP 5001 with the WebSocket its interface needs |
-| Actual Budget | HTTP 5006 with clients pinned for sync |
-| Homebox | HTTP 7745 checked against its status endpoint |
-| PhotoStructure | HTTP 1787 with timeouts sized for a library import |
-| Jellyfin / Emby | HTTP 8096 with timeouts long enough to watch a film |
-| Vaultwarden / Bitwarden | HTTP with the notification WebSocket kept alive |
-| Mattermost | HTTP 8065, sticky, with WebSockets |
-| Keycloak | HTTP 8080 checked on its separate management port |
-| Plex Media Server | HTTP 32400 with timeouts long enough to watch a film |
-| Frigate NVR | HTTP 5000 with camera streams kept open |
-| Audiobookshelf | HTTP 13378 checked against /healthcheck |
-| Navidrome | HTTP 4533 checked with /ping |
-| Overseerr / Jellyseerr | HTTP 5055 checked against its status API |
-| Tautulli | HTTP 8181 checked with /status |
-| PhotoPrism | HTTP 2342 checked against its status API |
-| Kavita | HTTP 5000 checked against its health API |
-| Docker registry | HTTP 5000 with room to push a large image |
-| qBittorrent | HTTP 8080 for the web interface |
-| SABnzbd | HTTP 8080 for the web interface |
-| Transmission | HTTP 9091 for the web interface |
-| Node-RED | HTTP 1880 with the editor's WebSocket kept open |
-| Zigbee2MQTT | HTTP 8080 with the WebSocket its interface uses |
-| ESPHome | HTTP 6052 with log streaming kept alive |
-| Homebridge | HTTP 8581 for the management interface |
-| ntfy | HTTP 80 with subscriptions held open |
-| Gotify | HTTP 80 with the message WebSocket kept open |
-| BookStack | HTTP 80 checked against /status |
-| Wiki.js | HTTP 3000 checked with /healthz |
 | Outline | HTTP 3000 checked with /_health |
-| Joplin Server | HTTP 22300 checked with /api/ping |
-| Vikunja | HTTP 3456 checked against /api/v1/info |
-| Firefly III | HTTP 8080 checked with /health |
-| n8n | HTTP 5678 checked with /healthz |
-| Directus | HTTP 8055 checked against /server/health |
-| NocoDB | HTTP 8080 checked against /api/v1/health |
-| Umami | HTTP 3000 checked with /api/heartbeat |
-| Stirling PDF | HTTP 8080 for PDF tools |
-| File Browser | HTTP 80 checked with /health |
-| Roundcube | HTTP 80 with the session kept on one server |
-| Miniflux / FreshRSS | HTTP 8080 checked with /healthcheck |
-| Homepage / Homarr | HTTP 3000 for a dashboard |
-| Graylog | HTTP 9000 checked against the endpoint meant for load balancers |
-| Loki | HTTP 3100 checked with /ready |
-| Alertmanager | HTTP 9093 checked with /-/healthy |
-| Woodpecker CI | HTTP 8000 checked with /healthz |
-| Argo CD | HTTP 8080 checked with /healthz |
-| Rancher | HTTPS 443 passed through to a self-signed backend |
-| Verdaccio (npm registry) | HTTP 4873 checked with /-/ping |
-| JFrog Artifactory | HTTP 8082 checked with its system ping |
-| Gerrit | HTTP 8080 checked against its version API |
-| Redmine | HTTP 3000 with sessions kept in place |
-| TeamCity | HTTP 8111 with build logs streaming |
-| Rocket.Chat | HTTP 3000 checked against /api/info |
-| Mastodon | HTTP 3000 checked with /health |
-| Lemmy | HTTP 8536 for the API and federation |
-| Discourse | HTTP 3000 checked with /srv/status |
-| Mailpit | HTTP 8025 for the interface, checked with /readyz |
-| Zabbix web interface | HTTP 8080 with the session kept on one server |
-| LibreNMS | HTTP 8000 for the interface |
-| Checkmk | HTTP 5000 for the interface |
-| Gatus | HTTP 8080 checked with /health |
-| Healthchecks | HTTP 8000 for cron monitoring |
-| Bambuddy (Bambu Lab printers) | HTTP 8080 with live print status kept open |
-| OctoPrint | HTTP 5000 with the print stream kept open |
-| Mainsail / Fluidd (Klipper) | HTTP 80 with Moonraker's WebSocket kept open |
-| Z-Wave JS UI | HTTP 8091 with the control WebSocket kept open |
-| Scrypted | HTTPS 10443 passed through, with camera streams kept open |
-| Komga | HTTP 25600 checked with its actuator |
-| Calibre-Web | HTTP 8083 for the library |
-| PeerTube | HTTP 9000 with room to upload and watch |
+| Overseerr / Jellyseerr | HTTP 5055 checked against its status API |
 | Owncast | HTTP 8080 with the stream and chat kept open |
-| Tandoor Recipes | HTTP 8080 for the recipe manager |
-| Grocy | HTTP 80 for household management |
-| Wallabag | HTTP 80 for read-it-later |
-| Karakeep / Hoarder | HTTP 3000 for bookmarks |
+| Paperless-ngx | HTTP 8000 with WebSockets for the consumption status |
+| PeerTube | HTTP 9000 with room to upload and watch |
+| pgAdmin | HTTP 80 checked with /misc/ping |
+| PhotoPrism | HTTP 2342 checked against its status API |
+| PhotoStructure | HTTP 1787 with timeouts sized for a library import |
+| phpMyAdmin | HTTP 80 with the session kept on one server |
 | Planka / Focalboard | HTTP 3000 with live board updates |
-| Kimai | HTTP 8001 for time tracking |
-| Snipe-IT | HTTP 80 for asset management |
-| Matomo | HTTP 80 for analytics |
 | Plausible | HTTP 8000 checked with /api/health |
-| Ghost | HTTP 2368 for publishing |
+| Plex Media Server | HTTP 32400 with timeouts long enough to watch a film |
+| Portainer | HTTPS 9443 passed through, with the console WebSocket kept open |
+| Prometheus | HTTP 9090 checked against /-/healthy |
+| qBittorrent | HTTP 8080 for the web interface |
+| RabbitMQ (AMQP) | TCP 5672 for AMQP clients |
+| Rancher | HTTPS 443 passed through to a self-signed backend |
+| Redmine | HTTP 3000 with sessions kept in place |
+| Rocket.Chat | HTTP 3000 checked against /api/info |
+| Roundcube | HTTP 80 with the session kept on one server |
+| SABnzbd | HTTP 8080 for the web interface |
+| Scrypted | HTTPS 10443 passed through, with camera streams kept open |
 | Seafile | HTTP 8000 with room to sync |
-| Duplicati | HTTP 8200 for the backup interface |
-| Kopia | HTTP 51515 for the backup interface |
-| ERPNext / Frappe | HTTP 8000 with sessions pinned |
-| Moodle | HTTP 80 with sessions pinned |
+| Snipe-IT | HTTP 80 for asset management |
+| SonarQube | HTTP 9000 checked against its system status |
+| Sonarr / Radarr / Lidarr | HTTP 8989 checked with /ping |
+| Sonatype Nexus | HTTP 8081 checked against its status endpoint |
+| Stirling PDF | HTTP 8080 for PDF tools |
+| Tandoor Recipes | HTTP 8080 for the recipe manager |
+| Tautulli | HTTP 8181 checked with /status |
+| TeamCity | HTTP 8111 with build logs streaming |
+| Transmission | HTTP 9091 for the web interface |
+| Umami | HTTP 3000 checked with /api/heartbeat |
+| UniFi Network controller | HTTPS 8443 passed through to a self-signed backend |
+| Uptime Kuma | HTTP 3001 with the WebSocket its interface is built on |
+| Vaultwarden / Bitwarden | HTTP with the notification WebSocket kept alive |
+| Verdaccio (npm registry) | HTTP 4873 checked with /-/ping |
+| Vikunja | HTTP 3456 checked against /api/v1/info |
+| Wallabag | HTTP 80 for read-it-later |
+| Wiki.js | HTTP 3000 checked with /healthz |
+| Woodpecker CI | HTTP 8000 checked with /healthz |
+| WordPress | HTTP with clients pinned and room for uploads |
+| Z-Wave JS UI | HTTP 8091 with the control WebSocket kept open |
+| Zabbix web interface | HTTP 8080 with the session kept on one server |
+| Zigbee2MQTT | HTTP 8080 with the WebSocket its interface uses |
 
 **Infrastructure**
 
 | Recipe | What it sets up |
 | --- | --- |
-| SSH bastion | TCP 22 to a pool of jump hosts |
-| Remote Desktop (RDP) | TCP 3389 with each client returning to the same host |
-| MQTT (Mosquitto) | TCP 1883 for long-lived publish/subscribe connections |
-| IMAP | TCP 993 for mail clients |
-| SMTP submission | TCP 587 for authenticated mail submission |
-| Syslog over TCP | TCP 514 to a pool of log collectors |
-| Zabbix server | TCP 10051 for agents reporting in |
-| LDAP directory | TCP 389 across the directory servers |
-| Proxmox VE | HTTPS 8006, passed through to a self-signed backend |
-| Kubernetes API servers | TCP 6443 across the control plane |
-| SMTP relay | TCP 25 to a pool of mail servers |
 | AdGuard Home | HTTP 3000 for the admin interface |
-| Pi-hole | HTTP 80 for the admin interface |
-| Syncthing (interface) | HTTP 8384 checked against its unauthenticated health endpoint |
 | Cockpit | HTTPS 9090 passed through, with the terminal WebSocket kept open |
-| TrueNAS | HTTPS passed through to the appliance |
-| OPNsense / pfSense | HTTPS passed through to the firewall's own interface |
-| Unraid | HTTP 80 passed through, with the dashboard's live updates kept open |
-| Mumble | TCP 64738 for voice chat |
-| LLDAP (directory) | TCP 3890 for LDAP clients |
-| Teleport | TCP 443 passed through without terminating TLS |
 | CrowdSec local API | HTTP 8080 checked with /health |
-| Traefik dashboard | HTTP 8080 checked with /ping |
+| IMAP | TCP 993 for mail clients |
+| Kubernetes API servers | TCP 6443 across the control plane |
+| LDAP directory | TCP 389 across the directory servers |
+| LLDAP (directory) | TCP 3890 for LDAP clients |
+| MQTT (Mosquitto) | TCP 1883 for long-lived publish/subscribe connections |
+| Mumble | TCP 64738 for voice chat |
 | Nginx Proxy Manager | HTTP 81 for the administration interface |
+| OPNsense / pfSense | HTTPS passed through to the firewall's own interface |
+| Pi-hole | HTTP 80 for the admin interface |
+| Proxmox VE | HTTPS 8006, passed through to a self-signed backend |
+| Remote Desktop (RDP) | TCP 3389 with each client returning to the same host |
+| SMTP relay | TCP 25 to a pool of mail servers |
+| SMTP submission | TCP 587 for authenticated mail submission |
+| SSH bastion | TCP 22 to a pool of jump hosts |
+| Syncthing (interface) | HTTP 8384 checked against its unauthenticated health endpoint |
+| Syslog over TCP | TCP 514 to a pool of log collectors |
+| Teleport | TCP 443 passed through without terminating TLS |
+| Traefik dashboard | HTTP 8080 checked with /ping |
+| TrueNAS | HTTPS passed through to the appliance |
+| Unraid | HTTP 80 passed through, with the dashboard's live updates kept open |
+| Zabbix server | TCP 10051 for agents reporting in |
 
 Every one carries example servers, so the shape of the answer is visible before
 you replace it with your own.
@@ -449,7 +449,7 @@ of its peers.
 ## Upgrades and the browser cache
 
 The page is served with `no-cache`, and everything it loads lives under a path
-that contains the version — `/static/v/1.60.0/js/main.js`. Those files are then
+that contains the version — `/static/v/1.60.1/js/main.js`. Those files are then
 cached for a year, which is safe because the URL changes whenever the version
 does.
 
