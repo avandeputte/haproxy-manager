@@ -1,0 +1,22 @@
+{
+  "name": "HashiCorp Vault",
+  "category": "Applications",
+  "summary": "HTTP 8200 to the active node, found by its own health endpoint.",
+  "notes": "Like Patroni, the health check does the routing: /v1/sys/health answers 200 only on the active unsealed node, 429 on a standby and 503 when sealed. Every standby is simply down for this pool, so a failover needs no change here.",
+  "fields": {
+    "url": "https://vault.example.com",
+    "target": "vault1=10.0.0.1:8200, vault2=10.0.0.2:8200, vault3=10.0.0.3:8200",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/v1/sys/health",
+    "health_status": "200",
+    "health_interval": "3s",
+    "timeout_server": "5m",
+    "timeout_connect": "5s",
+    "log_health_checks": true,
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 135
+}

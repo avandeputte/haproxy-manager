@@ -1,0 +1,19 @@
+{
+  "name": "PostgreSQL — single server or streaming replica",
+  "category": "Databases",
+  "summary": "TCP 5432 with a PostgreSQL login check.",
+  "notes": "For PostgreSQL without Patroni. The check opens a real connection as the named user, so a server that is listening but not accepting queries is taken out. Use the Patroni recipes instead if something is managing failover.",
+  "fields": {
+    "url": "tcp://0.0.0.0:5432",
+    "target": "10.0.0.1:5432",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "pgsql",
+    "health_user": "postgres",
+    "health_interval": "5s",
+    "timeout_server": "30m",
+    "timeout_connect": "5s"
+  },
+  "order": 60
+}

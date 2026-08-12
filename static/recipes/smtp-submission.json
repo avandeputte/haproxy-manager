@@ -1,0 +1,17 @@
+{
+  "name": "SMTP submission",
+  "category": "Infrastructure",
+  "summary": "TCP 587 for authenticated mail submission.",
+  "notes": "Separate from the relay recipe on 25: submission is where your own users send mail, usually with STARTTLS and a password, and it is often the port worth publishing rather than 25.",
+  "fields": {
+    "url": "tcp://0.0.0.0:587",
+    "target": "mx1=10.0.0.1:587, mx2=10.0.0.2:587",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "tcp",
+    "health_interval": "10s",
+    "timeout_server": "10m",
+    "timeout_connect": "5s"
+  },
+  "order": 179
+}

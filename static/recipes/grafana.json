@@ -1,0 +1,22 @@
+{
+  "name": "Grafana",
+  "category": "Applications",
+  "summary": "HTTP 3000 checked against its own health endpoint.",
+  "notes": "/api/health answers without authentication and reports whether Grafana can reach its database, which is a better signal than the login page. Live panels stream, hence the timeout.",
+  "fields": {
+    "url": "https://grafana.example.com",
+    "target": "grafana1=10.0.0.10:3000, grafana2=10.0.0.11:3000",
+    "balance": "leastconn",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "http",
+    "health_uri": "/api/health",
+    "health_status": "200",
+    "health_interval": "5s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 130
+}

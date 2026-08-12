@@ -1,0 +1,22 @@
+{
+  "name": "Open WebUI",
+  "category": "Applications",
+  "summary": "HTTP 8080, sticky, with streaming replies.",
+  "notes": "Replies stream token by token over a connection held open throughout, and the chat uses a WebSocket, so clients are pinned and the timeout is long.",
+  "fields": {
+    "url": "https://chat.example.com",
+    "target": "10.0.0.10:8080",
+    "balance": "leastconn",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "http",
+    "health_uri": "/health",
+    "health_status": "200",
+    "health_interval": "10s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 153
+}

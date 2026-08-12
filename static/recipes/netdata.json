@@ -1,0 +1,22 @@
+{
+  "name": "Netdata",
+  "category": "Applications",
+  "summary": "HTTP 19999 checked against its info endpoint.",
+  "notes": "/api/v1/info answers 200 with the agent's own state. Dashboards stream updates continuously, so the timeout is long.",
+  "fields": {
+    "url": "https://netdata.example.com",
+    "target": "10.0.0.10:19999",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "http",
+    "health_uri": "/api/v1/info",
+    "health_status": "200",
+    "health_interval": "10s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 158
+}

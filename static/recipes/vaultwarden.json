@@ -1,0 +1,21 @@
+{
+  "name": "Vaultwarden / Bitwarden",
+  "category": "Applications",
+  "summary": "HTTP with the notification WebSocket kept alive.",
+  "notes": "/alive is Vaultwarden's health endpoint. Clients hold a WebSocket open for notifications, which a short server timeout closes every minute.",
+  "fields": {
+    "url": "https://vault.example.com",
+    "target": "10.0.0.10:80",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/alive",
+    "health_status": "200",
+    "health_interval": "10s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 180
+}

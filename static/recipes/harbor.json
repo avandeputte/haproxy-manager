@@ -1,0 +1,21 @@
+{
+  "name": "Harbor registry",
+  "category": "Applications",
+  "summary": "HTTP with Harbor's health endpoint and room for large layers.",
+  "notes": "/api/v2.0/health reports every internal component, so a Harbor whose database or registry is down stops taking traffic. Pushing an image is one long request.",
+  "fields": {
+    "url": "https://harbor.example.com",
+    "target": "10.0.0.10:80",
+    "balance": "leastconn",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/api/v2.0/health",
+    "health_status": "200",
+    "health_interval": "10s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 142
+}

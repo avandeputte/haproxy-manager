@@ -1,0 +1,22 @@
+{
+  "name": "Odoo",
+  "category": "Applications",
+  "summary": "HTTP 8069 with sessions pinned.",
+  "notes": "/web/health answers 200 without a session. Odoo keeps sessions on the worker that created them unless you have configured shared storage, so clients are pinned. Long polling runs on 8072 as a separate service.",
+  "fields": {
+    "url": "https://erp.example.com",
+    "target": "odoo1=10.0.0.10:8069, odoo2=10.0.0.11:8069",
+    "balance": "leastconn",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "http",
+    "health_uri": "/web/health",
+    "health_status": "200",
+    "health_interval": "5s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 156
+}

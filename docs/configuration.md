@@ -76,6 +76,9 @@ it.
 | MariaDB / MySQL — Galera cluster | TCP 3306 with every client pinned to one node |
 | PostgreSQL — single server or streaming replica | TCP 5432 with a PostgreSQL login check |
 | Redis / Valkey | TCP 6379 with a connection check |
+| ClickHouse | HTTP 8123 checked with /ping |
+| InfluxDB | HTTP 8086 checked against /health |
+| etcd | HTTP 2379 checked against /health |
 | MongoDB | TCP 27017 with a connection check |
 
 **Applications**
@@ -88,8 +91,30 @@ it.
 | Nextcloud | HTTP with long timeouts and clients pinned to one server |
 | Home Assistant | HTTP 8123, with the WebSocket the interface depends on |
 | Grafana | HTTP 3000 checked against its own health endpoint |
+| HashiCorp Vault | HTTP 8200 to the active node, found by its own health endpoint |
+| Consul | HTTP 8500 checked against the leader endpoint |
+| Jenkins | HTTP 8080, sticky, with room for long builds |
 | Prometheus | HTTP 9090 checked against /-/healthy |
+| SonarQube | HTTP 9000 checked against its system status |
+| Harbor registry | HTTP with Harbor's health endpoint and room for large layers |
+| Sonatype Nexus | HTTP 8081 checked against its status endpoint |
+| Kibana | HTTP 5601 checked against its status API |
+| authentik | HTTP 9000 checked against its liveness endpoint |
+| Authelia | HTTP 9091 checked against /api/health |
+| Portainer | HTTPS 9443 passed through, with the console WebSocket kept open |
+| Uptime Kuma | HTTP 3001 with the WebSocket its interface is built on |
+| Immich | HTTP 2283 with timeouts sized for uploading a phone's library |
 | Gitea / Forgejo | HTTP 3000 with room for a large clone |
+| Paperless-ngx | HTTP 8000 with WebSockets for the consumption status |
+| WordPress | HTTP with clients pinned and room for uploads |
+| Ollama | HTTP 11434 with timeouts long enough to generate an answer |
+| Open WebUI | HTTP 8080, sticky, with streaming replies |
+| Matrix (Synapse) | HTTP 8008 checked against the client API |
+| Apache Guacamole | HTTP 8080 with sessions pinned to one node |
+| Odoo | HTTP 8069 with sessions pinned |
+| UniFi Network controller | HTTPS 8443 passed through to a self-signed backend |
+| Netdata | HTTP 19999 checked against its info endpoint |
+| Sonarr / Radarr / Lidarr | HTTP 8989 checked with /ping |
 | GitLab | HTTP with the timeouts a git push needs |
 | Jellyfin / Emby | HTTP 8096 with timeouts long enough to watch a film |
 | Vaultwarden / Bitwarden | HTTP with the notification WebSocket kept alive |
@@ -101,6 +126,13 @@ it.
 
 | Recipe | What it sets up |
 | --- | --- |
+| SSH bastion | TCP 22 to a pool of jump hosts |
+| Remote Desktop (RDP) | TCP 3389 with each client returning to the same host |
+| MQTT (Mosquitto) | TCP 1883 for long-lived publish/subscribe connections |
+| IMAP | TCP 993 for mail clients |
+| SMTP submission | TCP 587 for authenticated mail submission |
+| Syslog over TCP | TCP 514 to a pool of log collectors |
+| Zabbix server | TCP 10051 for agents reporting in |
 | LDAP directory | TCP 389 across the directory servers |
 | Proxmox VE | HTTPS 8006, passed through to a self-signed backend |
 | Kubernetes API servers | TCP 6443 across the control plane |
@@ -108,6 +140,23 @@ it.
 
 Every one carries example servers, so the shape of the answer is visible before
 you replace it with your own.
+
+Recipes are one JSON file each in `static/recipes/`, read when the wizard asks
+for them. Adding your own is a matter of dropping a file in — no restart — and
+an upgrade will not remove it. A file that is not valid JSON is skipped and the
+reason logged, so one bad recipe cannot empty the list. The filename is the
+recipe's identity; a minimal one looks like this:
+
+```json
+{
+  "name": "My application",
+  "category": "Applications",
+  "summary": "What it sets up, in a line.",
+  "notes": "Why these settings and not others.",
+  "fields": { "url": "https://app.example.com", "target": "10.0.0.10:8080",
+              "health": "http", "health_uri": "/healthz", "health_status": "200" }
+}
+```
 
 The interesting ones are the databases, because the right configuration is not
 obvious:
@@ -287,7 +336,7 @@ of its peers.
 ## Upgrades and the browser cache
 
 The page is served with `no-cache`, and everything it loads lives under a path
-that contains the version — `/static/v/1.56.0/js/main.js`. Those files are then
+that contains the version — `/static/v/1.57.0/js/main.js`. Those files are then
 cached for a year, which is safe because the URL changes whenever the version
 does.
 

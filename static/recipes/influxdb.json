@@ -1,0 +1,21 @@
+{
+  "name": "InfluxDB",
+  "category": "Databases",
+  "summary": "HTTP 8086 checked against /health.",
+  "notes": "/health reports whether the storage engine is ready, not merely that the port is open. Writes arrive in large batches, hence the timeout.",
+  "fields": {
+    "url": "https://influx.example.com",
+    "target": "10.0.0.1:8086",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/health",
+    "health_status": "200",
+    "health_interval": "5s",
+    "timeout_server": "10m",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 78
+}

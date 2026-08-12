@@ -1,0 +1,17 @@
+{
+  "name": "Zabbix server",
+  "category": "Infrastructure",
+  "summary": "TCP 10051 for agents reporting in.",
+  "notes": "This is the port agents and proxies send to. The web interface is an ordinary HTTP service -- publish it separately.",
+  "fields": {
+    "url": "tcp://0.0.0.0:10051",
+    "target": "zbx1=10.0.0.1:10051",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "tcp",
+    "health_interval": "10s",
+    "timeout_server": "10m",
+    "timeout_connect": "5s"
+  },
+  "order": 181
+}

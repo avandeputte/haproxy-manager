@@ -1,0 +1,20 @@
+{
+  "name": "UniFi Network controller",
+  "category": "Applications",
+  "summary": "HTTPS 8443 passed through to a self-signed backend.",
+  "notes": "The controller serves TLS with its own certificate, so the target is https:// and the connection to it is not verified. Devices keep an inform connection open on 8080, which is a separate service.",
+  "fields": {
+    "url": "https://unifi.example.com",
+    "target": "unifi1=https://10.0.0.10:8443",
+    "balance": "source",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "tcp",
+    "health_interval": "10s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 157
+}

@@ -1,0 +1,22 @@
+{
+  "name": "Apache Guacamole",
+  "category": "Applications",
+  "summary": "HTTP 8080 with sessions pinned to one node.",
+  "notes": "A remote desktop session is a WebSocket tunnel held by the node that opened it, so stickiness is not an optimisation here -- without it a reconnect lands elsewhere and the session is gone.",
+  "fields": {
+    "url": "https://remote.example.com",
+    "target": "10.0.0.10:8080",
+    "balance": "source",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "http",
+    "health_uri": "/guacamole/",
+    "health_status": "",
+    "health_interval": "10s",
+    "timeout_server": "4h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 155
+}

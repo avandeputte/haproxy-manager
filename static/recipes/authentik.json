@@ -1,0 +1,22 @@
+{
+  "name": "authentik",
+  "category": "Applications",
+  "summary": "HTTP 9000 checked against its liveness endpoint.",
+  "notes": "/-/health/live/ answers 204, so the expected status is left empty to accept any 2xx. Sessions live server-side, so clients are pinned.",
+  "fields": {
+    "url": "https://auth.example.com",
+    "target": "authentik1=10.0.0.10:9000, authentik2=10.0.0.11:9000",
+    "balance": "leastconn",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "http",
+    "health_uri": "/-/health/live/",
+    "health_status": "",
+    "health_interval": "5s",
+    "timeout_server": "10m",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 145
+}

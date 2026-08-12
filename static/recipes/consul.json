@@ -1,0 +1,21 @@
+{
+  "name": "Consul",
+  "category": "Applications",
+  "summary": "HTTP 8500 checked against the leader endpoint.",
+  "notes": "/v1/status/leader answers 200 on any agent that can see a leader, which is what you want: an agent cut off from the cluster stops taking traffic.",
+  "fields": {
+    "url": "https://consul.example.com",
+    "target": "consul1=10.0.0.1:8500, consul2=10.0.0.2:8500, consul3=10.0.0.3:8500",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/v1/status/leader",
+    "health_status": "200",
+    "health_interval": "5s",
+    "timeout_server": "5m",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 136
+}

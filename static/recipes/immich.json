@@ -1,0 +1,21 @@
+{
+  "name": "Immich",
+  "category": "Applications",
+  "summary": "HTTP 2283 with timeouts sized for uploading a phone's library.",
+  "notes": "/api/server/ping is the documented health endpoint. The first sync from a phone uploads tens of gigabytes, which is what the long server timeout is for.",
+  "fields": {
+    "url": "https://photos.example.com",
+    "target": "10.0.0.10:2283",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/api/server/ping",
+    "health_status": "200",
+    "health_interval": "10s",
+    "timeout_server": "4h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 149
+}

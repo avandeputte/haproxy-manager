@@ -1,0 +1,22 @@
+{
+  "name": "Sonarr / Radarr / Lidarr",
+  "category": "Applications",
+  "summary": "HTTP 8989 checked with /ping.",
+  "notes": "All of the *arr applications answer /ping with 200 and use the same shape: change the port for each one -- Sonarr 8989, Radarr 7878, Lidarr 8686. They stream logs over a WebSocket.",
+  "fields": {
+    "url": "https://sonarr.example.com",
+    "target": "10.0.0.10:8989",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "http",
+    "health_uri": "/ping",
+    "health_status": "200",
+    "health_interval": "10s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 159
+}

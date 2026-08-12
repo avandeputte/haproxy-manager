@@ -107,15 +107,23 @@ for name, text in DOCS.items():
 # -- recipes ---------------------------------------------------------------
 # Every recipe should be listed in the documentation, and every one should come
 # with example servers -- the shape of the answer is half of what they are for.
-recipe_block = re.search(r"RECIPES = \[(.*?)\n\]\n", APP, re.S)
-check(recipe_block is not None, "the recipe catalogue could not be found")
-if recipe_block:
-    ns = {}
-    exec(recipe_block.group(0), ns)
-    for r in ns["RECIPES"]:
-        check(r["name"] in ALL_DOCS, "a recipe is undocumented", r["name"])
-        check(bool(r["fields"].get("target")), "a recipe has no example servers", r["id"])
-        check(bool(r["fields"].get("url")), "a recipe has no example address", r["id"])
+import json
+recipe_files = sorted((ROOT / "static" / "recipes").glob("*.json"))
+check(len(recipe_files) > 0, "no recipes found in static/recipes")
+for path in recipe_files:
+    try:
+        r = json.loads(path.read_text())
+    except ValueError as e:
+        check(False, "a recipe is not valid JSON", "%s: %s" % (path.name, e))
+        continue
+    rid = path.stem
+    check(bool(r.get("name")), "a recipe has no name", rid)
+    check(r.get("name", "") in ALL_DOCS, "a recipe is undocumented", r.get("name", rid))
+    check(bool(r.get("summary")), "a recipe has no summary", rid)
+    fields = r.get("fields") or {}
+    check(bool(fields.get("target")), "a recipe has no example servers", rid)
+    check(bool(fields.get("url")), "a recipe has no example address", rid)
+    check("id" not in r, "a recipe repeats its id in the file; the filename is the id", rid)
 
 # -- strings the state refactor could have damaged --------------------------
 # Moving the shared variables into state.js rewrote every occurrence of their

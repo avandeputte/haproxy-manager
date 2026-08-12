@@ -1,0 +1,20 @@
+{
+  "name": "Proxmox VE",
+  "category": "Infrastructure",
+  "summary": "HTTPS 8006, passed through to a self-signed backend.",
+  "notes": "The target is https:// because Proxmox only speaks TLS, and its certificate is its own -- the connection to it is not verified. The console and shell are WebSockets tied to the node that opened them, so clients are pinned and the timeout is long.",
+  "fields": {
+    "url": "https://pve.example.com",
+    "target": "pve1=https://10.0.0.1:8006, pve2=https://10.0.0.2:8006",
+    "balance": "source",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "tcp",
+    "health_interval": "5s",
+    "timeout_server": "4h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 240
+}

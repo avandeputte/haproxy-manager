@@ -31,10 +31,10 @@ for i, r in enumerate(recipes):
         fail.append("%s: no example servers" % r["id"])
         f["target"] = "10.9.0.%d:8080" % (i + 1)
     # give each one a distinct listener so they can coexist
-    url = f.get("url", "")
-    if url.startswith("tcp://"):
-        port = int(url.rsplit(":",1)[1]) + i
-        f["url"] = "tcp://0.0.0.0:%d" % port
+    # every recipe wants a well-known port; give each a unique one here so they
+    # can all be published on one node at the same time
+    if f.get("url", "").startswith("tcp://"):
+        f["url"] = "tcp://0.0.0.0:%d" % (20000 + i)
     else:
         f["url"] = "https://%s.example.com" % r["id"]
     f.pop("cert_mode", None)
@@ -64,19 +64,16 @@ def has(rid, *needles):
     return not missing
 
 print()
-# the example servers must survive into the backend, with the right count
-counts = {"web":1, "web-websockets":2, "patroni-primary":3, "patroni-replicas":3,
-          "galera":3, "postgresql-plain":1, "redis":1, "mongodb":1,
-          "elasticsearch":3, "minio":4, "rabbitmq":3, "kubernetes-api":3,
-          "smtp":2, "ldap":2, "proxmox":2, "nextcloud":2, "home-assistant":1,
-          "grafana":2, "prometheus":1, "gitea":1, "gitlab":1, "jellyfin":1,
-          "vaultwarden":1, "mattermost":2, "keycloak":2, "docker-registry":1}
-for rid, want in counts.items():
-    block = next((c for c in cfg.split("\nbackend ") if c.startswith("be_"+rid+"\n")), "")
+# the example servers must survive into the backend: as many as the recipe
+# named, which is checked against the recipe rather than a list kept by hand
+for r in recipes:
+    want = len([t for t in r["fields"].get("target", "").split(",") if t.strip()])
+    block = next((c for c in cfg.split("\nbackend ") if c.startswith("be_"+r["id"]+"\n")), "")
     got = block.count("\n    server ")
-    print("  %-22s %d server(s)%s" % (rid, got, "" if got == want else "  EXPECTED %d" % want))
     if got != want:
-        fail.append("%s: %d servers, expected %d" % (rid, got, want))
+        fail.append("%s: %d servers in the config, recipe named %d" % (r["id"], got, want))
+print("  server counts match the recipes: %s"
+      % ("yes" if not any("servers in the config" in f for f in fail) else "NO"))
 
 print()
 checks = [

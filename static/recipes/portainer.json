@@ -1,0 +1,20 @@
+{
+  "name": "Portainer",
+  "category": "Applications",
+  "summary": "HTTPS 9443 passed through, with the console WebSocket kept open.",
+  "notes": "The target is https:// because Portainer serves TLS with its own certificate, which is not verified. The container console is a WebSocket tied to the node that opened it, so clients are pinned.",
+  "fields": {
+    "url": "https://portainer.example.com",
+    "target": "pt1=https://10.0.0.10:9443",
+    "balance": "source",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "tcp",
+    "health_interval": "10s",
+    "timeout_server": "4h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 147
+}

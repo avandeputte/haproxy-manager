@@ -1,0 +1,18 @@
+{
+  "name": "Redis / Valkey",
+  "category": "Databases",
+  "summary": "TCP 6379 with a connection check.",
+  "notes": "A connect check only proves something is listening -- it does not tell a primary from a replica, so point this at one node, or at a proxy that already knows which is which. Long timeouts, because clients hold connections open.",
+  "fields": {
+    "url": "tcp://0.0.0.0:6379",
+    "target": "10.0.0.1:6379",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "tcp",
+    "health_interval": "3s",
+    "timeout_server": "1h",
+    "timeout_connect": "3s"
+  },
+  "order": 70
+}

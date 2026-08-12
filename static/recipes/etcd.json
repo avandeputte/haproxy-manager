@@ -1,0 +1,20 @@
+{
+  "name": "etcd",
+  "category": "Databases",
+  "summary": "HTTP 2379 checked against /health.",
+  "notes": "/health answers 200 on a member that is part of a working quorum. If the cluster requires client certificates, this check cannot complete the handshake -- use a TCP check instead.",
+  "fields": {
+    "url": "tcp://0.0.0.0:2379",
+    "target": "etcd1=10.0.0.1:2379, etcd2=10.0.0.2:2379, etcd3=10.0.0.3:2379",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/health",
+    "health_status": "200",
+    "health_interval": "3s",
+    "timeout_server": "5m",
+    "timeout_connect": "5s",
+    "log_health_checks": true
+  },
+  "order": 79
+}

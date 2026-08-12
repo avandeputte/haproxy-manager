@@ -1,0 +1,18 @@
+{
+  "name": "Kubernetes API servers",
+  "category": "Infrastructure",
+  "summary": "TCP 6443 across the control plane.",
+  "notes": "TCP rather than HTTP, because the API server speaks TLS that HAProxy should not terminate -- kubeconfig pins its certificate. Watches stay open for hours, hence the timeout.",
+  "fields": {
+    "url": "tcp://0.0.0.0:6443",
+    "target": "cp1=10.0.0.1:6443, cp2=10.0.0.2:6443, cp3=10.0.0.3:6443",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "tcp",
+    "health_interval": "3s",
+    "timeout_server": "4h",
+    "timeout_connect": "5s",
+    "log_health_checks": true
+  },
+  "order": 250
+}

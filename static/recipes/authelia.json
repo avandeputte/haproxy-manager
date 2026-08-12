@@ -1,0 +1,22 @@
+{
+  "name": "Authelia",
+  "category": "Applications",
+  "summary": "HTTP 9091 checked against /api/health.",
+  "notes": "Authelia sits in front of other services, so it going away takes them with it -- check it often. Sessions are held server-side unless Redis is configured, so clients are pinned.",
+  "fields": {
+    "url": "https://login.example.com",
+    "target": "authelia1=10.0.0.10:9091, authelia2=10.0.0.11:9091",
+    "balance": "leastconn",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "http",
+    "health_uri": "/api/health",
+    "health_status": "200",
+    "health_interval": "3s",
+    "timeout_server": "5m",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 146
+}

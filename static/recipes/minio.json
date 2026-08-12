@@ -1,0 +1,20 @@
+{
+  "name": "MinIO / S3-compatible storage",
+  "category": "Applications",
+  "summary": "HTTP with MinIO's liveness endpoint and long timeouts.",
+  "notes": "/minio/health/live is the endpoint MinIO documents for exactly this. The long server timeout is for large uploads, which otherwise die halfway through.",
+  "fields": {
+    "url": "https://s3.example.com",
+    "target": "minio1=10.0.0.1:9000, minio2=10.0.0.2:9000, minio3=10.0.0.3:9000, minio4=10.0.0.4:9000",
+    "balance": "leastconn",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/minio/health/live",
+    "health_status": "200",
+    "health_interval": "5s",
+    "timeout_server": "1h",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 90
+}

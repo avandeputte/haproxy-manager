@@ -1,0 +1,22 @@
+{
+  "name": "Nextcloud",
+  "category": "Applications",
+  "summary": "HTTP with long timeouts and clients pinned to one server.",
+  "notes": "The timeout is the thing people get wrong: a large upload or a desktop client sync takes far longer than a web request, and the default cuts it off. /status.php answers without touching the database, so it makes a cheap check.",
+  "fields": {
+    "url": "https://cloud.example.com",
+    "target": "nc1=10.0.0.10:80, nc2=10.0.0.11:80",
+    "balance": "leastconn",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "http",
+    "health_uri": "/status.php",
+    "health_status": "200",
+    "health_interval": "5s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 110
+}

@@ -1,0 +1,22 @@
+{
+  "name": "Uptime Kuma",
+  "category": "Applications",
+  "summary": "HTTP 3001 with the WebSocket its interface is built on.",
+  "notes": "The whole page runs over socket.io, so a short server timeout shows up as the dashboard freezing rather than as an error.",
+  "fields": {
+    "url": "https://status.example.com",
+    "target": "10.0.0.10:3001",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "200",
+    "health_interval": "10s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 148
+}

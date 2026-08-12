@@ -1,0 +1,22 @@
+{
+  "name": "WordPress",
+  "category": "Applications",
+  "summary": "HTTP with clients pinned and room for uploads.",
+  "notes": "The expected status is empty because a WordPress site may answer / with a redirect. Plugin and media uploads are what the server timeout is for; sessions and nonces behave better when a visitor stays on one server.",
+  "fields": {
+    "url": "https://blog.example.com",
+    "target": "wp1=10.0.0.10:80, wp2=10.0.0.11:80",
+    "balance": "leastconn",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "5s",
+    "timeout_server": "10m",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 151
+}

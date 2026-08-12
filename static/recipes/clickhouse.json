@@ -1,0 +1,21 @@
+{
+  "name": "ClickHouse",
+  "category": "Databases",
+  "summary": "HTTP 8123 checked with /ping.",
+  "notes": "ClickHouse answers /ping with 200 and the word Ok, which is cheap enough to run often. Analytical queries run long, so the server timeout is generous. The native protocol on 9000 needs a TCP service of its own.",
+  "fields": {
+    "url": "https://clickhouse.example.com",
+    "target": "ch1=10.0.0.1:8123, ch2=10.0.0.2:8123",
+    "balance": "leastconn",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/ping",
+    "health_status": "200",
+    "health_interval": "5s",
+    "timeout_server": "30m",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 75
+}

@@ -1,0 +1,18 @@
+{
+  "name": "RabbitMQ (AMQP)",
+  "category": "Applications",
+  "summary": "TCP 5672 for AMQP clients.",
+  "notes": "AMQP connections are long-lived, so the server timeout is generous and stickiness keeps a client on the node holding its channels. Publish the management UI on 15672 as a separate HTTP service.",
+  "fields": {
+    "url": "tcp://0.0.0.0:5672",
+    "target": "rabbit1=10.0.0.1:5672, rabbit2=10.0.0.2:5672, rabbit3=10.0.0.3:5672",
+    "balance": "leastconn",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "tcp",
+    "health_interval": "5s",
+    "timeout_server": "4h",
+    "timeout_connect": "5s"
+  },
+  "order": 100
+}

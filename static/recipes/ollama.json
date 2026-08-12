@@ -1,0 +1,21 @@
+{
+  "name": "Ollama",
+  "category": "Applications",
+  "summary": "HTTP 11434 with timeouts long enough to generate an answer.",
+  "notes": "A response streams for as long as the model is talking, which is far longer than any web request -- with the default timeout the answer is cut off mid-sentence. Least connections, because one request occupies a server completely.",
+  "fields": {
+    "url": "https://ollama.example.com",
+    "target": "gpu1=10.0.0.10:11434, gpu2=10.0.0.11:11434",
+    "balance": "leastconn",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "200",
+    "health_interval": "10s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 152
+}

@@ -1,0 +1,18 @@
+{
+  "name": "MongoDB",
+  "category": "Databases",
+  "summary": "TCP 27017 with a connection check.",
+  "notes": "A connect check cannot tell a primary from a secondary. For a replica set, prefer giving the driver every member directly -- it does its own election-aware routing, and a proxy in front hides that from it.",
+  "fields": {
+    "url": "tcp://0.0.0.0:27017",
+    "target": "10.0.0.1:27017",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "tcp",
+    "health_interval": "5s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s"
+  },
+  "order": 220
+}

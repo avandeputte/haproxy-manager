@@ -1,0 +1,20 @@
+{
+  "name": "Elasticsearch / OpenSearch",
+  "category": "Applications",
+  "summary": "HTTP 9200 checked against the cluster health endpoint.",
+  "notes": "GET /_cluster/health answers 200 while the node can serve, which is a better signal than a connect check: a node that is joining or recovering is listening long before it is useful.",
+  "fields": {
+    "url": "https://search.example.com",
+    "target": "es1=10.0.0.1:9200, es2=10.0.0.2:9200, es3=10.0.0.3:9200",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/_cluster/health",
+    "health_status": "200",
+    "health_interval": "5s",
+    "timeout_server": "5m",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 80
+}

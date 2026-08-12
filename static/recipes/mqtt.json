@@ -1,0 +1,18 @@
+{
+  "name": "MQTT (Mosquitto)",
+  "category": "Infrastructure",
+  "summary": "TCP 1883 for long-lived publish/subscribe connections.",
+  "notes": "MQTT clients connect once and stay connected, so the server timeout has to be longer than the keepalive interval or the broker sees clients endlessly reconnecting. Use 8883 for TLS.",
+  "fields": {
+    "url": "tcp://0.0.0.0:1883",
+    "target": "mqtt1=10.0.0.1:1883, mqtt2=10.0.0.2:1883",
+    "balance": "source",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "tcp",
+    "health_interval": "10s",
+    "timeout_server": "4h",
+    "timeout_connect": "5s"
+  },
+  "order": 177
+}

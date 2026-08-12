@@ -1,0 +1,22 @@
+{
+  "name": "Kibana",
+  "category": "Applications",
+  "summary": "HTTP 5601 checked against its status API.",
+  "notes": "/api/status reports whether Kibana can reach Elasticsearch, which a connect check cannot. Long dashboards keep the connection open.",
+  "fields": {
+    "url": "https://kibana.example.com",
+    "target": "10.0.0.10:5601",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "http",
+    "health_uri": "/api/status",
+    "health_status": "200",
+    "health_interval": "10s",
+    "timeout_server": "10m",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 144
+}

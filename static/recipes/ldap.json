@@ -1,0 +1,17 @@
+{
+  "name": "LDAP directory",
+  "category": "Infrastructure",
+  "summary": "TCP 389 across the directory servers.",
+  "notes": "Plain TCP, so LDAPS on 636 and StartTLS on 389 both pass through untouched. Directory servers answer identically, so no stickiness is needed.",
+  "fields": {
+    "url": "tcp://0.0.0.0:389",
+    "target": "dc1=10.0.0.1:389, dc2=10.0.0.2:389",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "tcp",
+    "health_interval": "5s",
+    "timeout_server": "5m",
+    "timeout_connect": "5s"
+  },
+  "order": 230
+}

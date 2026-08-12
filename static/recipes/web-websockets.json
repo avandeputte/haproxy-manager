@@ -1,0 +1,21 @@
+{
+  "name": "Web application with WebSockets",
+  "category": "Web",
+  "summary": "As above, but connections are allowed to stay open for hours.",
+  "notes": "The only difference that matters is the server timeout: with the default, an idle WebSocket is closed after a minute or so and the application looks flaky rather than broken.",
+  "fields": {
+    "url": "https://app.example.com",
+    "target": "app1=10.0.0.10:8080, app2=10.0.0.11:8080",
+    "balance": "leastconn",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "200",
+    "health_interval": "5s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 20
+}

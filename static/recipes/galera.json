@@ -1,0 +1,22 @@
+{
+  "name": "MariaDB / MySQL — Galera cluster",
+  "category": "Databases",
+  "summary": "TCP 3306 with every client pinned to one node.",
+  "notes": "Galera accepts writes on any node, which is exactly the problem: two nodes writing the same rows deadlock on commit. Stickiness by source address keeps a client on one node, so the cluster behaves like a single writer with the others ready. The check performs a MySQL login handshake -- no password is sent -- so create an unprivileged account for it.",
+  "fields": {
+    "url": "tcp://0.0.0.0:3306",
+    "target": "galera1=10.0.0.1:3306, galera2=10.0.0.2:3306, galera3=10.0.0.3:3306",
+    "balance": "source",
+    "persistence": "source",
+    "stick_type": "ip",
+    "stick_size": "50k",
+    "stick_expire": "30m",
+    "health": "mysql",
+    "health_user": "haproxy",
+    "health_interval": "3s",
+    "timeout_server": "30m",
+    "timeout_connect": "5s",
+    "log_health_checks": true
+  },
+  "order": 50
+}

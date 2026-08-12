@@ -1,0 +1,17 @@
+{
+  "name": "SMTP relay",
+  "category": "Infrastructure",
+  "summary": "TCP 25 to a pool of mail servers.",
+  "notes": "Plain TCP: HAProxy passes the session through, including STARTTLS. Use 587 instead for submission. Whatever accepts the mail sees HAProxy's address unless you enable the proxy protocol on both sides.",
+  "fields": {
+    "url": "tcp://0.0.0.0:25",
+    "target": "mx1=10.0.0.1:25, mx2=10.0.0.2:25",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "tcp",
+    "health_interval": "10s",
+    "timeout_server": "5m",
+    "timeout_connect": "5s"
+  },
+  "order": 260
+}

@@ -1,0 +1,22 @@
+{
+  "name": "GitLab",
+  "category": "Applications",
+  "summary": "HTTP with the timeouts a git push needs.",
+  "notes": "/-/health answers without authentication. Pushing a large repository holds one connection for minutes, which is what the server timeout is for.",
+  "fields": {
+    "url": "https://gitlab.example.com",
+    "target": "10.0.0.10:80",
+    "balance": "leastconn",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "http",
+    "health_uri": "/-/health",
+    "health_status": "200",
+    "health_interval": "5s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 160
+}
