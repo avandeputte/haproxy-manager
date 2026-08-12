@@ -341,6 +341,18 @@ export async function clusterCard(fresh){
     const el=document.createElement("div");el.className="hint";el.style.padding="8px 16px";
     el.innerHTML="! "+esc(w);bd.appendChild(el);
   });
+  /* A node that took a configuration and then did not match it is the one
+     case the comparison cannot explain from the outside, so it is called out
+     above the table rather than left among the other warnings. */
+  cl.nodes.filter(n=>n.config_leak).forEach(n=>{
+    const el=document.createElement("div");el.className="hint";el.style.padding="8px 16px";
+    el.innerHTML="! <b>"+esc(n.hostname||n.name)+"</b> took the configuration from "+
+      esc(n.config_leak.source||"another node")+" and then did not match it ("+
+      esc(n.config_leak.mine)+" here against "+esc(n.config_leak.theirs)+
+      "). Something belonging to one node is inside the shared configuration; "+
+      "the object named below is the one to look at.";
+    bd.appendChild(el);
+  });
   if(!s.config_agreed)bd.appendChild(configDiff(cl.nodes));
   card.appendChild(bd);return card;
 }

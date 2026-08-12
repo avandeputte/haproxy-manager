@@ -1,5 +1,6 @@
 """Pushing the shared configuration to the other nodes, and receiving it."""
 
+from datetime import datetime, timezone
 from flask import jsonify
 from flask import request
 from urllib.parse import urlsplit
@@ -496,14 +497,23 @@ def _receive_locked(cfg, data, conf, source=None):
     # revision.
     cfg["_meta"]["shared_fp"] = shared_fingerprint(cfg)
     cfg["_meta"]["shared_rev"] = theirs
-    save_config(cfg)
-    if cfg["_meta"]["shared_fp"] != (data.get("fp") or cfg["_meta"]["shared_fp"]):
-        # Both sides hash the same shared view, so this should not happen. Say
-        # so rather than leave two nodes quietly disagreeing forever.
+    # Every node hashes the same thing -- the view that was sent -- so taking a
+    # configuration and then not matching it means something node-specific is
+    # sitting inside the shared sections without being marked as node-local.
+    # That is the one failure this whole mechanism cannot see past, so it is
+    # recorded and reported rather than left in a log nobody reads: the nodes
+    # would otherwise be shown as disagreeing forever with no reason given.
+    if data.get("fp") and cfg["_meta"]["shared_fp"] != data["fp"]:
+        cfg["_meta"]["config_leak"] = {
+            "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "source": source, "mine": cfg["_meta"]["shared_fp"], "theirs": data["fp"]}
         log.warning("took the configuration from %s but computed a different "
-                    "fingerprint (%s here, %s there) -- the Cluster page will "
-                    "report these nodes as disagreeing",
-                    source, cfg["_meta"]["shared_fp"], data.get("fp"))
+                    "fingerprint (%s here, %s there): something node-specific is "
+                    "inside the shared configuration", source,
+                    cfg["_meta"]["shared_fp"], data["fp"])
+    else:
+        cfg["_meta"].pop("config_leak", None)
+    save_config(cfg)
     cluster.invalidate()
     log.info("received configuration from %s at revision %d",
              source, cfg["_meta"]["shared_rev"])

@@ -423,6 +423,18 @@ minute old, so anything that changes or pushes the configuration throws the
 collected copy away — the next look asks the nodes again rather than repeating
 a verdict from before the change.
 
+**How node-local settings are kept out of it.** The fingerprint is taken over
+the same value that is sent to the other nodes, not a second derivation of it,
+so what is compared and what is shared cannot drift apart. That value excludes
+the whole `local` section and every object marked as belonging to one node.
+
+There is one failure it cannot see from the outside: an object that is
+node-specific but is *not* marked, sitting inside a shared collection. So each
+node checks itself — after taking a configuration it compares its own
+fingerprint with the one that arrived, and if they differ it records it and the
+Cluster page names the node and says what it means. Two nodes cannot end up
+disagreeing forever with no reason given.
+
 **What counts as HAProxy being up.** Keepalived gives the virtual IP up when
 its tracking script fails. The default script asks HAProxy through its admin
 socket whether it is serving, so an instance that is running but wedged fails
@@ -505,7 +517,7 @@ of its peers.
 ## Upgrades and the browser cache
 
 The page is served with `no-cache`, and everything it loads lives under a path
-that contains the version — `/static/v/1.66.0/js/main.js`. Those files are then
+that contains the version — `/static/v/1.67.0/js/main.js`. Those files are then
 cached for a year, which is safe because the URL changes whenever the version
 does.
 

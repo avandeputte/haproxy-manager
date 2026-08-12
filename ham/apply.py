@@ -427,6 +427,9 @@ def api_status():
         # And one per object, so a disagreement can name the object rather
         # than the collection it is somewhere inside.
         "config_objects": shared_objects(cfg),
+        # Set when this node took a configuration and then did not match it,
+        # which can only mean something node-specific travelled with it.
+        "config_leak": cfg["_meta"].get("config_leak") or None,
         "certs": certs,
         "acme_installed": Path(ACME_SH).exists(),
         "renews_here": acme.renewal_runs_here(cfg)[0],

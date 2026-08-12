@@ -98,6 +98,15 @@ def cluster_snapshot(cfg=None):
     # disagree about very nearly always is, so it is worked out once and said
     # in every case, not only in the tidy one.
     differs_in = _differing_parts(reachable)
+    # The one cause the comparison cannot diagnose from the outside: a node
+    # took a configuration and did not end up matching it.
+    leaking = [n for n in reachable if n.get("config_leak")]
+    if leaking:
+        warnings.append(
+            "%s took a configuration and then did not match it, so something "
+            "belonging to one node is inside the shared configuration. It will "
+            "not settle on its own -- the object named below is the one to look "
+            "at." % ", ".join(n["name"] for n in leaking))
     if behind:
         warnings.append(
             "%s %s an older configuration (revision %s against %d)%s. "

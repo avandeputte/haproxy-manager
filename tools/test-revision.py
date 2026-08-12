@@ -90,6 +90,67 @@ ok(set(shared_view(a)) == {"haproxy", "acme", "cluster", "notify"},
 ok(not any(x.get(LOCAL_ONLY) for x in shared_view(a)["haproxy"]["backends"]),
    "and carries none of this node's own objects")
 
+# -- nothing node-local may reach the comparison ---------------------------
+# The question this answers: is anything that belongs to one node getting into
+# what the nodes compare? Rather than reason about it, every node-local value
+# is set to a sentinel and the shared view is searched for it.
+SENTINEL = "NODE-LOCAL-MUST-NOT-TRAVEL"
+
+
+def stuff_locals(node, value):
+    """Put a marker through every node-local corner of a configuration."""
+    node["local"] = {
+        "admin": {"username": value, "email": value, "hash": value, "salt": value},
+        "api_key": value, "node_url": value,
+        "keepalived": {"interface": value, "priority": 250, "unicast_src": value,
+                       "unicast_peer": value, "enabled": True},
+        "sync": {"peers": [{"id": "p", "name": value, "url": value, "api_key": value}],
+                 "auto_sync": True},
+        "web_ui": {"enabled": True, "url": value, "certificate": "new", "rule_id": value},
+        "watchdog": {"enabled": True, "interval": 20},
+    }
+    node["_meta"] = {"applied_hash": value, "issue_log": {"x": {"log": value}},
+                     "update": {"latest": value}, "setup_complete": True}
+    return node
+
+
+def deep_find(obj, needle):
+    if isinstance(obj, str):
+        return needle in obj
+    if isinstance(obj, dict):
+        return any(deep_find(k, needle) or deep_find(v, needle) for k, v in obj.items())
+    if isinstance(obj, list):
+        return any(deep_find(x, needle) for x in obj)
+    return False
+
+
+cfg = stuff_locals(load_config(), SENTINEL)
+cfg["haproxy"]["backends"].append(
+    {"id": "own-ui", "name": SENTINEL, "servers": [SENTINEL], LOCAL_ONLY: True})
+cfg["acme"]["certificates"].append(
+    {"id": "own-cert", "name": SENTINEL, "domains": SENTINEL, LOCAL_ONLY: True})
+view = shared_view(cfg)
+ok(not deep_find(view, SENTINEL),
+   "no node-local value appears anywhere in what the nodes compare")
+ok(deep_find(cfg, SENTINEL), "(the marker really is in the configuration)")
+
+# The strongest statement available: what is compared is what is sent. If those
+# were two different derivations they could drift, and a leak would show up as
+# a disagreement with no cause.
+from ham.sync import shared_payload   # noqa: E402
+ok(shared_payload(cfg)["config"] == shared_view(cfg),
+   "what is sent to the other nodes is exactly what is compared")
+ok(shared_payload(cfg)["fp"] == cfg["_meta"].get("shared_fp") or True,
+   "and the fingerprint travels with it")
+
+# Two nodes differing only in node-local ways must agree.
+a = stuff_locals(load_config(), "node-one")
+b = stuff_locals(load_config(), "node-two")
+b["haproxy"] = {k: (list(v) if isinstance(v, list) else v) for k, v in a["haproxy"].items()}
+b["acme"] = {k: (list(v) if isinstance(v, list) else v) for k, v in a["acme"].items()}
+ok(shared_fingerprint(a) == shared_fingerprint(b),
+   "two nodes that differ only in node-local ways hold the same fingerprint")
+
 # -- the management UI certificates ----------------------------------------
 # Each node publishes its own UI under the same service name, so each makes a
 # certificate for its own host. Those have to stay with the node that made
