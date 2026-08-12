@@ -1,0 +1,21 @@
+{
+  "name": "Traefik dashboard",
+  "category": "Infrastructure",
+  "summary": "HTTP 8080 checked with /ping.",
+  "notes": "Only the dashboard and API: Traefik's own traffic ports are not proxied through here. /ping answers 200 when it is healthy.",
+  "fields": {
+    "url": "https://traefik.example.com",
+    "target": "10.0.0.10:8080",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "timeout_server": "10m",
+    "health": "http",
+    "health_uri": "/ping",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 363
+}

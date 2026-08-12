@@ -1,0 +1,19 @@
+{
+  "name": "CrowdSec local API",
+  "category": "Infrastructure",
+  "summary": "HTTP 8080 checked with /health.",
+  "notes": "Bouncers poll this for decisions, so it wants to be close and quick. Keep it on an internal address rather than publishing it.",
+  "fields": {
+    "url": "tcp://0.0.0.0:8080",
+    "target": "10.0.0.1:8080",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "timeout_server": "10m",
+    "timeout_connect": "5s",
+    "health": "http",
+    "health_uri": "/health",
+    "health_status": "200",
+    "health_interval": "5s"
+  },
+  "order": 332
+}

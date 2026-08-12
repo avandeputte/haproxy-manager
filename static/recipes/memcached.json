@@ -1,0 +1,17 @@
+{
+  "name": "Memcached",
+  "category": "Databases",
+  "summary": "TCP 11211 with a connection check.",
+  "notes": "Clients usually shard across memcached nodes themselves, keyed by the item, and a proxy in front breaks that -- every node would then hold every key. Use this for a single node, or when the client cannot do the sharding.",
+  "fields": {
+    "url": "tcp://0.0.0.0:11211",
+    "target": "10.0.0.1:11211",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "health": "tcp",
+    "health_interval": "5s"
+  },
+  "order": 80
+}

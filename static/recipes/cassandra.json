@@ -1,0 +1,18 @@
+{
+  "name": "Cassandra / ScyllaDB",
+  "category": "Databases",
+  "summary": "TCP 9042 for CQL clients.",
+  "notes": "Drivers discover the topology and route by token themselves, so giving them the contact points directly is usually better than a proxy. This is for clients that cannot -- through a firewall, say.",
+  "fields": {
+    "url": "tcp://0.0.0.0:9042",
+    "target": "cass1=10.0.0.1:9042, cass2=10.0.0.2:9042, cass3=10.0.0.3:9042",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "health": "tcp",
+    "health_interval": "5s"
+  },
+  "order": 81
+}

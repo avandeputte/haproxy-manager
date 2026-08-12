@@ -1,0 +1,22 @@
+{
+  "name": "ERPNext / Frappe",
+  "category": "Applications",
+  "summary": "HTTP 8000 with sessions pinned.",
+  "notes": "Frappe keeps sessions server-side and uses a WebSocket for notifications, so clients are pinned. Reports and imports are long-running.",
+  "fields": {
+    "url": "https://erp.example.com",
+    "target": "10.0.0.10:8000",
+    "balance": "leastconn",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "1h",
+    "health": "http",
+    "health_uri": "/api/method/ping",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 361
+}

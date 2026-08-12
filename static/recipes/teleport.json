@@ -1,0 +1,18 @@
+{
+  "name": "Teleport",
+  "category": "Infrastructure",
+  "summary": "TCP 443 passed through without terminating TLS.",
+  "notes": "Teleport does its own certificate work for every protocol it carries, so the connection is passed through untouched. Sessions last hours.",
+  "fields": {
+    "url": "tcp://0.0.0.0:443",
+    "target": "teleport1=10.0.0.1:443",
+    "balance": "source",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "8h",
+    "timeout_connect": "5s",
+    "health": "tcp",
+    "health_interval": "10s"
+  },
+  "order": 331
+}

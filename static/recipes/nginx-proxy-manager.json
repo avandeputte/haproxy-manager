@@ -1,0 +1,22 @@
+{
+  "name": "Nginx Proxy Manager",
+  "category": "Infrastructure",
+  "summary": "HTTP 81 for the administration interface.",
+  "notes": "The interface only -- the proxy's own traffic ports are separate. Restrict who can reach it, and consider whether two proxies in a row is what you want.",
+  "fields": {
+    "url": "https://npm.example.com",
+    "target": "10.0.0.10:81",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "30m",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 364
+}

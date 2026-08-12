@@ -1,0 +1,17 @@
+{
+  "name": "Kafka (single broker)",
+  "category": "Databases",
+  "summary": "TCP 9092 to one broker.",
+  "notes": "Read this before using it. A Kafka client asks any broker for the cluster layout and is told each broker's advertised address, then connects to those directly -- so round-robin across brokers behind one address does not work. Either publish one service per broker, each with its own port and matching advertised.listeners, or use this for a single broker.",
+  "fields": {
+    "url": "tcp://0.0.0.0:9092",
+    "target": "broker1=10.0.0.1:9092",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "health": "tcp",
+    "health_interval": "5s"
+  },
+  "order": 86
+}

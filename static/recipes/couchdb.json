@@ -1,0 +1,21 @@
+{
+  "name": "CouchDB",
+  "category": "Databases",
+  "summary": "HTTP 5984 checked with /_up.",
+  "notes": "/_up is CouchDB's own readiness endpoint and answers 200 only when the node can serve. Replication holds long connections open.",
+  "fields": {
+    "url": "https://couchdb.example.com",
+    "target": "couch1=10.0.0.1:5984, couch2=10.0.0.2:5984",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "timeout_server": "1h",
+    "health": "http",
+    "health_uri": "/_up",
+    "health_status": "200",
+    "health_interval": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 82
+}

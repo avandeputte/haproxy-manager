@@ -1,0 +1,22 @@
+{
+  "name": "Redmine",
+  "category": "Applications",
+  "summary": "HTTP 3000 with sessions kept in place.",
+  "notes": "Sessions are server-side, so clients are pinned. The check accepts any 2xx or 3xx because the front page may redirect to a login.",
+  "fields": {
+    "url": "https://redmine.example.com",
+    "target": "10.0.0.10:3000",
+    "balance": "leastconn",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "30m",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 305
+}

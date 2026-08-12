@@ -1,0 +1,22 @@
+{
+  "name": "Discourse",
+  "category": "Applications",
+  "summary": "HTTP 3000 checked with /srv/status.",
+  "notes": "/srv/status answers 200 without a login. Discourse uses long polling for live updates, which is what the timeout is for.",
+  "fields": {
+    "url": "https://forum.example.com",
+    "target": "10.0.0.10:3000",
+    "balance": "leastconn",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "1h",
+    "health": "http",
+    "health_uri": "/srv/status",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 313
+}

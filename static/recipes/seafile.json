@@ -1,0 +1,22 @@
+{
+  "name": "Seafile",
+  "category": "Applications",
+  "summary": "HTTP 8000 with room to sync.",
+  "notes": "The desktop client uploads and downloads large libraries in single requests. Seafile's file service on 8082 may also need publishing depending on your deployment.",
+  "fields": {
+    "url": "https://seafile.example.com",
+    "target": "10.0.0.10:8000",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "4h",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 358
+}

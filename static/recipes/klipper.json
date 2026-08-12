@@ -1,0 +1,22 @@
+{
+  "name": "Mainsail / Fluidd (Klipper)",
+  "category": "Applications",
+  "summary": "HTTP 80 with Moonraker's WebSocket kept open.",
+  "notes": "The interface is static files, but everything it does goes through Moonraker's WebSocket on 7125 -- publish that as well, or use a printer image that proxies it on the same port.",
+  "fields": {
+    "url": "https://printer.example.com",
+    "target": "10.0.0.10:80",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "24h",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 341
+}

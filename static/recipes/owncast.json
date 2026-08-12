@@ -1,0 +1,22 @@
+{
+  "name": "Owncast",
+  "category": "Applications",
+  "summary": "HTTP 8080 with the stream and chat kept open.",
+  "notes": "Viewers hold an HLS connection and a chat WebSocket for the length of the broadcast, so the timeout is long.",
+  "fields": {
+    "url": "https://live.example.com",
+    "target": "10.0.0.10:8080",
+    "balance": "leastconn",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "12h",
+    "health": "http",
+    "health_uri": "/api/status",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 347
+}

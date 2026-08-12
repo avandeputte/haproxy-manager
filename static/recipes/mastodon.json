@@ -1,0 +1,21 @@
+{
+  "name": "Mastodon",
+  "category": "Applications",
+  "summary": "HTTP 3000 checked with /health.",
+  "notes": "This is the web application. The streaming API on 4000 is a separate service holding WebSockets open, and media is usually served from object storage rather than through here.",
+  "fields": {
+    "url": "https://mastodon.example.com",
+    "target": "10.0.0.10:3000",
+    "balance": "leastconn",
+    "persistence": "none",
+    "timeout_server": "1h",
+    "health": "http",
+    "health_uri": "/health",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 311
+}

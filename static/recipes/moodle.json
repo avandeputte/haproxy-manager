@@ -1,0 +1,22 @@
+{
+  "name": "Moodle",
+  "category": "Applications",
+  "summary": "HTTP 80 with sessions pinned.",
+  "notes": "Sessions are server-side unless you have configured shared session storage. Uploading course material and running backups are what the timeout is for.",
+  "fields": {
+    "url": "https://moodle.example.com",
+    "target": "10.0.0.10:80",
+    "balance": "leastconn",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "1h",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 362
+}

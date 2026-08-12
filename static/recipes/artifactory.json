@@ -1,0 +1,21 @@
+{
+  "name": "JFrog Artifactory",
+  "category": "Applications",
+  "summary": "HTTP 8082 checked with its system ping.",
+  "notes": "/artifactory/api/system/ping answers OK without a login. Artefact uploads are large, hence the timeout.",
+  "fields": {
+    "url": "https://artifactory.example.com",
+    "target": "10.0.0.10:8082",
+    "balance": "leastconn",
+    "persistence": "none",
+    "timeout_server": "1h",
+    "health": "http",
+    "health_uri": "/artifactory/api/system/ping",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 303
+}

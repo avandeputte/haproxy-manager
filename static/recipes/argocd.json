@@ -1,0 +1,22 @@
+{
+  "name": "Argo CD",
+  "category": "Applications",
+  "summary": "HTTP 8080 checked with /healthz.",
+  "notes": "The interface streams live application state, and the CLI speaks gRPC over the same port, so the timeout is long and clients are pinned. Argo CD usually serves TLS itself -- if so, point the target at https://.",
+  "fields": {
+    "url": "https://argocd.example.com",
+    "target": "10.0.0.10:8080",
+    "balance": "leastconn",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "4h",
+    "health": "http",
+    "health_uri": "/healthz",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 300
+}

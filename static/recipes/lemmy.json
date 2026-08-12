@@ -1,0 +1,21 @@
+{
+  "name": "Lemmy",
+  "category": "Applications",
+  "summary": "HTTP 8536 for the API and federation.",
+  "notes": "Federation delivers activities from other instances as ordinary POSTs, so this has to be reachable from the internet. The check accepts any 2xx or 3xx.",
+  "fields": {
+    "url": "https://lemmy.example.com",
+    "target": "10.0.0.10:8536",
+    "balance": "leastconn",
+    "persistence": "none",
+    "timeout_server": "30m",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 312
+}

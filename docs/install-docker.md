@@ -28,7 +28,7 @@ Ampere instance; Docker picks the right one.
 
 ```
 ghcr.io/avandeputte/haproxy-manager:latest    the tip of main
-ghcr.io/avandeputte/haproxy-manager:1.59.0      a specific version
+ghcr.io/avandeputte/haproxy-manager:1.60.0      a specific version
 ghcr.io/avandeputte/haproxy-manager:sha-abc…  one exact commit
 ```
 

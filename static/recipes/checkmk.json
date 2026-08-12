@@ -1,0 +1,22 @@
+{
+  "name": "Checkmk",
+  "category": "Applications",
+  "summary": "HTTP 5000 for the interface.",
+  "notes": "The interface lives under a site path such as /cmk/, so adjust the check path to match your site name.",
+  "fields": {
+    "url": "https://checkmk.example.com",
+    "target": "10.0.0.10:5000",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "30m",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 322
+}

@@ -1,0 +1,21 @@
+{
+  "name": "Typesense",
+  "category": "Databases",
+  "summary": "HTTP 8108 checked with /health.",
+  "notes": "/health reports whether the node is ready and has disk. Importing documents in bulk is what the timeout is for.",
+  "fields": {
+    "url": "https://typesense.example.com",
+    "target": "10.0.0.10:8108",
+    "balance": "leastconn",
+    "persistence": "none",
+    "timeout_server": "1h",
+    "health": "http",
+    "health_uri": "/health",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 89
+}

@@ -1,0 +1,22 @@
+{
+  "name": "Kopia",
+  "category": "Applications",
+  "summary": "HTTP 51515 for the backup interface.",
+  "notes": "The interface streams progress while a snapshot runs, so the timeout outlasts a backup.",
+  "fields": {
+    "url": "https://kopia.example.com",
+    "target": "10.0.0.10:51515",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "4h",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 360
+}

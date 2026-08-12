@@ -1,0 +1,22 @@
+{
+  "name": "Bambuddy (Bambu Lab printers)",
+  "category": "Applications",
+  "summary": "HTTP 8080 with live print status kept open.",
+  "notes": "Bambuddy talks to the printers itself over MQTT on the local network and pushes status to the browser, so the connection stays open for the whole print -- hours, sometimes days. Check the port your deployment publishes; 8080 is the common default. The check accepts any 2xx or 3xx because the entry point redirects to a login.",
+  "fields": {
+    "url": "https://bambuddy.example.com",
+    "target": "10.0.0.10:8080",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "timeout_server": "24h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  },
+  "order": 339
+}

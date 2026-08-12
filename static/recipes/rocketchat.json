@@ -1,0 +1,22 @@
+{
+  "name": "Rocket.Chat",
+  "category": "Applications",
+  "summary": "HTTP 3000 checked against /api/info.",
+  "notes": "The client is a WebSocket application throughout, so stickiness and a long timeout are not optional -- without them the chat reconnects constantly.",
+  "fields": {
+    "url": "https://chat.example.com",
+    "target": "rc1=10.0.0.10:3000, rc2=10.0.0.11:3000",
+    "balance": "leastconn",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "4h",
+    "health": "http",
+    "health_uri": "/api/info",
+    "health_status": "200",
+    "health_interval": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 310
+}

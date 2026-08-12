@@ -1,0 +1,22 @@
+{
+  "name": "Tandoor Recipes",
+  "category": "Applications",
+  "summary": "HTTP 8080 for the recipe manager.",
+  "notes": "The check accepts any 2xx or 3xx since the entry point redirects to a login. Importing a recipe fetches an external page, which can be slow.",
+  "fields": {
+    "url": "https://recipes.example.com",
+    "target": "10.0.0.10:8080",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "30m",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 348
+}

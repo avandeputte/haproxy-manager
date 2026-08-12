@@ -1,0 +1,22 @@
+{
+  "name": "Kimai",
+  "category": "Applications",
+  "summary": "HTTP 8001 for time tracking.",
+  "notes": "Sessions are server-side, so clients are pinned. Exporting a long report is what the timeout is for.",
+  "fields": {
+    "url": "https://time.example.com",
+    "target": "10.0.0.10:8001",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "30m",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 353
+}

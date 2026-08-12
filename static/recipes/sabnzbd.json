@@ -2,7 +2,7 @@
   "name": "SABnzbd",
   "category": "Applications",
   "summary": "HTTP 8080 for the web interface.",
-  "notes": "The check accepts any 2xx or 3xx: most API calls need a key, and the front page does not. Like qBittorrent, SABnzbd checks the Host header, so add this name to host_whitelist.",
+  "notes": "The check accepts any 2xx or 3xx: most API calls need a key, and the front page does not. SABnzbd rejects requests whose Host header it does not recognise, so add this name to its host_whitelist setting.",
   "fields": {
     "url": "https://sabnzbd.example.com",
     "target": "10.0.0.10:8080",

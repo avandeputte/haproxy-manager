@@ -1,0 +1,21 @@
+{
+  "name": "Verdaccio (npm registry)",
+  "category": "Applications",
+  "summary": "HTTP 4873 checked with /-/ping.",
+  "notes": "An install pulls hundreds of small packages, so least connections spreads the work; publishing a large tarball is what the timeout is for.",
+  "fields": {
+    "url": "https://npm.example.com",
+    "target": "10.0.0.10:4873",
+    "balance": "leastconn",
+    "persistence": "none",
+    "timeout_server": "30m",
+    "health": "http",
+    "health_uri": "/-/ping",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 302
+}

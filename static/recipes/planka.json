@@ -1,0 +1,22 @@
+{
+  "name": "Planka / Focalboard",
+  "category": "Applications",
+  "summary": "HTTP 3000 with live board updates.",
+  "notes": "Boards update live over a WebSocket, so clients are pinned and the timeout is long. Planka listens on 3000 and Focalboard on 8000.",
+  "fields": {
+    "url": "https://boards.example.com",
+    "target": "10.0.0.10:3000",
+    "balance": "leastconn",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "4h",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 352
+}

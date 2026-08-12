@@ -1,0 +1,20 @@
+{
+  "name": "Rancher",
+  "category": "Applications",
+  "summary": "HTTPS 443 passed through to a self-signed backend.",
+  "notes": "Rancher serves TLS with its own certificate, which is not verified here. The interface and kubectl proxying both hold WebSockets open, so clients are pinned and the timeout is long.",
+  "fields": {
+    "url": "https://rancher.example.com",
+    "target": "rancher1=https://10.0.0.10:443",
+    "balance": "source",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "4h",
+    "health": "tcp",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 301
+}

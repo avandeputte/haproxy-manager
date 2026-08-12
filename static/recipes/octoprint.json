@@ -1,0 +1,22 @@
+{
+  "name": "OctoPrint",
+  "category": "Applications",
+  "summary": "HTTP 5000 with the print stream kept open.",
+  "notes": "The interface holds a WebSocket for temperatures and progress for the whole length of a print, which can be days. The check accepts any 2xx or 3xx.",
+  "fields": {
+    "url": "https://octoprint.example.com",
+    "target": "10.0.0.10:5000",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "24h",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 340
+}

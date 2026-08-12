@@ -1,0 +1,22 @@
+{
+  "name": "Duplicati",
+  "category": "Applications",
+  "summary": "HTTP 8200 for the backup interface.",
+  "notes": "Backup jobs run on the server itself; this publishes the interface. Restrict who can reach it -- it holds the credentials for your backup destinations.",
+  "fields": {
+    "url": "https://duplicati.example.com",
+    "target": "10.0.0.10:8200",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "1h",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 359
+}

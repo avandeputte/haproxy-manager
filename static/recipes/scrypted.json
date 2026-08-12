@@ -1,0 +1,20 @@
+{
+  "name": "Scrypted",
+  "category": "Applications",
+  "summary": "HTTPS 10443 passed through, with camera streams kept open.",
+  "notes": "Scrypted serves TLS with its own certificate, so the target is https:// and is not verified. Live camera views are WebRTC and WebSocket streams held open indefinitely.",
+  "fields": {
+    "url": "https://scrypted.example.com",
+    "target": "scrypted1=https://10.0.0.10:10443",
+    "balance": "source",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "6h",
+    "health": "tcp",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 343
+}

@@ -107,7 +107,23 @@ for name, text in DOCS.items():
 # -- recipes ---------------------------------------------------------------
 # Every recipe should be listed in the documentation, and every one should come
 # with example servers -- the shape of the answer is half of what they are for.
+#
+# A recipe fills the wizard by field name, and a name the wizard does not have
+# is skipped in silence -- the recipe simply does less than it says. So the
+# names and the select values are checked against WIZ_FIELDS itself.
 import json
+wiz = (ROOT / "static" / "js" / "pages" / "services.js").read_text()
+wiz = wiz[wiz.index("export const WIZ_FIELDS"):]
+wiz = wiz[:wiz.index("\n];")]
+WIZ_KEYS, WIZ_OPTIONS = set(), {}
+for row in re.findall(r"\{k:\"(\w+)\"(.*?)\}", wiz, re.S):
+    WIZ_KEYS.add(row[0])
+    opts = re.search(r"o:\[(.*?)\]", row[1], re.S)
+    if opts:
+        WIZ_OPTIONS[row[0]] = set(re.findall(r"\"([^\"]*)\"", opts.group(1)))
+check(len(WIZ_KEYS) > 15, "could not read WIZ_FIELDS out of services.js",
+      "found %d" % len(WIZ_KEYS))
+
 recipe_files = sorted((ROOT / "static" / "recipes").glob("*.json"))
 check(len(recipe_files) > 0, "no recipes found in static/recipes")
 for path in recipe_files:
@@ -124,6 +140,18 @@ for path in recipe_files:
     check(bool(fields.get("target")), "a recipe has no example servers", rid)
     check(bool(fields.get("url")), "a recipe has no example address", rid)
     check("id" not in r, "a recipe repeats its id in the file; the filename is the id", rid)
+    for k, v in fields.items():
+        check(k in WIZ_KEYS, "a recipe sets a field the wizard does not have",
+              "%s: %s" % (rid, k))
+        if k in WIZ_OPTIONS:
+            check(str(v) in WIZ_OPTIONS[k], "a recipe sets a value not in the list",
+                  "%s: %s=%r, not one of %s"
+                  % (rid, k, v, ", ".join(sorted(WIZ_OPTIONS[k]))))
+    # An http check with a path but no interval inherits the 2s default, which
+    # is far too eager for anything that renders a page to answer.
+    if fields.get("health") == "http":
+        check(bool(fields.get("health_interval")),
+              "an http recipe does not say how often to check", rid)
 
 # -- strings the state refactor could have damaged --------------------------
 # Moving the shared variables into state.js rewrote every occurrence of their

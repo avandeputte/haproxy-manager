@@ -1,0 +1,21 @@
+{
+  "name": "CockroachDB",
+  "category": "Databases",
+  "summary": "TCP 26257 with the check aimed at the HTTP readiness endpoint.",
+  "notes": "The check runs against a different port and protocol from the traffic: /health?ready=1 on the HTTP port 8080 answers 200 only when the node is ready to serve, so a node that is starting up or draining takes no SQL connections while clients keep using 26257.",
+  "fields": {
+    "url": "tcp://0.0.0.0:26257",
+    "target": "crdb1=10.0.0.1:26257, crdb2=10.0.0.2:26257, crdb3=10.0.0.3:26257",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "check_port": "8080",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "log_health_checks": true,
+    "health": "http",
+    "health_uri": "/health?ready=1",
+    "health_status": "200",
+    "health_interval": "3s"
+  },
+  "order": 84
+}

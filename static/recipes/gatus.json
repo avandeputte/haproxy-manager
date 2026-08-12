@@ -1,0 +1,21 @@
+{
+  "name": "Gatus",
+  "category": "Applications",
+  "summary": "HTTP 8080 checked with /health.",
+  "notes": "A status page is the last thing that should be down, so check it often.",
+  "fields": {
+    "url": "https://status.example.com",
+    "target": "10.0.0.10:8080",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "timeout_server": "10m",
+    "health": "http",
+    "health_uri": "/health",
+    "health_status": "200",
+    "health_interval": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 323
+}

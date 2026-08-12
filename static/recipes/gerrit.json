@@ -1,0 +1,22 @@
+{
+  "name": "Gerrit",
+  "category": "Applications",
+  "summary": "HTTP 8080 checked against its version API.",
+  "notes": "/config/server/version answers without a login. Git over SSH on 29418 is a separate TCP service.",
+  "fields": {
+    "url": "https://gerrit.example.com",
+    "target": "10.0.0.10:8080",
+    "balance": "leastconn",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "1h",
+    "health": "http",
+    "health_uri": "/config/server/version",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 304
+}

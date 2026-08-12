@@ -1,0 +1,21 @@
+{
+  "name": "Qdrant",
+  "category": "Databases",
+  "summary": "HTTP 6333 checked with /healthz.",
+  "notes": "Vector search over a large collection can take a while, hence the timeout. The gRPC interface on 6334 is a separate TCP service.",
+  "fields": {
+    "url": "https://qdrant.example.com",
+    "target": "10.0.0.10:6333",
+    "balance": "leastconn",
+    "persistence": "none",
+    "timeout_server": "30m",
+    "health": "http",
+    "health_uri": "/healthz",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 87
+}

@@ -1,0 +1,22 @@
+{
+  "name": "Snipe-IT",
+  "category": "Applications",
+  "summary": "HTTP 80 for asset management.",
+  "notes": "Sessions are server-side, so clients are pinned. Importing a CSV of assets is one long request.",
+  "fields": {
+    "url": "https://assets.example.com",
+    "target": "10.0.0.10:80",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "30m",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 354
+}

@@ -1,0 +1,21 @@
+{
+  "name": "Meilisearch",
+  "category": "Databases",
+  "summary": "HTTP 7700 checked with /health.",
+  "notes": "/health answers without a key. Indexing a large dataset is one long request.",
+  "fields": {
+    "url": "https://search.example.com",
+    "target": "10.0.0.10:7700",
+    "balance": "leastconn",
+    "persistence": "none",
+    "timeout_server": "1h",
+    "health": "http",
+    "health_uri": "/health",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 88
+}

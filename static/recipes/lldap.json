@@ -1,0 +1,17 @@
+{
+  "name": "LLDAP (directory)",
+  "category": "Infrastructure",
+  "summary": "TCP 3890 for LDAP clients.",
+  "notes": "This is the LDAP port; the web interface on 17170 is an ordinary HTTP service worth publishing separately.",
+  "fields": {
+    "url": "tcp://0.0.0.0:3890",
+    "target": "10.0.0.1:3890",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "timeout_server": "5m",
+    "timeout_connect": "5s",
+    "health": "tcp",
+    "health_interval": "10s"
+  },
+  "order": 330
+}

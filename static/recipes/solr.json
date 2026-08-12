@@ -1,0 +1,21 @@
+{
+  "name": "Apache Solr",
+  "category": "Databases",
+  "summary": "HTTP 8983 checked with the ping handler.",
+  "notes": "/solr/admin/ping answers 200 when the core is serving. Reindexing holds a connection open for a long time.",
+  "fields": {
+    "url": "https://solr.example.com",
+    "target": "10.0.0.10:8983",
+    "balance": "leastconn",
+    "persistence": "none",
+    "timeout_server": "1h",
+    "health": "http",
+    "health_uri": "/solr/admin/ping",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 90
+}

@@ -1,0 +1,22 @@
+{
+  "name": "PeerTube",
+  "category": "Applications",
+  "summary": "HTTP 9000 with room to upload and watch.",
+  "notes": "Uploading a video and watching one are both long-lived, and live streaming uses WebSockets. Federation traffic arrives here too, so it must be reachable from the internet.",
+  "fields": {
+    "url": "https://video.example.com",
+    "target": "10.0.0.10:9000",
+    "balance": "leastconn",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "6h",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 346
+}

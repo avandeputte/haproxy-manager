@@ -1,0 +1,21 @@
+{
+  "name": "VictoriaMetrics",
+  "category": "Databases",
+  "summary": "HTTP 8428 checked with /health.",
+  "notes": "Long range queries need the timeout. Writes and reads can be split across separate services if you run the cluster version.",
+  "fields": {
+    "url": "https://vm.example.com",
+    "target": "10.0.0.10:8428",
+    "balance": "leastconn",
+    "persistence": "none",
+    "timeout_server": "30m",
+    "health": "http",
+    "health_uri": "/health",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 92
+}

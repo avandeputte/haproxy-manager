@@ -1,0 +1,22 @@
+{
+  "name": "Matomo",
+  "category": "Applications",
+  "summary": "HTTP 80 for analytics.",
+  "notes": "Tracking requests are many and small, so least connections spreads them; report generation over a long period is what the timeout is for.",
+  "fields": {
+    "url": "https://analytics.example.com",
+    "target": "10.0.0.10:80",
+    "balance": "leastconn",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "30m",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 355
+}

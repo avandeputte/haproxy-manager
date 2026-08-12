@@ -1,0 +1,22 @@
+{
+  "name": "Zabbix web interface",
+  "category": "Applications",
+  "summary": "HTTP 8080 with the session kept on one server.",
+  "notes": "The web interface only. Agent and proxy traffic arrives on 10051 and is a separate TCP service. Sessions are held server-side, so clients are pinned.",
+  "fields": {
+    "url": "https://zabbix.example.com",
+    "target": "10.0.0.10:8080",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "30m",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 320
+}

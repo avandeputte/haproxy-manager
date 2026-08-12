@@ -2,7 +2,7 @@
   "name": "Dockge",
   "category": "Applications",
   "summary": "HTTP 5001 with the WebSocket its interface needs.",
-  "notes": "Like Uptime Kuma from the same author, the whole interface runs over socket.io: a short server timeout shows up as the page going quiet. Terminal output streams over the same connection, so clients are pinned.",
+  "notes": "The whole interface runs over socket.io, so a short server timeout shows up as the page going quiet. Terminal output streams over the same connection, which is why clients are pinned to one server.",
   "fields": {
     "url": "https://dockge.example.com",
     "target": "10.0.0.10:5001",

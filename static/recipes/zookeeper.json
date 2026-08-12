@@ -1,0 +1,18 @@
+{
+  "name": "ZooKeeper",
+  "category": "Databases",
+  "summary": "TCP 2181 for clients.",
+  "notes": "Clients are given the whole ensemble and handle failover themselves, so a proxy is only useful when they cannot reach every node directly.",
+  "fields": {
+    "url": "tcp://0.0.0.0:2181",
+    "target": "zk1=10.0.0.1:2181, zk2=10.0.0.2:2181, zk3=10.0.0.3:2181",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "health": "tcp",
+    "health_interval": "5s"
+  },
+  "order": 85
+}

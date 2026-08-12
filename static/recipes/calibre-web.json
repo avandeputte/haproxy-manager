@@ -1,0 +1,22 @@
+{
+  "name": "Calibre-Web",
+  "category": "Applications",
+  "summary": "HTTP 8083 for the library.",
+  "notes": "The check accepts any 2xx or 3xx because the front page redirects to a login. Sending a book to a device converts it first, which takes a while.",
+  "fields": {
+    "url": "https://books.example.com",
+    "target": "10.0.0.10:8083",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "1h",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 345
+}

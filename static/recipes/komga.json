@@ -1,0 +1,22 @@
+{
+  "name": "Komga",
+  "category": "Applications",
+  "summary": "HTTP 25600 checked with its actuator.",
+  "notes": "/actuator/health is Spring Boot's standard endpoint and answers without a login. Reading a large comic streams a lot in one request.",
+  "fields": {
+    "url": "https://komga.example.com",
+    "target": "10.0.0.10:25600",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "1h",
+    "health": "http",
+    "health_uri": "/actuator/health",
+    "health_status": "200",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 344
+}

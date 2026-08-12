@@ -1,0 +1,22 @@
+{
+  "name": "TeamCity",
+  "category": "Applications",
+  "summary": "HTTP 8111 with build logs streaming.",
+  "notes": "Agents hold long connections and the interface streams build output, so clients are pinned and the timeout outlasts a build.",
+  "fields": {
+    "url": "https://teamcity.example.com",
+    "target": "10.0.0.10:8111",
+    "balance": "leastconn",
+    "persistence": "source",
+    "stick_type": "ip",
+    "timeout_server": "4h",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "cert_mode": "auto",
+    "http_redirect": true,
+    "timeout_connect": "5s"
+  },
+  "order": 306
+}

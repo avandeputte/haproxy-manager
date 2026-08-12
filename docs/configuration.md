@@ -80,6 +80,19 @@ it.
 | ClickHouse | HTTP 8123 checked with /ping |
 | InfluxDB | HTTP 8086 checked against /health |
 | etcd | HTTP 2379 checked against /health |
+| Memcached | TCP 11211 with a connection check |
+| Cassandra / ScyllaDB | TCP 9042 for CQL clients |
+| CouchDB | HTTP 5984 checked with /_up |
+| Neo4j (Bolt) | TCP 7687 for the Bolt protocol |
+| CockroachDB | TCP 26257 with the check aimed at the HTTP readiness endpoint |
+| ZooKeeper | TCP 2181 for clients |
+| Kafka (single broker) | TCP 9092 to one broker |
+| Qdrant | HTTP 6333 checked with /healthz |
+| Meilisearch | HTTP 7700 checked with /health |
+| Typesense | HTTP 8108 checked with /health |
+| Apache Solr | HTTP 8983 checked with the ping handler |
+| Weaviate | HTTP 8080 checked against its readiness endpoint |
+| VictoriaMetrics | HTTP 8428 checked with /health |
 | MongoDB | TCP 27017 with a connection check |
 
 **Applications**
@@ -167,6 +180,47 @@ it.
 | Loki | HTTP 3100 checked with /ready |
 | Alertmanager | HTTP 9093 checked with /-/healthy |
 | Woodpecker CI | HTTP 8000 checked with /healthz |
+| Argo CD | HTTP 8080 checked with /healthz |
+| Rancher | HTTPS 443 passed through to a self-signed backend |
+| Verdaccio (npm registry) | HTTP 4873 checked with /-/ping |
+| JFrog Artifactory | HTTP 8082 checked with its system ping |
+| Gerrit | HTTP 8080 checked against its version API |
+| Redmine | HTTP 3000 with sessions kept in place |
+| TeamCity | HTTP 8111 with build logs streaming |
+| Rocket.Chat | HTTP 3000 checked against /api/info |
+| Mastodon | HTTP 3000 checked with /health |
+| Lemmy | HTTP 8536 for the API and federation |
+| Discourse | HTTP 3000 checked with /srv/status |
+| Mailpit | HTTP 8025 for the interface, checked with /readyz |
+| Zabbix web interface | HTTP 8080 with the session kept on one server |
+| LibreNMS | HTTP 8000 for the interface |
+| Checkmk | HTTP 5000 for the interface |
+| Gatus | HTTP 8080 checked with /health |
+| Healthchecks | HTTP 8000 for cron monitoring |
+| Bambuddy (Bambu Lab printers) | HTTP 8080 with live print status kept open |
+| OctoPrint | HTTP 5000 with the print stream kept open |
+| Mainsail / Fluidd (Klipper) | HTTP 80 with Moonraker's WebSocket kept open |
+| Z-Wave JS UI | HTTP 8091 with the control WebSocket kept open |
+| Scrypted | HTTPS 10443 passed through, with camera streams kept open |
+| Komga | HTTP 25600 checked with its actuator |
+| Calibre-Web | HTTP 8083 for the library |
+| PeerTube | HTTP 9000 with room to upload and watch |
+| Owncast | HTTP 8080 with the stream and chat kept open |
+| Tandoor Recipes | HTTP 8080 for the recipe manager |
+| Grocy | HTTP 80 for household management |
+| Wallabag | HTTP 80 for read-it-later |
+| Karakeep / Hoarder | HTTP 3000 for bookmarks |
+| Planka / Focalboard | HTTP 3000 with live board updates |
+| Kimai | HTTP 8001 for time tracking |
+| Snipe-IT | HTTP 80 for asset management |
+| Matomo | HTTP 80 for analytics |
+| Plausible | HTTP 8000 checked with /api/health |
+| Ghost | HTTP 2368 for publishing |
+| Seafile | HTTP 8000 with room to sync |
+| Duplicati | HTTP 8200 for the backup interface |
+| Kopia | HTTP 51515 for the backup interface |
+| ERPNext / Frappe | HTTP 8000 with sessions pinned |
+| Moodle | HTTP 80 with sessions pinned |
 
 **Infrastructure**
 
@@ -190,6 +244,12 @@ it.
 | TrueNAS | HTTPS passed through to the appliance |
 | OPNsense / pfSense | HTTPS passed through to the firewall's own interface |
 | Unraid | HTTP 80 passed through, with the dashboard's live updates kept open |
+| Mumble | TCP 64738 for voice chat |
+| LLDAP (directory) | TCP 3890 for LDAP clients |
+| Teleport | TCP 443 passed through without terminating TLS |
+| CrowdSec local API | HTTP 8080 checked with /health |
+| Traefik dashboard | HTTP 8080 checked with /ping |
+| Nginx Proxy Manager | HTTP 81 for the administration interface |
 
 Every one carries example servers, so the shape of the answer is visible before
 you replace it with your own.
@@ -389,7 +449,7 @@ of its peers.
 ## Upgrades and the browser cache
 
 The page is served with `no-cache`, and everything it loads lives under a path
-that contains the version — `/static/v/1.59.0/js/main.js`. Those files are then
+that contains the version — `/static/v/1.60.0/js/main.js`. Those files are then
 cached for a year, which is safe because the URL changes whenever the version
 does.
 
