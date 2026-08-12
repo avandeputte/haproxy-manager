@@ -26,7 +26,10 @@ fail = []
 for i, r in enumerate(recipes):
     f = dict(r["fields"])
     f["name"] = r["id"]
-    f.setdefault("target", "10.9.0.%d:%s" % (i+1, "8080"))
+    # every recipe brings its own example servers now
+    if not f.get("target"):
+        fail.append("%s: no example servers" % r["id"])
+        f["target"] = "10.9.0.%d:8080" % (i + 1)
     # give each one a distinct listener so they can coexist
     url = f.get("url", "")
     if url.startswith("tcp://"):
@@ -61,8 +64,29 @@ def has(rid, *needles):
     return not missing
 
 print()
+# the example servers must survive into the backend, with the right count
+counts = {"web":1, "web-websockets":2, "patroni-primary":3, "patroni-replicas":3,
+          "galera":3, "postgresql-plain":1, "redis":1, "mongodb":1,
+          "elasticsearch":3, "minio":4, "rabbitmq":3, "kubernetes-api":3,
+          "smtp":2, "ldap":2, "proxmox":2, "nextcloud":2, "home-assistant":1,
+          "grafana":2, "prometheus":1, "gitea":1, "gitlab":1, "jellyfin":1,
+          "vaultwarden":1, "mattermost":2, "keycloak":2, "docker-registry":1}
+for rid, want in counts.items():
+    block = next((c for c in cfg.split("\nbackend ") if c.startswith("be_"+rid+"\n")), "")
+    got = block.count("\n    server ")
+    print("  %-22s %d server(s)%s" % (rid, got, "" if got == want else "  EXPECTED %d" % want))
+    if got != want:
+        fail.append("%s: %d servers, expected %d" % (rid, got, want))
+
+print()
 checks = [
   ("patroni-primary",  "option httpchk", "/primary", "port 8008"),
+  ("keycloak",         "option httpchk", "/health/ready", "port 9000"),
+  ("proxmox",          "ssl"),
+  ("nextcloud",        "/status.php", "timeout server 1h"),
+  ("grafana",          "/api/health"),
+  ("jellyfin",         "timeout server 4h"),
+  ("ldap",             "check"),
   ("patroni-replicas", "option httpchk", "/replica", "port 8008"),
   ("galera",           "option mysql-check", "balance source", "stick"),
   ("postgresql-plain", "option pgsql-check"),

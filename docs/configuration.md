@@ -60,20 +60,54 @@ right answer for nearly all of them. **Start from a recipe** fills those in and
 leaves the two things only you know: the name to publish and the servers behind
 it.
 
+**Web**
+
 | Recipe | What it sets up |
 | --- | --- |
-| Web application | HTTP or HTTPS with a check on `/` |
-| Web application with WebSockets | as above, with a server timeout long enough that idle sockets survive |
-| PostgreSQL — Patroni, writes | TCP 5432 to the leader, found by asking Patroni's API on 8008 |
-| PostgreSQL — Patroni, read-only | TCP 5433 across the replicas only |
-| MariaDB / MySQL — Galera | TCP 3306 with source stickiness and a MySQL login check |
-| PostgreSQL — single server | TCP 5432 with a PostgreSQL login check |
+| Web application | An ordinary HTTP or HTTPS site with a health check on / |
+| Web application with WebSockets | As above, but connections are allowed to stay open for hours |
+
+**Databases**
+
+| Recipe | What it sets up |
+| --- | --- |
+| PostgreSQL — Patroni, writes | TCP 5432 to whichever node is the leader, found by asking Patroni |
+| PostgreSQL — Patroni, read-only | TCP 5433 spread across the replicas, never the leader |
+| MariaDB / MySQL — Galera cluster | TCP 3306 with every client pinned to one node |
+| PostgreSQL — single server or streaming replica | TCP 5432 with a PostgreSQL login check |
 | Redis / Valkey | TCP 6379 with a connection check |
-| Elasticsearch / OpenSearch | HTTP checked against `/_cluster/health` |
-| MinIO / S3-compatible | HTTP checked against `/minio/health/live`, long upload timeout |
-| RabbitMQ | TCP 5672 with timeouts for long-lived AMQP connections |
-| Kubernetes API servers | TCP 6443, passed through rather than terminated |
+| MongoDB | TCP 27017 with a connection check |
+
+**Applications**
+
+| Recipe | What it sets up |
+| --- | --- |
+| Elasticsearch / OpenSearch | HTTP 9200 checked against the cluster health endpoint |
+| MinIO / S3-compatible storage | HTTP with MinIO's liveness endpoint and long timeouts |
+| RabbitMQ (AMQP) | TCP 5672 for AMQP clients |
+| Nextcloud | HTTP with long timeouts and clients pinned to one server |
+| Home Assistant | HTTP 8123, with the WebSocket the interface depends on |
+| Grafana | HTTP 3000 checked against its own health endpoint |
+| Prometheus | HTTP 9090 checked against /-/healthy |
+| Gitea / Forgejo | HTTP 3000 with room for a large clone |
+| GitLab | HTTP with the timeouts a git push needs |
+| Jellyfin / Emby | HTTP 8096 with timeouts long enough to watch a film |
+| Vaultwarden / Bitwarden | HTTP with the notification WebSocket kept alive |
+| Mattermost | HTTP 8065, sticky, with WebSockets |
+| Keycloak | HTTP 8080 checked on its separate management port |
+| Docker registry | HTTP 5000 with room to push a large image |
+
+**Infrastructure**
+
+| Recipe | What it sets up |
+| --- | --- |
+| LDAP directory | TCP 389 across the directory servers |
+| Proxmox VE | HTTPS 8006, passed through to a self-signed backend |
+| Kubernetes API servers | TCP 6443 across the control plane |
 | SMTP relay | TCP 25 to a pool of mail servers |
+
+Every one carries example servers, so the shape of the answer is visible before
+you replace it with your own.
 
 The interesting ones are the databases, because the right configuration is not
 obvious:
@@ -253,7 +287,7 @@ of its peers.
 ## Upgrades and the browser cache
 
 The page is served with `no-cache`, and everything it loads lives under a path
-that contains the version — `/static/v/1.55.0/js/main.js`. Those files are then
+that contains the version — `/static/v/1.56.0/js/main.js`. Those files are then
 cached for a year, which is safe because the URL changes whenever the version
 does.
 

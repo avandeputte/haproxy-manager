@@ -104,6 +104,19 @@ for name, text in DOCS.items():
         check(quoted == version, "%s names an old package file" % name,
               "says %s, VERSION is %s" % (quoted, version))
 
+# -- recipes ---------------------------------------------------------------
+# Every recipe should be listed in the documentation, and every one should come
+# with example servers -- the shape of the answer is half of what they are for.
+recipe_block = re.search(r"RECIPES = \[(.*?)\n\]\n", APP, re.S)
+check(recipe_block is not None, "the recipe catalogue could not be found")
+if recipe_block:
+    ns = {}
+    exec(recipe_block.group(0), ns)
+    for r in ns["RECIPES"]:
+        check(r["name"] in ALL_DOCS, "a recipe is undocumented", r["name"])
+        check(bool(r["fields"].get("target")), "a recipe has no example servers", r["id"])
+        check(bool(r["fields"].get("url")), "a recipe has no example address", r["id"])
+
 # -- strings the state refactor could have damaged --------------------------
 # Moving the shared variables into state.js rewrote every occurrence of their
 # names, including ones inside strings: className="who" became
