@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.64.0_all.deb
+sudo apt-get install -y ./haproxy-manager_1.65.0_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -260,7 +260,9 @@ Three things follow from it:
 - **A node cannot push a configuration older than the one already there.** An
   isolated node that was edited and then reconnected would otherwise overwrite
   the current configuration with its own; it is refused, with both revisions in
-  the message, and can still be forced through deliberately.
+  the message. To discard what is on the other node instead, **Overwrite** on
+  the Cluster page lifts this node's revision above every other node's and
+  pushes, so they end up on the same configuration and the same revision.
 - **It heals itself.** With *Keep the nodes in step* on, the background health
   check already asks every node how it is; any node reporting an older revision
   is brought up to date from the node holding the newest, and a node that has

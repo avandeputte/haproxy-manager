@@ -153,7 +153,7 @@ def mesh_for(cfg, target):
     return out
 
 
-def sync_push(cfg, only=None, include_peers=True):
+def sync_push(cfg, only=None, include_peers=True, force=False):
     """Push to every enabled peer (or just one), in parallel.
 
     The membership list travels with every push, not just an explicit one from
@@ -171,6 +171,10 @@ def sync_push(cfg, only=None, include_peers=True):
         return {"ok": False, "error": "no peers configured (Advanced > Keepalived > Peer sync)"}
 
     base = shared_payload(cfg)
+    if force:
+        # Belt and braces: the revision has already been lifted above every
+        # node's, so this only matters if one of them moved in between.
+        base = dict(base, force=True)
 
     def send(p):
         payload = dict(base, peers=mesh_for(cfg, p)) if include_peers else base
@@ -192,6 +196,49 @@ def sync_push(cfg, only=None, include_peers=True):
                           "will not appear in their cluster view. Set \"This node's URL\" under "
                           "Cluster > This node.")
     return out
+
+
+def make_newest(cfg):
+    """Put this node's configuration ahead of every other node's.
+
+    What "overwrite the others" has to mean. A node that was edited while it
+    was passive holds a higher revision than the node you are pushing from, and
+    refusing that push is the whole point of the revision -- so forcing it
+    through by ignoring the check would leave the cluster agreeing on content
+    while disagreeing about who is newest, and the next round would undo it.
+
+    Instead this node's revision is lifted above the highest any node reports,
+    which makes the ordinary push legitimate and leaves every node on the same
+    number afterwards. The content does not change, so the fingerprint does
+    not either.
+    """
+    highest = int(cfg["_meta"].get("shared_rev") or 0)
+    seen = []
+    for peer in enabled_peers(cfg):
+        url = (peer.get("url") or "").rstrip("/")
+        try:
+            r = _requests.get(url + "/api/status",
+                              headers={"X-API-Key": peer.get("api_key", "")},
+                              timeout=(PEER_CONNECT_TIMEOUT, PEER_READ_TIMEOUT),
+                              verify=bool(peer.get("verify_tls")))
+            if r.status_code == 200:
+                rev = int(r.json().get("config_rev") or 0)
+                seen.append((peer.get("name") or url, rev))
+                highest = max(highest, rev)
+        except Exception as e:
+            # A node that cannot be asked cannot be outranked either. Go above
+            # what is known and say so: it is still refused if it turns out to
+            # be ahead, rather than being overwritten by a smaller number.
+            log.warning("overwriting: %s did not report its revision (%s)",
+                        peer.get("name") or url, e)
+    with _lock:
+        cur = load_config()
+        cur["_meta"]["shared_fp"] = shared_fingerprint(cur)
+        cur["_meta"]["shared_rev"] = highest + 1
+        save_config(cur)
+    log.info("overwriting: this node moves to revision %d, above %s",
+             highest + 1, ", ".join("%s at %d" % x for x in seen) or "nothing reported")
+    return load_config()
 
 
 def reconcile(cfg, nodes):
@@ -301,9 +348,22 @@ def catch_up(cfg):
 
 @app.post("/api/sync/push")
 def api_sync_push():
+    """Push the shared configuration to the other nodes.
+
+    With "overwrite", this node's configuration is first made the newest, so a
+    node that was edited while it was passive takes it instead of refusing it.
+    That is the only way to discard a change made on the wrong node.
+    """
     body = request.get_json(silent=True) or {}
-    return jsonify(sync_push(load_config(), only=body.get("peer"),
-                             include_peers=bool(body.get("include_peers", True))))
+    cfg = load_config()
+    if body.get("overwrite"):
+        if _requests is None:
+            return jsonify({"ok": False,
+                            "error": "python3-requests is not installed on this node"})
+        cfg = make_newest(cfg)
+    return jsonify(sync_push(cfg, only=body.get("peer"),
+                             include_peers=bool(body.get("include_peers", True)),
+                             force=bool(body.get("overwrite"))))
 
 @app.get("/api/sync/pull")
 def api_sync_pull():
@@ -359,9 +419,11 @@ def _receive_locked(cfg, data, conf, source=None):
             "ok": False, "node": socket.gethostname(), "stale": True,
             "their_rev": theirs, "my_rev": mine,
             "error": "%s holds revision %d and was offered revision %d, which is "
-                     "older. Apply from the node that has the newer configuration, "
-                     "or overwrite deliberately from the Cluster page."
-                     % (socket.gethostname(), mine, theirs)}), 409
+                     "older -- so %s was changed after the node pushing this. "
+                     "Apply from whichever node is right; to discard what is on "
+                     "%s, use Overwrite on the Cluster page."
+                     % (socket.gethostname(), mine, theirs, socket.gethostname(),
+                        socket.gethostname())}), 409
 
     # Gathered before anything is replaced: it is what this node owns.
     mine_ids = local_only_ids(cfg)
@@ -430,7 +492,7 @@ def _receive_locked(cfg, data, conf, source=None):
     # change of our own, so the sender and this node end up on the same
     # revision.
     cfg["_meta"]["shared_fp"] = shared_fingerprint(cfg)
-    cfg["_meta"]["shared_rev"] = max(theirs, mine if data.get("force") else 0)
+    cfg["_meta"]["shared_rev"] = theirs
     save_config(cfg)
     if cfg["_meta"]["shared_fp"] != (data.get("fp") or cfg["_meta"]["shared_fp"]):
         # Both sides hash the same shared view, so this should not happen. Say

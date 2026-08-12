@@ -394,7 +394,14 @@ which node holds what.
 - A node offered a configuration **older** than the one it already has refuses
   it, and says both revisions. Without that, an isolated node that was edited
   and later reconnected would overwrite the current configuration with its own.
-  The push can be repeated with `force` to overwrite deliberately.
+- **Overwrite** is how you discard a change made on the wrong node. Editing a
+  passive node moves it ahead of the active one, so an ordinary Sync from the
+  active node is refused — correctly, because it is older. **Cluster → Nodes**
+  offers *Overwrite* beside each node and *Overwrite every node* below the
+  list. It lifts this node's revision above every other node's and then pushes
+  normally, so afterwards every node holds the same configuration **and** the
+  same revision; nothing is left disagreeing about who is newest. What was on
+  the other node is discarded.
 - **Keep the nodes in step** (Cluster → Nodes) does three things: pushes after
   every Apply, brings any node reporting an older revision up to date in the
   background, and takes the newest configuration from the cluster when this
@@ -488,7 +495,7 @@ of its peers.
 ## Upgrades and the browser cache
 
 The page is served with `no-cache`, and everything it loads lives under a path
-that contains the version — `/static/v/1.64.0/js/main.js`. Those files are then
+that contains the version — `/static/v/1.65.0/js/main.js`. Those files are then
 cached for a year, which is safe because the URL changes whenever the version
 does.
 

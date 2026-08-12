@@ -179,6 +179,18 @@ export function peersCard(peers,loc){
         catch(e){out.textContent=e.message;}
       }));
       act.appendChild(document.createTextNode(" "));
+      /* For the case an ordinary Sync cannot handle: the other node was edited
+         and holds a newer configuration, so it refuses this one. This discards
+         what is there and replaces it with what is here. */
+      act.appendChild(btn("Overwrite","sm warn",async()=>{
+        if(!confirm("Replace the configuration on "+p.name+" with this node's?\n\n"+
+                    "Anything changed on "+p.name+" and not applied from here is discarded."))return;
+        out.textContent="overwriting...";
+        try{const r=await api("sync/push","POST",{peer:p.id,include_peers:true,overwrite:true});
+          out.textContent=r.ok?"overwritten":("failed: "+(r.error||""));}
+        catch(e){out.textContent=e.message;}
+      }));
+      act.appendChild(document.createTextNode(" "));
       act.appendChild(btn("Edit","sm",()=>peerEditor(p,()=>route())));
       act.appendChild(document.createTextNode(" "));
       act.appendChild(btn("Remove","sm dngr",async()=>{
@@ -221,6 +233,19 @@ export function peersCard(peers,loc){
                                                               :'<span class="pill down">'+esc(x.error||"failed")+"</span>")).join("<br>")
                     ||esc(r.error||"done");
       if(r.warning)msg.innerHTML+='<div style="margin-top:8px">! '+esc(r.warning)+"</div>";
+    }catch(e){msg.textContent=e.message;}
+  }));
+  foot.appendChild(document.createTextNode(" "));
+  foot.appendChild(btn("Overwrite every node","dngr",async()=>{
+    if(!confirm("Replace the configuration on every other node with this one's?\n\n"+
+                "A node that was edited holds a newer configuration and normally refuses "+
+                "this push. Overwriting discards those changes."))return;
+    msg.textContent="Overwriting every node...";
+    try{
+      const r=await api("sync/push","POST",{include_peers:true,overwrite:true});
+      msg.innerHTML=(r.results||[]).map(x=>esc(x.name)+": "+(x.ok?'<span class="pill up">ok</span>'
+                                                              :'<span class="pill down">'+esc(x.error||"failed")+"</span>")).join("<br>")
+                    ||esc(r.error||"done");
     }catch(e){msg.textContent=e.message;}
   }));
   foot.appendChild(msg);
@@ -314,7 +339,43 @@ export async function clusterCard(fresh){
     const el=document.createElement("div");el.className="hint";el.style.padding="8px 16px";
     el.innerHTML="! "+esc(w);bd.appendChild(el);
   });
+  if(!s.config_agreed)bd.appendChild(configDiff(cl.nodes));
   card.appendChild(bd);return card;
+}
+
+/* Which parts of the configuration the nodes disagree about, and who holds
+   what. "They differ" is not something anyone can act on; "they differ in
+   acme.certificates, and node 2 is the odd one out" is. */
+function configDiff(nodes){
+  const wrap=document.createElement("div");wrap.style.padding="0 16px 12px";
+  const have=nodes.filter(n=>n.reachable&&n.config_parts&&Object.keys(n.config_parts).length);
+  if(have.length<2){
+    wrap.innerHTML='<div class=sub>Not every node reports what it holds in detail '+
+      "(they are not all on the same version), so there is nothing to compare part by part.</div>";
+    return wrap;
+  }
+  const keys=[...new Set(have.flatMap(n=>Object.keys(n.config_parts)))].sort()
+    .filter(k=>new Set(have.map(n=>n.config_parts[k])).size>1);
+  if(!keys.length){
+    wrap.innerHTML='<div class=sub>Every part matches, so the difference is in something '+
+      "not compared part by part. Refresh; if it persists, the nodes are at different revisions.</div>";
+    return wrap;
+  }
+  /* One short tag per distinct value, so the odd one out is visible without
+     reading hashes: A, B, C rather than 16 hex characters each. */
+  const tag=(k,v)=>{
+    const seen=[...new Set(have.map(n=>n.config_parts[k]))];
+    return String.fromCharCode(65+seen.indexOf(v));
+  };
+  wrap.innerHTML="<div class=fl style='margin-bottom:6px'>Where they differ</div>"+
+    "<table><thead><tr><th>Part</th>"+have.map(n=>"<th>"+esc(n.hostname||n.name)+"</th>").join("")+
+    "</tr></thead><tbody>"+
+    keys.map(k=>"<tr><td class=mono>"+esc(k)+"</td>"+
+      have.map(n=>'<td><span class="pill '+(tag(k,n.config_parts[k])==="A"?"up":"warn")+'">'+
+                  tag(k,n.config_parts[k])+"</span></td>").join("")+"</tr>").join("")+
+    "</tbody></table><div class=sub style='margin-top:6px'>Same letter, same contents. "+
+    "Apply from the node that is right, or use Overwrite under Nodes to replace what is on the others.</div>";
+  return wrap;
 }
 
 /* ---- keepalived diagnostics ---- */

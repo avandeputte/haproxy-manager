@@ -19,7 +19,11 @@ _cluster_cache_lock = threading.Lock()
 
 
 def _differing_parts(nodes):
-    """Which collections the nodes do not agree on, named."""
+    """Which collections the nodes do not agree on, named.
+
+    A node running a version that does not report its parts is left out of the
+    comparison rather than counted as differing from everything.
+    """
     parts = [n.get("config_parts") or {} for n in nodes if n.get("config_parts")]
     if len(parts) < 2:
         return ""
@@ -77,24 +81,29 @@ def cluster_snapshot(cfg=None):
     fps = {n.get("config_fp") for n in reachable if n.get("config_fp")}
     behind = [n for n in reachable if n.get("config_fp") and (n.get("config_rev") or 0) < newest]
     agree = len(fps) <= 1
+    # "The nodes disagree" is not something anyone can act on. Which part they
+    # disagree about very nearly always is, so it is worked out once and said
+    # in every case, not only in the tidy one.
+    differs_in = _differing_parts(reachable)
     if behind:
         warnings.append(
-            "%s %s an older configuration (revision %s against %d). "
+            "%s %s an older configuration (revision %s against %d)%s. "
             "%s serve it if %s take%s the virtual IP; push from the node that has "
             "the newest one."
             % (", ".join(n["name"] for n in behind),
                "holds" if len(behind) == 1 else "hold",
                ", ".join(str(n.get("config_rev") or 0) for n in behind), newest,
+               differs_in,
                "It will" if len(behind) == 1 else "They will",
                "it" if len(behind) == 1 else "they", "s" if len(behind) == 1 else ""))
     elif not agree:
         # Same revision, different content: two nodes were changed while they
-        # could not see each other. Nothing here can decide which is right, but
-        # naming the part that differs usually explains it at a glance.
+        # could not see each other. Nothing here can decide which is right.
         warnings.append(
             "The nodes hold different configurations at the same revision (%d), "
             "so they were changed independently%s. Choose the node that is right "
-            "and apply from it." % (newest, _differing_parts(reachable)))
+            "and apply from it, or use Overwrite to replace what is on the others."
+            % (newest, differs_in))
 
     # Each node reports what it can see, so a node that vanishes is reported
     # by each of its peers -- which also tells you who lost sight of it.
@@ -141,7 +150,7 @@ def cluster_snapshot(cfg=None):
                     # and to offer to fix it.
                     "config_rev": newest, "config_agreed": bool(agree and not behind),
                     "config_behind": [n["name"] for n in behind],
-                    "config_differs_in": _differing_parts(reachable)},
+                    "config_differs_in": differs_in},
         "taken": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
     with _cluster_cache_lock:
