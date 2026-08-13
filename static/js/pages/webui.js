@@ -64,6 +64,33 @@ export async function renderWebui(){
   /* Where the names point. A name resolving somewhere this node is not looks
      exactly like the node being down, and no amount of looking at HAProxy
      shows it. */
+  /* Why the Services page can show the same address twice: more than one rule
+     routes to this node's UI service. Both send traffic to the same pool, so
+     nothing is broken -- but two rows for one service is a puzzle. */
+  if((cur.extra_rules||[]).length){
+    const box=document.createElement("div");box.className="hint";
+    box.style.cssText="margin-bottom:14px";
+    box.innerHTML="This node has "+(cur.extra_rules.length+1)+" rules routing to its own "+
+      "UI service, which is why it appears more than once on the Services page. Both send "+
+      "traffic to the same place, so nothing is broken; the extra "+
+      (cur.extra_rules.length===1?"one is":"ones are")+" left over from an older version. "+
+      "The extra: "+cur.extra_rules.map(r=>"<span class=mono>"+esc(r.name)+"</span>"+
+        (r.hosts&&r.hosts.length?" ("+r.hosts.map(esc).join(", ")+")":"")).join(", ")+".";
+    const b=btn("Remove the extra rule"+(cur.extra_rules.length===1?"":"s"),"sm warn",async()=>{
+      if(!confirm("Remove "+cur.extra_rules.length+" leftover rule"+
+                  (cur.extra_rules.length===1?"":"s")+" routing to this node's UI service?\n\n"+
+                  "The rule this node uses is kept, and the service is rebuilt and applied "+
+                  "afterwards."))return;
+      b.disabled=true;b.textContent="removing...";
+      try{const r=await api("webui/tidy","POST",{});
+        await renderWebui();
+        if(r.applied&&r.applied.ok===false)alert("Removed, but Apply failed: "+(r.applied.error||""));
+      }catch(e){alert(e.message);b.disabled=false;}
+    });
+    const row=document.createElement("div");row.style.marginTop="8px";row.appendChild(b);
+    box.appendChild(row);
+    bd.appendChild(box);
+  }
   (cur.address_checks||[]).forEach(c=>{
     const el=document.createElement("p");el.className="hint";
     el.style.cssText="margin-bottom:14px;color:var(--drift)";

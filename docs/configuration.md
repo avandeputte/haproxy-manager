@@ -350,6 +350,13 @@ The login is node-local: set it on each node.
 publishes this UI as a normal service with a certificate, so you stop using
 plain HTTP.
 
+**If the service appears more than once on the Services page**, more than one
+rule routes to it — a leftover from a version that could build it twice. Both
+send traffic to the same pool, so nothing is broken and nothing is served
+twice, but two rows for one service is a puzzle rather than information. Web UI
+access names the extras and offers to remove them: the rule this node uses is
+kept, the service is rebuilt, and the result applied.
+
 The page says which names this node **actually answers for**, read from the
 objects rather than from the setting that made them. The watchdog checks the
 same thing every round: if a configured address stops being routed, it rebuilds
@@ -547,7 +554,7 @@ of its peers.
 ## Upgrades and the browser cache
 
 The page is served with `no-cache`, and everything it loads lives under a path
-that contains the version — `/static/v/1.78.2/js/main.js`. Those files are then
+that contains the version — `/static/v/1.79.0/js/main.js`. Those files are then
 cached for a year, which is safe because the URL changes whenever the version
 does.
 

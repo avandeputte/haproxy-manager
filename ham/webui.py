@@ -61,6 +61,15 @@ def build_webui(cfg, pub, mode="auto", http_redirect=True):
     mine = webui_object_ids(cfg)
     mine |= {c["id"] for c in cfg["acme"]["certificates"] if is_webui_cert(c)}
     move_to_local(cfg, mine)
+    # Record which rule this node uses, here rather than only in the request
+    # handler: this also runs when a configuration arrives from another node,
+    # and a stale id would make the rule actually in use look like a leftover.
+    local_hp = cfg["local"].get("haproxy") or {}
+    pools = {b["id"] for b in local_hp.get("backends") or [] if b.get("name") == WEBUI_NAME}
+    ours = [r for r in local_hp.get("rules") or [] if r.get("backend") in pools]
+    if ours:
+        best = max(ours, key=lambda r: len(r.get("conditions") or []))
+        cfg["local"].setdefault("web_ui", {})["rule_id"] = best["id"]
     return acts, warns
 
 
@@ -135,6 +144,78 @@ def webui_address_checks(cfg):
     return out
 
 
+def extra_ui_rules(cfg):
+    """Rules routing to this node's UI service other than the one it uses.
+
+    A leftover from when the service could be built twice: both rules point at
+    the same pool, so nothing is broken and nothing is served twice -- HAProxy
+    takes the first that matches -- but the Services page honestly shows one
+    row per rule, and two rows for one service is a puzzle rather than
+    information.
+
+    Only rules whose pool is this node's UI service and which are this node's
+    own are considered, so nothing a person made by hand is ever in the list.
+    """
+    all_of_it = merged(cfg)["haproxy"]
+    pools = {b["id"] for b in all_of_it.get("backends") or [] if b.get("name") == WEBUI_NAME}
+    mine = {r.get("id") for r in (cfg["local"].get("haproxy") or {}).get("rules") or []}
+    ours = [r for r in all_of_it.get("rules") or []
+            if r.get("backend") in pools and r.get("id") in mine]
+    keep = (cfg["local"].get("web_ui") or {}).get("rule_id") or ""
+    if keep not in {r.get("id") for r in ours}:
+        # The recorded id names nothing here. Rather than call every rule a
+        # leftover, keep the one testing the most host names -- the one built
+        # for both this node's address and the shared one.
+        keep = max(ours, key=lambda r: len(r.get("conditions") or []),
+                   default={}).get("id", "")
+    out = []
+    for rule in ours:
+        if rule.get("id") != keep:
+            hosts = [c.get("value") for c in all_of_it.get("conditions") or []
+                     if c.get("id") in (rule.get("conditions") or [])
+                     and c.get("type") == "host_matches"]
+            out.append({"id": rule.get("id"), "name": rule.get("name"), "hosts": hosts})
+    return out
+
+
+@app.post("/api/webui/tidy")
+def api_webui_tidy():
+    """Remove the leftover rules, on request rather than on sight.
+
+    They are this node's own objects, they route to this node's own pool, and
+    the one being kept is the one recorded in the setting -- so what goes is
+    not a judgement about ownership. It is still asked for rather than done
+    quietly: removing objects from a working configuration is exactly what
+    should require somebody to have decided.
+    """
+    with _lock:
+        cfg = load_config()
+        extras = extra_ui_rules(cfg)
+        if not extras:
+            return jsonify({"ok": True, "removed": [], "note": "There was nothing to tidy."})
+        promote_local(cfg)                       # where _remove_service_objects looks
+        removed = []
+        for rule in extras:
+            removed += _remove_service_objects(cfg["haproxy"], rule["id"])
+        s = cfg["local"].get("web_ui") or {}
+        pub, err = wizard._split_url(s.get("url"), "x", default_scheme="https",
+                                     allow=("http", "https"))
+        if not err:
+            # Rebuild afterwards, so anything the removal shared with the rule
+            # that is being kept is put straight back.
+            build_webui(cfg, pub, "auto" if s.get("certificate") == "new"
+                        else s.get("certificate", "auto"), True)
+        else:
+            move_to_local(cfg, webui_object_ids(cfg))
+        save_config(cfg)
+    log.warning("removed %d leftover rule(s) for this node's own UI service", len(extras))
+    res = apply.do_apply(load_config())
+    return jsonify({"ok": True, "removed": removed,
+                    "applied": {"ok": res.get("ok"), "error": res.get("error")},
+                    "note": "Removed %d leftover rule%s." % (len(extras),
+                                                             "" if len(extras) == 1 else "s")})
+
+
 def webui_missing_hosts(cfg):
     """Addresses this node is configured to answer for and currently does not."""
     s = cfg["local"].get("web_ui") or {}
@@ -201,6 +282,9 @@ def api_webui_get():
         # and not another is not a proxy problem: it is a name resolving
         # somewhere this node is not.
         "address_checks": webui_address_checks(cfg),
+        # Rules for this node's own UI beyond the one it uses -- why the
+        # Services page can show the same address twice.
+        "extra_rules": extra_ui_rules(cfg),
     })
 
 
