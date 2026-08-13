@@ -18,7 +18,7 @@ export function sparkline(values, opts){
   const area=pts+" "+(pad+(vals.length-1)*step).toFixed(1)+","+(h-pad)+" "+pad+","+(h-pad);
   return '<svg class=spark width="'+w+'" height="'+h+'" viewBox="0 0 '+w+" "+h+
     '" preserveAspectRatio=none role=img aria-label="'+esc(o.label||"")+'">'+
-    '<polygon points="'+area+'" fill="'+(o.fill||"rgba(62,207,168,0.18)")+'"/>'+
+    '<polygon points="'+area+'" fill="'+(o.fill||"var(--spark-fill)")+'"/>'+
     '<polyline points="'+pts+'" fill=none stroke="'+(o.stroke||"var(--up)")+
       '" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>';
 }
@@ -35,7 +35,7 @@ export function trafficSpark(series, opts){
   let html='<span class=sparkwrap>'+sparkline(req,{width:w,height:h,
     label:total+" requests"});
   if(bad)html+=sparkline(err,{width:w,height:h,stroke:"var(--down)",
-    fill:"rgba(220,80,80,0.22)",label:bad+" server errors"});
+    fill:"var(--spark-fill-bad)",label:bad+" server errors"});
   html+="</span>";
   return html;
 }

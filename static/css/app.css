@@ -11,8 +11,49 @@
   --drift:#b26a00;       /* unapplied changes */
   --down:#b3402e;
   --up:#2e7d4f;
+  --field:#ffffff;       /* the inside of an input */
+  --pill-up:#e4f1e9;
+  --pill-down:#f7e6e2;
+  --pill-warn:#f6ecdd;
+  --pill-off:#eceff0;
+  --note-bg:#f6ecdd;     /* the read-only banner */
+  --note-edge:#e3cfa8;
+  --note-ink:#7a4d00;
+  --on-solid:#ffffff;    /* text on a filled button */
+  --shade:rgba(15,25,30,.55);   /* behind a dialog */
+  --spark-fill:rgba(62,207,168,.18);
+  --spark-fill-bad:rgba(220,80,80,.22);
   --mono:ui-monospace,"SF Mono","Cascadia Code",Consolas,Menlo,monospace;
   --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+
+/* Dark. The sidebar and the log view were always dark, so they are unchanged;
+   what turns over is the content beside them. Applied by a data-theme on the
+   root element, and by the operating system's preference when the setting is
+   left at "system" -- which is what data-theme="" means here. */
+:root[data-theme=dark]{
+  --paper:#12191c;
+  --card:#182226;
+  --ink:#dbe5e4;
+  --mist:#93a5a5;
+  --hair:#2a373b;
+  --line:#3ecfa8;
+  --line-2:#2fae8d;
+  --drift:#e0a44a;
+  --down:#f08a72;
+  --up:#5fc98d;
+  --field:#0f171a;
+  --pill-up:#173026;
+  --pill-down:#33201d;
+  --pill-warn:#332a1a;
+  --pill-off:#232e31;
+  --note-bg:#2a2317;
+  --note-edge:#4a3c22;
+  --note-ink:#e8c07d;
+  --on-solid:#0f171a;
+  --shade:rgba(0,0,0,.62);
+  --spark-fill:rgba(62,207,168,.16);
+  --spark-fill-bad:rgba(240,138,114,.20);
 }
 *{box-sizing:border-box;margin:0}
 body{font:14px/1.5 var(--sans);color:var(--ink);background:var(--paper);display:flex;min-height:100vh}
@@ -60,7 +101,7 @@ button{font:inherit;cursor:pointer}
 .chip.drift{border-color:var(--drift);color:var(--drift)}
 #content{padding:22px 24px;max-width:1140px;width:100%}
 #banner{padding:12px 24px 0;max-width:1140px;width:100%}
-#banner .ro{background:#f6ecdd;border:1px solid #e3cfa8;color:#7a4d00;border-radius:6px;padding:11px 14px;font-size:13px;display:flex;gap:12px;align-items:flex-start}
+#banner .ro{background:var(--note-bg);border:1px solid var(--note-edge);color:var(--note-ink);border-radius:6px;padding:11px 14px;font-size:13px;display:flex;gap:12px;align-items:flex-start}
 #banner .ro b{display:block;margin-bottom:2px}
 
 /* ---- generic ---- */
@@ -79,17 +120,17 @@ td .sub{color:var(--mist);font-size:12px}
 .empty{padding:26px 16px;color:var(--mist);text-align:center}
 .btn{border:1px solid var(--hair);background:var(--card);color:var(--ink);padding:6px 12px;border-radius:4px;font-size:13px}
 .btn:hover{border-color:var(--mist)}
-.btn.pri{background:var(--line);border-color:var(--line);color:#fff}
+.btn.pri{background:var(--line);border-color:var(--line);color:var(--on-solid)}
 .btn.pri:hover{background:var(--line-2)}
-.btn.warn{background:var(--drift);border-color:var(--drift);color:#fff}
+.btn.warn{background:var(--drift);border-color:var(--drift);color:var(--on-solid)}
 .btn.dngr{color:var(--down);border-color:var(--hair)}
 .btn.sm{padding:3px 8px;font-size:12px}
 .btn[disabled]{opacity:.5;cursor:default}
 .pill{display:inline-block;padding:2px 8px;border-radius:10px;font:12px var(--mono)}
-.pill.up{background:#e4f1e9;color:var(--up)}
-.pill.down{background:#f7e6e2;color:var(--down)}
-.pill.off{background:#eceff0;color:var(--mist)}
-.pill.warn{background:#f6ecdd;color:var(--drift)}
+.pill.up{background:var(--pill-up);color:var(--up)}
+.pill.down{background:var(--pill-down);color:var(--down)}
+.pill.off{background:var(--pill-off);color:var(--mist)}
+.pill.warn{background:var(--pill-warn);color:var(--drift)}
 .logbar{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--hair)}
 .logbar label{display:flex;gap:5px;align-items:center;font-size:13px;white-space:nowrap}
 .logview{margin:0;max-height:62vh;overflow:auto;background:#10191c;padding:10px 0}
@@ -116,11 +157,11 @@ pre{font:12px/1.5 var(--mono);background:#0f191e;color:#d5e2e0;padding:14px;bord
 .frm{display:grid;grid-template-columns:190px 1fr;gap:12px 16px;align-items:start}
 .frm label.fl{font:600 12px var(--mono);color:var(--mist);padding-top:7px;text-align:right}
 .frm input[type=text],.frm input[type=number],.frm input[type=password],.frm select,.frm textarea{
-  width:100%;max-width:460px;padding:7px 9px;border:1px solid var(--hair);border-radius:4px;font:13px var(--sans);background:#fff;color:var(--ink)}
+  width:100%;max-width:460px;padding:7px 9px;border:1px solid var(--hair);border-radius:4px;font:13px var(--sans);background:var(--field);color:var(--ink)}
 .frm textarea{font-family:var(--mono);font-size:12.5px;min-height:74px}
 .frm input:focus,.frm select:focus,.frm textarea:focus,button:focus-visible{outline:2px solid var(--line);outline-offset:1px}
 .ckbox{display:flex;align-items:center;gap:8px;padding-top:7px}
-.cklist{border:1px solid var(--hair);border-radius:4px;max-width:460px;max-height:170px;overflow:auto;padding:6px 8px;background:#fff}
+.cklist{border:1px solid var(--hair);border-radius:4px;max-width:460px;max-height:170px;overflow:auto;padding:6px 8px;background:var(--field)}
 .cklist label{display:flex;gap:8px;align-items:center;padding:3px 0;font-size:13px}
 .cklist .none{color:var(--mist);font-size:12px;padding:2px}
 
@@ -132,7 +173,7 @@ pre{font:12px/1.5 var(--mono);background:#0f191e;color:#d5e2e0;padding:14px;bord
 #loginbox .loginmark{width:204px;height:auto;margin:0 0 16px -4px}
 #loginbox .hint{margin-bottom:18px}
 #loginbox label{font:600 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--mist);margin-bottom:5px}
-#loginbox input{padding:8px 10px;border:1px solid var(--hair);border-radius:4px;font:14px var(--sans);margin-bottom:14px;background:#fff;color:var(--ink)}
+#loginbox input{padding:8px 10px;border:1px solid var(--hair);border-radius:4px;font:14px var(--sans);margin-bottom:14px;background:var(--field);color:var(--ink)}
 #loginbox button{margin-top:4px}
 #loginbox .err{margin:12px 0 0;text-align:center}
 
@@ -143,7 +184,7 @@ pre{font:12px/1.5 var(--mono);background:#0f191e;color:#d5e2e0;padding:14px;bord
 #nav .foot .lo:hover{border-color:#4a6068;color:#fff}
 
 /* ---- modal ---- */
-#ovl{position:fixed;inset:0;background:rgba(15,25,30,.55);display:none;align-items:flex-start;justify-content:center;padding:6vh 16px;z-index:20}
+#ovl{position:fixed;inset:0;background:var(--shade);display:none;align-items:flex-start;justify-content:center;padding:6vh 16px;z-index:20}
 #ovl.show{display:flex}
 #dlg{background:var(--card);border-radius:8px;width:100%;max-width:760px;max-height:86vh;display:flex;flex-direction:column}
 #dlg .hd{display:flex;align-items:center;padding:14px 18px;border-bottom:1px solid var(--hair)}

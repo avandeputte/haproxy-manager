@@ -283,6 +283,7 @@ def api_whoami():
         "authenticated": True,
         "username": user,
         "email": (cfg["local"].get("admin") or {}).get("email", ""),
+        "theme": (cfg["local"].get("admin") or {}).get("theme", "system"),
         "version": VERSION,
         "hostname": socket.gethostname(),
         "needs_setup": False,
@@ -450,6 +451,12 @@ def api_password():
             time.sleep(0.5)
             return jsonify({"ok": False, "error":
                             "the current password is not correct"}), 401
+    # Appearance is a preference, not a credential: it needs a session and
+    # nothing more, and it travels with the account so it follows the person to
+    # another browser.
+    theme = body.get("theme")
+    if theme is not None and theme not in ("system", "light", "dark"):
+        return jsonify({"ok": False, "error": "unknown appearance %r" % theme}), 400
     # The email can be changed on its own; a password only when one is given.
     email = body.get("email")
     if email is not None:
@@ -467,6 +474,8 @@ def api_password():
             cfg["local"]["admin"]["username"] = username
         if email is not None:
             cfg["local"]["admin"]["email"] = email
+        if theme is not None:
+            cfg["local"]["admin"]["theme"] = theme
         save_config(cfg)
     # Offered rather than automatic: the login is node-local, and wanting a
     # different administrator on one node is legitimate.
@@ -476,7 +485,8 @@ def api_password():
             "administrator %s on %s%s", "updated" if r.get("ok") else "NOT updated",
             r.get("name"), "" if r.get("ok") else ": " + r.get("error", ""))
     out = {"ok": True, "username": username,
-           "email": cfg["local"]["admin"].get("email", "")}
+           "email": cfg["local"]["admin"].get("email", ""),
+           "theme": cfg["local"]["admin"].get("theme", "system")}
     if pushed is not None:
         out["nodes"] = pushed
     if new or wants_name:

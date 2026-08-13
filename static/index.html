@@ -9,6 +9,17 @@
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <meta name="theme-color" content="#17242a">
 <link rel="stylesheet" href="/static/v/__VERSION__/css/app.css">
+<script>
+/* Before anything is painted. The preference is stored with the account, but
+   waiting for the API to answer would show a light page for a moment first,
+   which is exactly what someone choosing dark does not want to see. */
+(function(){try{
+  var want=localStorage.getItem("ham_theme")||"system";
+  var dark=want==="dark"||(want==="system"&&
+    window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.dataset.theme=dark?"dark":"light";
+}catch(e){}})();
+</script>
 </head>
 <body>
 <aside id="nav">

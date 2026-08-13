@@ -24,6 +24,7 @@ js/pages/webui.js
 js/shell.js
 js/sparkline.js
 js/state.js
+js/theme.js
 logo.svg
 recipes/actual.json
 recipes/adguard.json

@@ -3,6 +3,7 @@ import { $, api, btn, closeDlg, esc, fieldEl, fieldRow, openDlg } from "./core.j
 import { boot } from "./shell.js";
 import { maybeSetupWizard } from "./pages/setup.js";
 import { state } from "./state.js";
+import { THEMES, applyTheme, currentTheme } from "./theme.js";
 
 /* ---- authentication ---- */
 
@@ -29,6 +30,9 @@ export function openAccount(){
   const fields=[
     {k:"username",l:"Username",t:"text"},
     {k:"email",l:"Email",t:"text",h:"Optional. Offered as the default for ACME accounts and notifications."},
+    {k:"theme",l:"Appearance",t:"select",o:THEMES,d:"system",
+     h:"system follows what this machine is set to. Kept with your account, so it "+
+       "follows you to another browser."},
     {k:"current",l:"Current password",t:"password",h:"Only needed to change the password"},
     {k:"new",l:"New password",t:"password",h:"At least 8 characters. Leave empty to keep the current one."},
     {k:"new2",l:"Repeat new password",t:"password"},
@@ -43,12 +47,22 @@ export function openAccount(){
       ". Only the stored hash travels, never the password."});
   fields.forEach(f=>fieldRow(f,f.k==="username"?(state.who.username||state.who.admin_username)
                              :f.k==="email"?(state.who.email||"")
+                             :f.k==="theme"?currentTheme()
                              :f.k==="propagate"?true:"")
                  .forEach(el=>body.appendChild(el)));
   const err=document.createElement("div");err.className="err";
   const out=document.createElement("div");out.className="hint";out.style.marginTop="10px";
   body.appendChild(out);
-  openDlg("Account",body,[err,btn("Cancel","",closeDlg),
+  /* Applied as it is chosen: an appearance you cannot see until you save is a
+     guess. Choosing and then closing without saving puts it back. */
+  const wasTheme=currentTheme();
+  /* Wired after openDlg: fieldEl looks inside the dialog, and until openDlg
+     puts this body there it finds nothing. */
+  const wireTheme=()=>{
+    const el=fieldEl("theme");
+    if(el)el.addEventListener("change",()=>applyTheme(el.value));
+  };
+  openDlg("Account",body,[err,btn("Cancel","",()=>{applyTheme(wasTheme);closeDlg();}),
     btn("Save","pri",async()=>{
       const val=k=>{const el=fieldEl(k);return el?el.value:"";};
       const nw=val("new");
@@ -58,6 +72,7 @@ export function openAccount(){
       try{
         const r=await api("password","POST",{username:val("username").trim(),email:val("email").trim(),
                                      current:val("current"),new:nw,
+                                     theme:val("theme"),
                                      propagate:!!(box&&box.checked)});
         const failed=(r.nodes||[]).filter(n=>!n.ok);
         if(failed.length){
@@ -72,10 +87,14 @@ export function openAccount(){
         closeDlg();await refreshWho();
       }catch(e){err.textContent=e.message;}
     })]);
+  wireTheme();
 }
 
 export async function refreshWho(){
   try{state.who=await api("whoami");}catch(e){/* whoami is public; ignore */}
+  /* The account's choice is the real one; localStorage only carries it far
+     enough to paint the first frame. */
+  if(state.who.theme&&state.who.theme!==currentTheme())applyTheme(state.who.theme);
   const f=$("#whofoot");f.innerHTML="";
   if(state.who.authenticated){
     const d=document.createElement("div");d.className="who";

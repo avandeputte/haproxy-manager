@@ -62,6 +62,22 @@ export function fieldEl(k){
   }
   return document.querySelector('#content [data-field="'+k+'"]')||document.getElementById("f_"+k);
 }
+/* Choose an option by marking it, not by assigning to the select's value.
+   Both work in a browser; only this one works everywhere, and it is also the
+   thing that actually happens -- a select has no value of its own, it has an
+   option that is selected. */
+export function selectOption(sel,value){
+  const want=String(value==null?"":value);
+  let found=false;
+  [...(sel.options||[])].forEach(o=>{
+    const hit=String(o.value)===want;
+    o.selected=hit;
+    if(hit)found=true;
+  });
+  if(!found&&sel.options&&sel.options.length)sel.options[0].selected=true;
+  return found;
+}
+
 export function fieldRow(f,val){
   const lab=document.createElement("label");lab.className="fl";lab.textContent=f.l;lab.htmlFor="f_"+f.k;
   const cell=document.createElement("div");
@@ -82,13 +98,13 @@ export function fieldRow(f,val){
       op.textContent=(o&&typeof o==="object")?(o.label??o.value):o;
       inp.appendChild(op);
     });
-    inp.value=val??f.d??(opts.length?valOf(opts[0]):"");
+    selectOption(inp,val??f.d??(opts.length?valOf(opts[0]):""));
     cell.appendChild(inp);
   }else if(f.t==="ref"){
     inp=document.createElement("select");inp.id="f_"+f.k;inp.dataset.field=f.k;
     const none=document.createElement("option");none.value="";none.textContent="(none)";inp.appendChild(none);
     (lists[f.ref]||[]).forEach(it=>{const op=document.createElement("option");op.value=it.id;op.textContent=it.name;inp.appendChild(op);});
-    inp.value=val||"";cell.appendChild(inp);
+    selectOption(inp,val||"");cell.appendChild(inp);
   }else if(f.t==="refmulti"){
     inp=document.createElement("div");inp.className="cklist";inp.id="f_"+f.k;inp.dataset.field=f.k;inp.dataset.refmulti="1";
     const items=lists[f.ref]||[];

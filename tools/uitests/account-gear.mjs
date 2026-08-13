@@ -9,8 +9,9 @@ if (!parseHTML) {
 }
 const REPO = process.cwd();
 const { document, window } = parseHTML(`<!doctype html><html><body>
-<div id="ovl"><div id="dlgtitle"></div><button id="dlgclose"></button>
-<div id="dlgbody"></div><div id="dlgfoot"></div></div>
+<div id="ovl"><div id="dlg" role="dialog" aria-modal="true">
+<div class="hd"><h3 id="dlgtitle"></h3><button id="dlgclose"></button></div>
+<div class="bd" id="dlgbody"></div><div class="ft" id="dlgfoot"></div></div></div>
 <aside id="nav"><div class="foot" id="whofoot"></div></aside>
 <div id="login"><form id="loginbox"><input id="lu"><input id="lp">
 <div id="lp2wrap" hidden><input id="lp2"></div><div id="lerr"></div>

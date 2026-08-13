@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.79.0_all.deb
+sudo apt-get install -y ./haproxy-manager_1.80.0_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -53,6 +53,14 @@ with two branches:
 
 Either way it ends with this node's API key, which is what the other nodes need
 to reach it. "Set this up later" skips straight to the UI.
+
+The gear beside your name at the foot of the menu opens the account dialog:
+change the password (optionally applying it to the other nodes), and choose
+**Appearance** — *System*, *Light* or *Dark*. *System* follows the operating
+system's own light/dark setting and changes with it. The choice is stored with
+the node's administrator so it survives a new browser, and also remembered
+locally so the page is painted in the right colours before it has asked the
+server anything.
 
 ## Publishing a service
 
