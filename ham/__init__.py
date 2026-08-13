@@ -32,6 +32,7 @@ from . import (
     vrrp,
     cluster,
     stats,
+    traffic,
     logs,
     updates,
     wizard,
@@ -47,6 +48,6 @@ from . import (
 __all__ = [
     "app", "log", "VERSION", "config", "util", "auth", "validate", "crud",
     "haproxy", "keepalived", "apply", "acme", "notify", "watchdog",
-    "sync", "setup", "peering", "vrrp", "cluster", "stats", "logs",
+    "sync", "setup", "peering", "vrrp", "cluster", "stats", "traffic", "logs",
     "updates", "wizard", "dnsapi", "webui", "recipes", "backup", "static"
 ]

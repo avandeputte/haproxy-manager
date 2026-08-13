@@ -304,7 +304,7 @@ export async function clusterCard(fresh){
       '">'+(s.config_agreed?"configuration agreed":"configuration differs")+"</span>");
   if(cl.nodes.length===1&&!s.warnings.length){
     bd.innerHTML='<div class=empty>This is the only node. Add the others under '+
-      'Advanced &rsaquo; Keepalived &rsaquo; Peer sync to see their health here.</div>';
+      'Cluster &rsaquo; Other nodes to see their health here.</div>';
     card.appendChild(bd);return card;
   }
   const pill=(v,good)=>'<span class="pill '+(good?"up":v==="disabled"?"off":"down")+'">'+esc(v||"—")+"</span>";

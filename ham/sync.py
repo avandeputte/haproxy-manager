@@ -168,7 +168,7 @@ def sync_push(cfg, only=None, include_peers=True, force=False):
         if not peers:
             return {"ok": False, "error": "no such peer"}
     if not peers:
-        return {"ok": False, "error": "no peers configured (Advanced > Keepalived > Peer sync)"}
+        return {"ok": False, "error": "no peers configured (Cluster > Other nodes)"}
 
     base = shared_payload(cfg)
     if force:

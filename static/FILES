@@ -22,6 +22,7 @@ js/pages/updates.js
 js/pages/watchdog.js
 js/pages/webui.js
 js/shell.js
+js/sparkline.js
 js/state.js
 logo.svg
 recipes/actual.json

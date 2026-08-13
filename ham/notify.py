@@ -121,14 +121,22 @@ def send_to(dest, subject, body, severity="warning", event=""):
                          "or webhook" % kind)
 
 
-def notify(event, subject, body, severity="warning", cfg=None):
+def notify(event, subject, body, severity="warning", cfg=None, force=False):
     """Send to every enabled destination. Never raises: a failing mail server
-    must not take down the thing that noticed the problem."""
+    must not take down the thing that noticed the problem.
+
+    force is for the second half of a pair: something recovered that was
+    already reported as broken. Recoveries are informational, and the severity
+    floor defaults to warning, so without this someone would be told what
+    broke and never that it came back -- which is worse than not being told at
+    all, because it leaves them believing it is still broken.
+    """
     cfg = cfg or load_config()
     n = cfg.get("notify") or {}
     if not n.get("enabled", True):
         return {"sent": 0, "skipped": "notifications are switched off"}
-    if SEVERITY.get(severity, 1) < SEVERITY.get(n.get("min_severity", "warning"), 1):
+    if not force and \
+            SEVERITY.get(severity, 1) < SEVERITY.get(n.get("min_severity", "warning"), 1):
         return {"sent": 0, "skipped": "below the configured severity"}
     if event and not (n.get("events") or {}).get(event, True):
         return {"sent": 0, "skipped": "the %s category is switched off" % event}
@@ -170,9 +178,19 @@ def notify_transition(key, state, event, subject, body, severity="warning", cfg=
         if not changed and not (stale and state != "ok"):
             _notify_state[key] = dict(prev, state=state)
             return {"sent": 0, "skipped": "no change"}
+        # Was the thing this closes actually reported? A recovery for an alert
+        # nobody received is noise.
+        closing = state == "ok" and prev.get("state") not in (None, "ok") \
+            and prev.get("sent")
         _notify_state[key] = {"state": state, "since": prev.get("since", now)
-                              if not changed else now, "last_sent": now}
-    return notify(event, subject, body, severity, cfg)
+                              if not changed else now, "last_sent": now,
+                              "sent": False}
+    res = notify(event, subject, body, severity, cfg, force=bool(closing))
+    with _notify_lock:
+        st = _notify_state.get(key)
+        if st is not None:
+            st["sent"] = bool(res.get("sent"))
+    return res
 
 
 @app.get("/api/notify")

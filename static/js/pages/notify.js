@@ -39,13 +39,16 @@ export async function renderNotify(){
        {value:"warning",label:"warning -- something was repaired"},
        {value:"error",label:"error -- something is broken"}]},
    {k:"repeat_hours",l:"Repeat an unresolved problem after (hours)",t:"text",
-    h:"a problem is announced when it starts, then repeated this often until it clears"},
+    h:"a problem is announced when it starts, then repeated this often until it clears. "+
+      "The message saying it has cleared is always sent, whatever the severity above says -- "+
+      "being told what broke and never that it came back is worse than not being told."},
   ];
   const wfrm=document.createElement("div");wfrm.className="frm";
   WHEN.forEach(f=>fieldRow(f,st[f.k]).forEach(el=>wfrm.appendChild(el)));
   wb.appendChild(wfrm);
   const ev=st.events||{};
   const EVENTS=[["certificates","Certificates issued, renewed or failed"],
+                ["service","A published service loses servers, or gets them back"],
                 ["watchdog","Services restarted, or beyond repair"],
                 ["apply","Apply refused, or HAProxy did not reload"],
                 ["cluster","A node stops answering, or split brain"],

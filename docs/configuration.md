@@ -539,7 +539,7 @@ of its peers.
 ## Upgrades and the browser cache
 
 The page is served with `no-cache`, and everything it loads lives under a path
-that contains the version — `/static/v/1.77.0/js/main.js`. Those files are then
+that contains the version — `/static/v/1.78.0/js/main.js`. Those files are then
 cached for a year, which is safe because the URL changes whenever the version
 does.
 
@@ -608,6 +608,26 @@ The choice is between two costs:
 For a database pool, clients reconnect and source stickiness sends them back to
 the same node, so the default is usually right. Raise it if a reconnect is
 disruptive to what is behind the proxy.
+
+## Traffic history
+
+Each node records, once a minute, how many requests each pool served and how
+many server errors it returned, and keeps a day of it in
+`$HAM_DATA_DIR/traffic.json`. The Statistics page draws it; the Services page
+shows a sparkline per service.
+
+| | |
+| --- | --- |
+| Resolution | one point a minute |
+| Kept | 24 hours |
+| Scope | this node only |
+| Written to | `traffic.json`, never the configuration — it must not move the shared revision |
+
+Counts are what happened during that minute, not running totals, and a counter
+that has gone backwards is treated as HAProxy having restarted rather than as
+negative traffic. Every series carries one value per timestamp, so a pool that
+appeared later shows zeros before it existed rather than having its history
+slid backwards in time.
 
 ## Backup and restore
 

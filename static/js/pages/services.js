@@ -2,6 +2,7 @@ import { $, HEALTH_LABEL, api, btn, closeDlg, esc, fieldRow, list, openDlg, read
 import { refreshStatus, route } from "../shell.js";
 import { CERT_STATUS } from "../pages/certificates.js";
 import { state } from "../state.js";
+import { sparkCaption, trafficSpark } from "../sparkline.js";
 
 /* ---- services (the simple view) ---- */
 export const WIZ_FIELDS=[
@@ -226,7 +227,12 @@ export async function renderServices(){
 
 /* The services table, shared by the Services page and the Overview. */
 export async function servicesCard(){
-  const [svcs]=await Promise.all([api("services"),list("acme/accounts",true),list("acme/challenges",true)]);
+  /* The history is a separate read and a failure to get it must not take the
+     page with it: a sparkline is the least important thing on it. */
+  const [svcs,traffic]=await Promise.all([
+    api("services"),
+    api("traffic").catch(()=>({at:[],series:{}})),
+    list("acme/accounts",true),list("acme/challenges",true)]);
   const card=document.createElement("div");card.className="card";
   const hd=document.createElement("div");hd.className="hd";
   hd.innerHTML="<h2>Services</h2><div class=sp></div>";
@@ -239,16 +245,22 @@ export async function servicesCard(){
       'such as <span class=mono>http://192.168.1.100:1781</span> and creates everything HAProxy needs for it.</div>';
   }else{
     const t=document.createElement("table");
-    t.innerHTML="<thead><tr><th>Public URL</th><th>Forwards to</th><th>Certificate</th><th></th></tr></thead>";
+    t.innerHTML="<thead><tr><th>Public URL</th><th>Forwards to</th><th>Traffic</th>"+
+      "<th>Certificate</th><th></th></tr></thead>";
     const tb=document.createElement("tbody");
     svcs.forEach(s=>{
       const tr=document.createElement("tr");
       tr.innerHTML="<td>"+(s.urls||[s.url]).map(u=>"<span class=mono>"+esc(u)+"</span>").join("<br>")+
           (s.managed==="web-ui"?'<div class=sub>this node\'s own web UI &mdash; managed under '+
-             'System &rsaquo; Web UI access, and never synced to the other nodes</div>':"")+
+             'Settings &rsaquo; Web UI access, and never synced to the other nodes</div>':"")+
           (s.enabled?"":"<div class=sub>disabled</div>")+"</td>"+
         "<td class=mono>"+(s.targets.length?s.targets.map(esc).join("<br>"):"<span class=sub>no server</span>")+
           "<div class=sub>pool "+esc(s.pool||"—")+"</div></td>"+
+        /* Requests a minute over the last day, with server errors over them.
+           Answers "when did this start", which the live figures cannot. */
+        "<td>"+trafficSpark((traffic.series||{})["be_"+(s.pool||"")],{width:110,height:22})+
+          (traffic.at&&traffic.at.length?'<div class=sub>'+esc(sparkCaption(traffic.at))+"</div>":"")+
+        "</td>"+
         /* just which certificate serves it; its state lives on the Certificates page */
         "<td>"+(s.certificate
                  ? esc(s.certificate)+(s.certificate_match==="wildcard"?" <span class=sub>(wildcard)</span>":"")

@@ -18,6 +18,7 @@ setup.py
 static.py
 stats.py
 sync.py
+traffic.py
 updates.py
 util.py
 validate.py

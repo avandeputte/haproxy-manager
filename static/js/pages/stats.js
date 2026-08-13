@@ -1,4 +1,5 @@
 import { $, api, esc } from "../core.js";
+import { trafficSpark } from "../sparkline.js";
 import { state } from "../state.js";
 
 /* ---- live statistics ---- */
@@ -28,6 +29,13 @@ export async function renderStats(){
     c.innerHTML='<div class="card"><div class=hd><h2>Statistics</h2></div><div class="bd"><p class=hint>'+esc(st.error)+"</p></div></div>";
     return;
   }
+
+  /* The figures above are what is happening now; this is what happened.
+     "When did it start" is not answerable from a live gauge. */
+  try{
+    const h=await api("traffic");
+    if((h.at||[]).length>1)c.appendChild(historyCard(h));
+  }catch(e){/* history is a nicety; the live figures are the page */}
 
   const fe=document.createElement("div");fe.className="card";
   fe.innerHTML='<div class=hd><h2>Listeners</h2><div class=sp></div><span class=hint>refreshes every 5s</span></div>'+
@@ -69,4 +77,41 @@ export async function renderStats(){
   });
 
   state.pageTimer=setTimeout(()=>{if(location.hash==="#/p:stats")renderStats();},5000);
+}
+
+
+/* ---- what happened, a minute at a time ---- */
+function historyCard(h){
+  const card=document.createElement("div");card.className="card";
+  card.innerHTML='<div class=hd><h2>Traffic</h2><div class=sp></div>'+
+    "<span class=hint>"+esc(h.span)+" of history, one point a minute</span></div>";
+  const bd=document.createElement("div");bd.className="bd";
+  /* Busiest first: a page of flat lines with the interesting one at the
+     bottom is a page nobody reads to the bottom of. */
+  const rows=Object.keys(h.series||{}).map(name=>{
+    const s=h.series[name];
+    return {name:name, s:s,
+            req:(s.req||[]).reduce((a,b)=>a+b,0),
+            err:(s.e5||[]).reduce((a,b)=>a+b,0)};
+  }).filter(r=>r.req||r.err).sort((a,b)=>b.req-a.req);
+  if(!rows.length){
+    bd.innerHTML='<p class=hint>Nothing has been served yet in the recorded window.</p>';
+    card.appendChild(bd);return card;
+  }
+  bd.innerHTML="<table><thead><tr><th>Pool</th><th>Traffic</th><th>Requests</th>"+
+    "<th>Server errors</th><th>Busiest minute</th></tr></thead><tbody>"+
+    rows.map(r=>{
+      const peak=Math.max(0,...(r.s.req||[]));
+      return "<tr><td class=mono>"+esc(r.name.replace(/^b[ek]_/,""))+"</td>"+
+        "<td>"+trafficSpark(r.s,{width:220,height:28})+"</td>"+
+        "<td>"+num(r.req)+"</td>"+
+        "<td>"+(r.err?'<span style="color:var(--down)">'+num(r.err)+"</span>":"0")+"</td>"+
+        "<td>"+num(peak)+" <span class=sub>req/min</span></td></tr>";
+    }).join("")+"</tbody></table>";
+  const foot=document.createElement("div");foot.className="hint";
+  foot.style.padding="8px 16px";
+  foot.textContent="Collected on this node only, and only while it is running -- "+
+    "a gap in the line is a gap in the recording, not in the traffic.";
+  bd.appendChild(foot);
+  card.appendChild(bd);return card;
 }

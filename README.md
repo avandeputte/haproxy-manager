@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.77.0_all.deb
+sudo apt-get install -y ./haproxy-manager_1.78.0_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -458,6 +458,22 @@ five seconds:
 A server with health checking switched off reports `no check` and counts as up,
 because HAProxy still routes to it.
 
+## Traffic history
+
+The Statistics page shows what is happening now; the **Traffic** card on it
+shows what happened. Once a minute each node records, per pool, how many
+requests it served and how many server errors it returned, and keeps a day of
+it — enough to answer *when did this start*, which a live gauge cannot.
+
+The Services page carries the same thing as a sparkline per service, with
+server errors drawn over the requests, because the question is always whether
+they happened at the same time.
+
+It is per node and only covers time the app was running: a gap in the line is
+a gap in the recording, not in the traffic. Counts are per minute rather than
+totals, and a counter that goes backwards is treated as HAProxy having
+restarted rather than as negative traffic.
+
 ## Notifications
 
 **Notifications** sends when something needs a person. Nothing extra is
@@ -476,7 +492,29 @@ forward an alert to anything not listed above.
 Test each destination from the page: it sends a real message, so it is proven
 before it is needed.
 
+### When a service loses its servers
+
+HAProxy is already health-checking every server, and it is the thing actually
+deciding where traffic goes — so that is what the alerts come from. A service
+whose servers all fail their checks is reported as down, one that loses some
+of them as degraded, naming the servers and what their last check said. When
+it recovers, that is reported too.
+
+**Only the node holding the virtual IP says anything about services.** Every
+node runs the same checks, so three nodes would send three copies of every
+alert — and a passive node's view is not the one that matters: it is not
+carrying the traffic, and a server it cannot reach may be perfectly reachable
+from the node that is. Faults about a node *itself* — its HAProxy stopped, its
+certificate could not be renewed — still come from that node, because nobody
+else can see them.
+
 ### It alerts on changes, not on conditions
+
+A recovery is always delivered, whatever the severity threshold says. Recovery
+messages are informational and the threshold defaults to warning, so without
+that exception someone would be told what broke and never that it came back —
+which is worse than silence, because it leaves them believing it is still
+broken. A recovery for something that was never reported is not sent.
 
 The watchdog runs every twenty seconds. Anything that reported a *state* would
 arrive thousands of times a week, so alerts fire on **transitions** and an
@@ -707,7 +745,7 @@ over Sync, or are re-issued.
   Until then only the calls that create it answer — everything else returns 401 —
   so a node waiting to be set up does not hand its configuration to whoever
   reaches it first.
-- **Every API endpoint requires a session or the API key.** Of 63 routes exactly
+- **Every API endpoint requires a session or the API key.** Of 64 routes exactly
   three answer without either: `/api/login`, `/api/whoami` (which
   unauthenticated returns nothing but whether an administrator exists), and
   `/api/setup`, which refuses once an administrator exists. This is verified by

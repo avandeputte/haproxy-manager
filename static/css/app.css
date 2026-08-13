@@ -185,3 +185,8 @@ th.sorted-desc::after{border-top-color:var(--line)}
   background:transparent;border-color:transparent;color:#9db2ae}
 #nav .foot .lo.gear:hover{background:#0f191e;border-color:#2c3e44;color:#fff}
 #nav .foot .lo.gear svg{display:block}
+
+/* Sparklines: two lines occupy the same box, so errors sit over requests. */
+.sparkwrap{position:relative;display:inline-block;line-height:0}
+.sparkwrap .spark+.spark{position:absolute;left:0;top:0}
+.spark{display:inline-block;vertical-align:middle}

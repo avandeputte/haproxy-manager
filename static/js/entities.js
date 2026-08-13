@@ -49,7 +49,7 @@ export const E={
    {k:"custom",l:"Extra directives",t:"textarea",h:"Advanced. Raw lines added inside this backend, for anything the fields above do not cover -- for example \"http-reuse safe\". One per line. See the HAProxy configuration manual: https://docs.haproxy.org/2.6/configuration.html"}]},
 
  "haproxy/frontends":{title:"Public Services",add:"Add service",
-  intro:"Listening sockets clients connect to (frontends). Certificates come from ACME > Certificates.",
+  intro:"Listening sockets clients connect to (frontends). Certificates come from the Certificates page.",
   cols:[["name","Name"],["binds","Listen on",r=>"<span class=mono>"+esc((r.binds||"").split("\n").filter(Boolean).join(", "))+"</span>"],
         ["mode","Mode",r=>esc(r.mode||"http")+(r.ssl_enabled?" +ssl":"")],
         ["be","Default pool",r=>r.default_backend?esc(nameOf("haproxy/backends",r.default_backend)):"—"],

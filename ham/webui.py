@@ -503,7 +503,7 @@ def api_service_delete(rid):
         if target.get("id") in local_ids:
             return jsonify({"ok": False, "error":
                             "This is the node's own web UI service. Turn it off under "
-                            "System > Web UI access instead."}), 409
+                            "Settings > Web UI access instead."}), 409
         removed = _remove_service_objects(hp, rid)
         save_config(cfg)
     return jsonify({"ok": True, "removed": removed,

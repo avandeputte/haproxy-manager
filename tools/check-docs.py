@@ -186,6 +186,59 @@ check(listed == expected, "the documented recipes are not in the picker's order"
       next((("%r comes before %r" % (a, b))
             for a, b in zip(listed, expected) if a != b), ""))
 
+# -- menu paths the UI tells people to follow ------------------------------
+# "Manage them under ACME > Certificates" stayed true-looking after
+# Certificates moved to the top of the menu: both names still exist, only the
+# hierarchy changed. So what is checked is the hierarchy -- a page at the top
+# of the menu must not be described as living inside another page.
+shell = (ROOT / "static" / "js" / "shell.js").read_text()
+nav = shell[shell.index("export const NAV"):]
+nav = nav[:nav.index("\n];")]
+GROUPS = {"Advanced", "Settings", "HAProxy"}
+for grp in re.findall(r'\["grp","([^"]+)"', nav):
+    GROUPS.update(w.strip().title() for w in re.split(r"[·.]", grp) if w.strip())
+PAGES = {m for m in re.findall(r'","([^"]+)"\]', nav)}
+HEADINGS = set()
+for js in sorted((ROOT / "static" / "js").rglob("*.js")):
+    HEADINGS.update(h.strip() for h in re.findall(r"<h2>([^<&]+)</h2>", js.read_text()))
+HEADINGS |= {"This node", "Other nodes"}      # cards whose heading carries markup
+
+
+def _resolve(words, places, from_end):
+    """The longest run of words that names a place, read from one end."""
+    for n in range(len(words), 0, -1):
+        part = " ".join(words[-n:] if from_end else words[:n])
+        for cand in places:
+            if part.lower() == cand.lower():
+                return cand
+    return None
+
+
+# People say "ACME" for the page called "ACME Settings", so the first word of
+# a page name counts as naming it -- otherwise the wording that prompted this
+# check would not have been recognised as a menu path at all.
+PARENTS = GROUPS | PAGES | {p.split()[0] for p in PAGES if " " in p}
+
+SEP = r"\s*(?:&rsaquo;|&gt;|>|\u2192|\u203a)\s*"
+PATH = re.compile(r"([A-Za-z' ]{3,40}?)" + SEP + r"([A-Za-z' ]{3,40})")
+for src in (ROOT / "static" / "js", ROOT / "ham"):
+    for f in sorted(src.rglob("*.js")) + sorted(src.rglob("*.py")):
+        for left, right in PATH.findall(f.read_text()):
+            parent = _resolve(left.split(), PARENTS, True)
+            leaf = _resolve(right.split(), PAGES | HEADINGS | GROUPS, False)
+            if not leaf or not parent:
+                continue                    # not a menu path, just prose
+            if leaf in PAGES and parent not in GROUPS:
+                check(False, "the UI describes a page as living inside another page",
+                      "%s says %r, but %r is at the top of the menu"
+                      % (f.name, parent + " > " + leaf, leaf))
+
+# The section called System is called Settings now.
+for src in (ROOT / "static" / "js", ROOT / "ham"):
+    for f in sorted(src.rglob("*.js")) + sorted(src.rglob("*.py")):
+        for m in re.findall(r"System\s*(?:&rsaquo;|>|\u2192)\s*[A-Z]", f.read_text()):
+            check(False, "the UI still calls the Settings section System", f.name)
+
 # -- strings the state refactor could have damaged --------------------------
 # Moving the shared variables into state.js rewrote every occurrence of their
 # names, including ones inside strings: className="who" became

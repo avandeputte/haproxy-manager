@@ -47,7 +47,7 @@ export async function renderOverview(){
     }catch(e){pre.textContent="FAILED -- "+e.message;}
   }));
   const cb=document.createElement("div");
-  if(!st.certs.length)cb.innerHTML='<div class=empty>No certificates defined. Create them under ACME &gt; Certificates.</div>';
+  if(!st.certs.length)cb.innerHTML='<div class=empty>No certificates yet. Request one on the Certificates page.</div>';
   else{
     st.certs.forEach(x=>{certStat[x.id]=x;});
     cb.innerHTML="<table><thead><tr><th>Name</th><th>Status</th><th>Expires</th><th>Issuer</th><th>Last issue</th></tr></thead><tbody>"+
@@ -57,7 +57,7 @@ export async function renderOverview(){
         "<td class=mono style=font-size:11.5px>"+esc(x.issuer||"—")+"</td>"+
         "<td>"+certLastCell(x)+"</td></tr>").join("")+
       "</tbody></table>"+
-      '<div class=hint style="padding:10px 16px">Manage and issue them under ACME &gt; Certificates.</div>';
+      '<div class=hint style="padding:10px 16px">Manage and issue them on the Certificates page.</div>';
   }
   cc.appendChild(cb);c.appendChild(cc);
 
