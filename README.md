@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.78.1_all.deb
+sudo apt-get install -y ./haproxy-manager_1.78.2_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -21,6 +21,12 @@ docker run -d --network host --cap-add NET_ADMIN --cap-add NET_BROADCAST --cap-a
 ```
 
 Then open `http://<node>:8080`.
+
+<img src="docs/img/overview.png" alt="The Overview page: three nodes, their roles and versions, and every published service with a day of traffic" width="900">
+
+<sub>Every screenshot here is the real application, driven by a browser against
+a three-node cluster holding made-up data — see
+[tools/screenshots](tools/screenshots/).</sub>
 
 **Detailed guides**
 
@@ -49,6 +55,13 @@ Either way it ends with this node's API key, which is what the other nodes need
 to reach it. "Set this up later" skips straight to the UI.
 
 ## Publishing a service
+
+<img src="docs/img/services.png" alt="The Services page: each published name, the servers behind it, a day of traffic and the certificate serving it" width="900">
+
+Each row is one public name routed to a pool. **Publish a service** opens the
+wizard, which can start from a recipe:
+
+<img src="docs/img/publish-wizard.png" alt="The publish wizard with the Jellyfin recipe chosen, filling in the port, health check and timeouts" width="900">
 
 The normal way to use this is **Services → Publish a service**: give it the URL
 people will visit and the server behind it.
@@ -236,6 +249,8 @@ renewal happens on its own.)
 
 ## High availability
 
+<img src="docs/img/cluster.png" alt="Cluster settings: virtual IPs, router ID, VRRP password, and what counts as HAProxy being up" width="900">
+
 Any number of nodes. One holds the virtual IP and serves traffic; the others
 stand by with the same configuration, ready to take it.
 
@@ -407,6 +422,8 @@ so while the UI is still listening on all addresses.
 
 ## Requesting a certificate
 
+<img src="docs/img/certificates.png" alt="The Certificates page: what is on disk, its issuer, expiry and days remaining" width="900">
+
 **Certificates → Request a certificate** asks for the domains and then, for the
 two things a certificate needs, lets you either reuse what is already there or
 create it in the same step:
@@ -459,6 +476,8 @@ A server with health checking switched off reports `no check` and counts as up,
 because HAProxy still routes to it.
 
 ## Traffic history
+
+<img src="docs/img/statistics.png" alt="The Traffic card: a day of requests per pool, with server errors drawn over them" width="900">
 
 The Statistics page shows what is happening now; the **Traffic** card on it
 shows what happened. Once a minute each node records, per pool, how many
@@ -543,6 +562,8 @@ of it.
 
 ## Watchdog
 
+<img src="docs/img/watchdog.png" alt="The Watchdog page: what it sees right now, and what it has restarted" width="900">
+
 Each node supervises its own services. **Watchdog** shows what it sees and what
 it has done.
 
@@ -617,6 +638,8 @@ unresponsive node: **5.1s** to collect, **3ms** to read.
 something stale.
 
 ## Logs
+
+<img src="docs/img/logs.png" alt="The Logs page: the UI, HAProxy, acme.sh and Keepalived merged into one timeline" width="900">
 
 **Logs** merges four sources into one timeline, newest at the bottom:
 

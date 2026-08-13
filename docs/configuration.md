@@ -42,6 +42,8 @@ reloads. A configuration that does not validate is never written.
 
 ## Publishing a service
 
+<img src="img/publish-wizard.png" alt="The publish wizard, started from a recipe" width="900">
+
 **Services → Publish a service.**
 
 | Field | Notes |
@@ -342,6 +344,8 @@ The login is node-local: set it on each node.
 
 ## Serving the UI over HTTPS
 
+<img src="img/webui.png" alt="Web UI access: this node's address, the shared address, and which names it answers for" width="900">
+
 **System → Web UI access.** Give it a name (`https://proxy.example.com`) and it
 publishes this UI as a normal service with a certificate, so you stop using
 plain HTTP.
@@ -375,6 +379,8 @@ Do this early. Over plain HTTP both the password and the session cookie cross
 the network in clear.
 
 ## Clustering
+
+<img src="img/cluster.png" alt="Cluster settings, shared by every node" width="900">
 
 **Cluster** holds everything about running more than one node.
 
@@ -516,6 +522,8 @@ not repaired.
 
 ## Notifications
 
+<img src="img/notifications.png" alt="Notification destinations, what they are told about, and recent attempts" width="900">
+
 **System → Notifications.** Email (SMTP), Pushover and a JSON webhook. Nothing
 extra is installed for any of it.
 
@@ -539,7 +547,7 @@ of its peers.
 ## Upgrades and the browser cache
 
 The page is served with `no-cache`, and everything it loads lives under a path
-that contains the version — `/static/v/1.78.1/js/main.js`. Those files are then
+that contains the version — `/static/v/1.78.2/js/main.js`. Those files are then
 cached for a year, which is safe because the URL changes whenever the version
 does.
 
@@ -610,6 +618,8 @@ the same node, so the default is usually right. Raise it if a reconnect is
 disruptive to what is behind the proxy.
 
 ## Traffic history
+
+<img src="img/statistics.png" alt="A day of traffic per pool, with server errors over the requests" width="900">
 
 Each node records, once a minute, how many requests each pool served and how
 many server errors it returned, and keeps a day of it in

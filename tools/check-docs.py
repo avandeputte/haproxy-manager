@@ -186,6 +186,24 @@ check(listed == expected, "the documented recipes are not in the picker's order"
       next((("%r comes before %r" % (a, b))
             for a, b in zip(listed, expected) if a != b), ""))
 
+# -- screenshots -----------------------------------------------------------
+# A screenshot referenced but missing is a broken image on the front page, and
+# one committed but never referenced is a megabyte nobody asked for.
+img_dir = ROOT / "docs" / "img"
+on_disk = {p.name for p in img_dir.glob("*.png")} if img_dir.exists() else set()
+referenced = set()
+for name, text in DOCS.items():
+    for src in re.findall(r'(?:src="|\]\()(?:docs/)?img/([^"\)]+)', text):
+        referenced.add(src)
+        check(src in on_disk, "a screenshot is referenced but not committed",
+              "%s wants img/%s" % (name, src))
+for extra in sorted(on_disk - referenced):
+    check(False, "a screenshot is committed but nothing shows it", extra)
+for shot in sorted(on_disk):
+    size = (img_dir / shot).stat().st_size
+    check(size < 400 * 1024, "a screenshot is too large to ship in every package",
+          "%s is %d KB" % (shot, size // 1024))
+
 # -- menu paths the UI tells people to follow ------------------------------
 # "Manage them under ACME > Certificates" stayed true-looking after
 # Certificates moved to the top of the menu: both names still exist, only the
