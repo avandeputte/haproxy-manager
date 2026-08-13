@@ -20,9 +20,10 @@ export async function renderBackup(){
   bk.innerHTML='<div class=hd><h2>Configuration backup</h2></div>';
   const bb=document.createElement("div");bb.className="bd";
   bb.innerHTML='<p class=hint style="margin-bottom:14px">A JSON backup of everything the UI manages: Real Servers, Backend Pools, '+
-    'Public Services, Conditions, Rules, Health Monitors, HAProxy Settings and all ACME objects. '+
-    'Node-local settings (Keepalived, Sync, the login and the API key) and private keys are <b>not</b> included, '+
-    'so the file is safe to copy between nodes.</p>';
+    'Public Services, Conditions, Rules, Health Monitors, HAProxy Settings, all ACME objects, and the '+
+    'users and groups a service can ask visitors to sign in with. '+
+    'Node-local settings (Keepalived, Sync, the login and the API key), private keys and those users\' '+
+    'passwords are <b>not</b> included, so the file is safe to copy between nodes.</p>';
   const brow=document.createElement("div");brow.style.display="flex";brow.style.gap="10px";brow.style.alignItems="center";brow.style.flexWrap="wrap";
   brow.appendChild(btn("Download backup","pri",()=>download("export/config")));
   const file=document.createElement("input");file.type="file";file.accept=".json,application/json";file.style.fontSize="13px";
@@ -32,8 +33,9 @@ export async function renderBackup(){
     const f=file.files&&file.files[0];
     if(!f){msg.textContent="Choose a backup file first.";return;}
     if(!confirm("Restore \""+f.name+"\"?\n\nThis replaces every Real Server, Backend Pool, Public Service, "+
-                "Condition, Rule, Health Monitor and ACME object on this node. "+
-                "Keepalived, Sync and the login are kept.\n\nNothing is applied until you press Apply."))return;
+                "Condition, Rule, Health Monitor, ACME object, service user and group on this node. "+
+                "Keepalived, Sync and the login are kept, and so are the passwords of the service users "+
+                "already here -- a backup carries none.\n\nNothing is applied until you press Apply."))return;
     msg.textContent="Restoring...";
     try{
       const r=await api("import/config","POST",JSON.parse(await f.text()));

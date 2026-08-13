@@ -1,4 +1,4 @@
-import { $, HEALTH_LABEL, api, btn, closeDlg, esc, fieldRow, list, openDlg, readForm, showText } from "../core.js";
+import { $, HEALTH_LABEL, api, btn, closeDlg, esc, fieldEl, fieldRow, list, openDlg, readForm, showText } from "../core.js";
 import { refreshStatus, route } from "../shell.js";
 import { CERT_STATUS } from "../pages/certificates.js";
 import { state } from "../state.js";
@@ -40,6 +40,12 @@ export const WIZ_FIELDS=[
  {k:"timeout_connect",l:"Connect timeout",t:"text",h:"Optional, for this pool only, e.g. 5s"},
  {k:"timeout_server",l:"Server timeout",t:"text",h:"Optional, for this pool only, e.g. 30s. Long-lived connections such as databases usually need more than the default."},
  {k:"log_health_checks",l:"Log health check changes",t:"bool",h:"option log-health-checks -- records every up/down transition"},
+ {k:"auth_enabled",l:"Require a sign-in",t:"bool",
+  h:"Ask visitors for a user name and password before letting them through. HAProxy checks it, so an unauthenticated request never reaches the servers. Manage the accounts under Basic auth."},
+ {k:"auth_groups",l:"Allowed groups",t:"refmulti",ref:"access/groups",
+  h:"Leave nothing ticked to admit any user"},
+ {k:"auth_realm",l:"Sign-in prompt",t:"text",
+  h:"What the browser shows above its password box. Defaults to the service name."},
  {k:"http_redirect",l:"Redirect HTTP to HTTPS",t:"bool",d:true,h:"Also listens on port 80 and sends visitors to HTTPS"},
  {k:"apply",l:"Apply immediately",t:"bool",d:true,h:"Write haproxy.cfg and reload once the objects are created"},
 ];
@@ -53,8 +59,8 @@ export const CERT_MODE_LABEL={auto:"auto -- reuse one that covers this host",
 
 /* Tell the user which certificate a host will end up using, before they commit. */
 export async function updateCertNote(note){
-  const raw=(document.getElementById("f_url")||{}).value||"";
-  const mode=(document.getElementById("f_cert_mode")||{}).value||"auto";
+  const raw=(fieldEl("url")||{}).value||"";
+  const mode=(fieldEl("cert_mode")||{}).value||"auto";
   let host="";
   try{host=new URL(raw.includes("://")?raw:"https://"+raw).hostname;}catch(e){}
   if(!host||!raw.trim().toLowerCase().startsWith("https")){note.innerHTML="";return;}
@@ -142,36 +148,29 @@ export function openWizard(prefill){
   const hsel=frm.querySelector("#f_health");
   if(hsel)[...hsel.options].forEach(o=>{o.textContent=HEALTH_LABEL[o.value]||o.value;});
   const setRow=(k,on)=>{(rows[k]||[]).forEach(el=>{el.style.display=on?"":"none";});};
+  const val=k=>((fieldEl(k)||{}).value||"");
   const syncRows=()=>{
     const show=HEALTH_SHOWS[hsel?hsel.value:"none"]||[];
     ["health_interval","health_uri","health_status","health_user","health_method",
      "health_version","health_host"].forEach(k=>setRow(k,show.includes(k)));
     setRow("check_port",(hsel?hsel.value:"none")!=="none");
     // tcp:// forwards a raw port: no host name, so no certificate and no redirect
-    const isTcp=((document.getElementById("f_url")||{}).value||"").trim().toLowerCase().startsWith("tcp");
+    const isTcp=val("url").trim().toLowerCase().startsWith("tcp");
     ["cert_mode","account","challenge","http_redirect"].forEach(k=>setRow(k,!isTcp));
-    const st=(document.getElementById("f_persistence")||{}).value;
-    ["stick_type","stick_size","stick_expire"].forEach(k=>setRow(k,st==="source"));
+    /* Basic authentication is part of HTTP; a raw TCP port has nowhere to
+       carry it, so the whole idea is hidden rather than offered and refused. */
+    const authOn=!isTcp&&!!(fieldEl("auth_enabled")||{}).checked;
+    setRow("auth_enabled",!isTcp);
+    ["auth_groups","auth_realm"].forEach(k=>setRow(k,authOn));
+    ["stick_type","stick_size","stick_expire"].forEach(k=>setRow(k,val("persistence")==="source"));
     /* A raw TCP port cannot answer an HTTP check -- unless the check is aimed at
        a different port, which is exactly how Patroni is fronted: traffic to
        PostgreSQL on 5432, the check to its REST API on 8008. */
-    const cport=((document.getElementById("f_check_port")||{}).value||"").trim();
-    if(isTcp&&!cport&&hsel&&hsel.value==="http")hsel.value="tcp";
+    if(isTcp&&!val("check_port").trim()&&hsel&&hsel.value==="http")hsel.value="tcp";
   };
-  if(hsel)hsel.addEventListener("change",syncRows);
-  ["f_url","f_persistence"].forEach(id=>{
-    const el=document.getElementById(id);
-    if(el){el.addEventListener("change",syncRows);el.addEventListener("blur",syncRows);}
-  });
-  syncRows();
   const note=document.createElement("div");note.className="hint";note.style.margin="2px 0 0";
   const noteRow=document.createElement("div");noteRow.appendChild(note);
   frm.appendChild(document.createElement("div"));frm.appendChild(noteRow);
-  ["f_url","f_cert_mode"].forEach(id=>{
-    const el=document.getElementById(id);
-    if(el){el.addEventListener("change",()=>updateCertNote(note));el.addEventListener("blur",()=>updateCertNote(note));}
-  });
-  updateCertNote(note);
   const out=document.createElement("div");out.style.marginTop="16px";wrap.appendChild(out);
   const err=document.createElement("div");err.className="err";
 
@@ -184,8 +183,10 @@ export function openWizard(prefill){
     d.health={type:d.health,interval:d.health_interval,uri:d.health_uri,
               status:d.health_status,user:d.health_user,method:d.health_method,
               version:d.health_version,host:d.health_host};
+    d.auth={enabled:d.auth_enabled,groups:d.auth_groups,realm:d.auth_realm};
     ["cert_mode","health_interval","health_uri","health_status","health_user",
-     "health_method","health_version","health_host"].forEach(k=>delete d[k]);
+     "health_method","health_version","health_host",
+     "auth_enabled","auth_groups","auth_realm"].forEach(k=>delete d[k]);
     return d;   // balance / persistence / stick_* / check_port / log_health_checks pass straight through
   };
   const show=(r,saved)=>{
@@ -218,6 +219,25 @@ export function openWizard(prefill){
     }catch(e){err.textContent=e.message;create.disabled=false;}
   });
   openDlg(prefill?"Edit service":"Publish a service",wrap,[err,btn("Close","",closeDlg),preview,create]);
+
+  /* Only now are these fields in the document, and only elements that are in
+     it can be found by id or usefully listened to. Wiring the form while it
+     was still being built left every one of these listeners on nothing: the
+     rows that should appear and disappear as the URL changes stayed as they
+     were first drawn. */
+  if(hsel)hsel.addEventListener("change",syncRows);
+  ["url","persistence","auth_enabled"].forEach(k=>{
+    const el=fieldEl(k);
+    if(el){el.addEventListener("change",syncRows);el.addEventListener("input",syncRows);
+           el.addEventListener("blur",syncRows);}
+  });
+  ["url","cert_mode"].forEach(k=>{
+    const el=fieldEl(k);
+    if(el){el.addEventListener("change",()=>updateCertNote(note));
+           el.addEventListener("blur",()=>updateCertNote(note));}
+  });
+  syncRows();
+  updateCertNote(note);
 }
 
 export async function renderServices(){
@@ -232,7 +252,9 @@ export async function servicesCard(){
   const [svcs,traffic]=await Promise.all([
     api("services"),
     api("traffic").catch(()=>({at:[],series:{}})),
-    list("acme/accounts",true),list("acme/challenges",true)]);
+    list("acme/accounts",true),list("acme/challenges",true),
+    /* the wizard's group picker reads this cache */
+    list("access/groups",true)]);
   const card=document.createElement("div");card.className="card";
   const hd=document.createElement("div");hd.className="hd";
   hd.innerHTML="<h2>Services</h2><div class=sp></div>";
@@ -250,9 +272,14 @@ export async function servicesCard(){
     const tb=document.createElement("tbody");
     svcs.forEach(s=>{
       const tr=document.createElement("tr");
+      const auth=s.auth||{};
       tr.innerHTML="<td>"+(s.urls||[s.url]).map(u=>"<span class=mono>"+esc(u)+"</span>").join("<br>")+
           (s.managed==="web-ui"?'<div class=sub>this node\'s own web UI &mdash; managed under '+
              'Settings &rsaquo; Web UI access, and never synced to the other nodes</div>':"")+
+          /* Whether a visitor is asked to sign in belongs beside the address:
+             it is part of what this URL does, not a detail of the pool. */
+          (auth.enabled?'<div class=sub>sign-in required &mdash; '+
+             ((auth.group_names||[]).length?esc(auth.group_names.join(", ")):"any user")+"</div>":"")+
           (s.enabled?"":"<div class=sub>disabled</div>")+"</td>"+
         "<td class=mono>"+(s.targets.length?s.targets.map(esc).join("<br>"):"<span class=sub>no server</span>")+
           "<div class=sub>pool "+esc(s.pool||"—")+"</div></td>"+
@@ -280,6 +307,8 @@ export async function servicesCard(){
         health_user:(s.health||{}).user,health_method:(s.health||{}).method,
         health_version:(s.health||{}).version,health_host:(s.health||{}).host,
         timeout_connect:s.timeout_connect,timeout_server:s.timeout_server,
+        auth_enabled:(s.auth||{}).enabled,auth_groups:(s.auth||{}).groups,
+        auth_realm:(s.auth||{}).realm,
         certificate_id:s.certificate_id,
       })));
       act.appendChild(document.createTextNode(" "));

@@ -48,6 +48,13 @@ DEFAULT_CONFIG = {
         "challenges": [],   # Challenge Types
         "certificates": [],
     },
+    # Who may reach a service that asks visitors to sign in. Shared: a service
+    # is published on every node, so the credentials it checks have to be there
+    # too. These are nothing to do with the login for this UI.
+    "access": {
+        "users": [],     # {id, username, hash, groups, enabled, description}
+        "groups": [],    # {id, name, description}
+    },
     # Cluster-wide VRRP settings: identical on every node, so they sync.
     "cluster": {
         # The name that should reach whichever node is currently active. It is
@@ -351,6 +358,7 @@ def shared_view(cfg):
     """
     return {"haproxy": cfg["haproxy"],
             "acme": cfg["acme"],
+            "access": cfg.get("access", {}),
             "cluster": cfg["cluster"],
             "notify": cfg.get("notify", {})}
 

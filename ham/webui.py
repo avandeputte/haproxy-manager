@@ -9,7 +9,7 @@ import copy
 from .base import LISTEN, PORT, _lock, app, log
 from .config import WEBUI_NAME, is_webui_cert, load_config, merged, move_to_local, promote_local, save_config, webui_object_ids
 from .util import _by_id, cert_details, cert_path
-from . import apply, dnsapi, vrrp, wizard
+from . import access, apply, dnsapi, vrrp, wizard
 
 # --------------------------------------------------------------------------
 
@@ -418,6 +418,11 @@ def api_services():
             "check_port": first.get("check_port") or "",
             "timeout_connect": pool.get("timeout_connect") or "",
             "timeout_server": pool.get("timeout_server") or "",
+            # Whether visitors are asked to sign in, and who is let through.
+            "auth": {"enabled": bool(pool.get("auth_enabled")),
+                     "groups": list(pool.get("auth_groups") or []),
+                     "group_names": access.group_names(cfg, pool.get("auth_groups")),
+                     "realm": pool.get("auth_realm") or ""},
             "health": {"type": m.get("type") if m else "none",
                        "interval": (m or {}).get("interval") or "2s",
                        "uri": (m or {}).get("http_uri") or "/",

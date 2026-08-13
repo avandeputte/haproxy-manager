@@ -434,6 +434,11 @@ def _receive_locked(cfg, data, conf, source=None):
         cfg["haproxy"] = _merge_defaults(conf["haproxy"], DEFAULT_CONFIG["haproxy"])
     if "acme" in conf:
         cfg["acme"] = _merge_defaults(conf["acme"], DEFAULT_CONFIG["acme"])
+    if isinstance(conf.get("access"), dict):
+        # The users and groups a published service asks visitors for. They
+        # travel with the services that check them, or a failover would meet
+        # people with a password no node here has heard of.
+        cfg["access"] = _merge_defaults(conf["access"], DEFAULT_CONFIG["access"])
     if isinstance(conf.get("cluster"), dict):
         # Cluster-wide VRRP settings. Anything per node -- interface, priority,
         # unicast addresses -- lives in local and is deliberately untouched.

@@ -33,6 +33,11 @@ export const NAV=[
  ["haproxy/rules","Rules"],
  ["haproxy/healthchecks","Health Monitors"],
  ["s:haproxy-settings","Settings"],
+ /* Who a published service may ask to sign in -- not accounts for this UI,
+    which is why they are their own group rather than part of Settings. */
+ ["grp","BASIC AUTH","collapse"],
+ ["access/users","Users"],
+ ["access/groups","Groups"],
  /* Settings last: everything here is something you set once and revisit
     rarely, unlike the pages above that you watch. */
  ["grp","SETTINGS","collapse"],

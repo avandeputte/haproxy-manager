@@ -2,10 +2,12 @@
 
 from datetime import datetime
 from datetime import timezone
+import re
 
 from .base import CERT_DIR
 from .config import merged
 from .util import _by_id, _sec, cert_path
+from . import access
 
 # --------------------------------------------------------------------------
 
@@ -129,6 +131,12 @@ def render_haproxy(cfg):
         A("    stats uri %s" % (st.get("stats_uri") or "/stats"))
         A("    stats refresh 10s")
         A("")
+
+    # Everyone who may be asked to sign in, in one list. Written before the
+    # services so it reads in the order it is used: who exists, then what they
+    # are let into.
+    for ln in access.render_userlist(cfg):
+        A(ln)
 
     for fe in hp["frontends"]:
         if not fe.get("enabled", True):
@@ -265,6 +273,30 @@ def render_haproxy(cfg):
             # "tcp" needs nothing here: `check` on the server line is a connect test
         if be.get("log_health_checks"):
             A("    option log-health-checks")
+        # A sign-in in front of this pool. HAProxy checks it against the
+        # userlist itself, so a request without credentials is answered with a
+        # 401 here and never reaches a server. Only in HTTP mode: there is no
+        # such thing as basic authentication on a raw TCP port.
+        if be.get("auth_enabled") and mode == "http":
+            wanted = be.get("auth_groups") or []
+            allowed = [_sec(n) for n in access.group_names(cfg, wanted)]
+            if not access.users_with_passwords(cfg) or (wanted and not allowed):
+                # Either nobody can give the sign-in this service asks for, or
+                # the only groups it admits no longer exist. Refusing every
+                # request is the one safe reading: serving it openly would turn
+                # a missing user or a deleted group into no protection at all.
+                A("    # a sign-in is required here and nobody can satisfy it")
+                A("    http-request deny")
+            else:
+                # No group named means anybody in the list, which is what the
+                # form says an empty selection does.
+                test = ("http_auth_group(%s) %s" % (access.USERLIST, " ".join(allowed))
+                        if allowed else "http_auth(%s)" % access.USERLIST)
+                # The realm is what the browser shows above its password box,
+                # so it keeps its spaces and is quoted rather than sanitised
+                # into something nobody would recognise.
+                realm = re.sub(r'["\\\n]', "", be.get("auth_realm") or be.get("name") or "Restricted")
+                A('    http-request auth realm "%s" unless { %s }' % (realm, test))
         for key, directive in (("timeout_connect", "timeout connect"),
                                ("timeout_server", "timeout server"),
                                ("timeout_check", "timeout check")):

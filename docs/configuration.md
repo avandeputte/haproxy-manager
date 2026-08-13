@@ -9,6 +9,7 @@ them by hand is pointless, because the next Apply overwrites them (keeping a
 
 - [The model](#the-model)
 - [Publishing a service](#publishing-a-service)
+- [Requiring a sign-in](#requiring-a-sign-in)
 - [Certificates](#certificates)
 - [Serving the UI over HTTPS](#serving-the-ui-over-https)
 - [Clustering](#clustering)
@@ -297,6 +298,42 @@ not HTTP.
 classic case: traffic goes to PostgreSQL on 5432, but the check is an HTTP
 request to 8008 that only the leader answers. Set **Check port** and choose an
 HTTP check; the rendered backend then checks one place and routes to another.
+
+## Requiring a sign-in
+
+A service can be put behind HTTP basic authentication. HAProxy checks the
+credentials from a `userlist` in the generated configuration, so a request
+without valid ones is answered with a 401 and never reaches a server.
+
+**Basic auth → Users** and **Basic auth → Groups** hold who may sign in. These
+accounts are only for published services; they give no access to this
+management UI.
+
+| Field | Notes |
+| --- | --- |
+| User name | letters, digits, and `. - _ @` — it travels in a configuration line and comes back from a browser |
+| Password | at least 8 characters, stored only as a SHA-512 crypt (`$6$`) hash. Leaving the field empty when editing keeps the current one. |
+| Groups | which groups the user belongs to |
+| Enabled | off keeps the account but stops it signing in anywhere |
+
+On the service itself (the publish wizard, or a Backend Pool under Advanced):
+
+| Field | Notes |
+| --- | --- |
+| Require a sign-in | HTTP services only — a raw TCP port has nowhere to carry one |
+| Allowed groups | none ticked admits any user; otherwise only members of those groups |
+| Sign-in prompt | the realm the browser shows above its password box; defaults to the pool name |
+
+Two edges are deliberate. A group that a service admits cannot be deleted while
+that service admits it — the request is refused and names the service. And a
+service that requires a sign-in nobody can satisfy (no users with a password
+yet, or every group it admitted is gone) renders as `http-request deny`:
+refusing everyone is safer than quietly becoming public.
+
+Users and groups are shared across the cluster, because the services that check
+them are. The backup carries them **without** the password hashes, like every
+other secret, so users restored from a backup need a password set again before
+they can sign in — the users already on the node keep theirs.
 
 ## Certificates
 
@@ -665,6 +702,7 @@ The JSON backup contains secrets. Store it accordingly.
 | ACME accounts, challenge types, certificates | This node's URL |
 | Cluster VRRP settings: VRID, VIPs, auth, interval | Keepalived interface, priority, state |
 | Notification settings and destinations | The UI's own HTTPS service, and its certificate |
+| Service sign-in users and groups | |
 | | Administrator login |
 | | Watchdog settings |
 

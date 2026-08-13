@@ -13,7 +13,7 @@ import uuid
 from .base import ACME_HOME, ACME_SH, _lock, app
 from .config import load_config, save_config
 from .util import _by_id, _sec, cert_details, cert_path, parse_domains, run
-from . import acme, wizard
+from . import access, acme, wizard
 
 # --------------------------------------------------------------------------
 
@@ -330,7 +330,8 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
                    certificate_id=None, new_certificate=False,
                    balance=None, persistence=None, stick_size=None, stick_expire=None,
                    stick_type=None, log_health_checks=False, check_port=None,
-                   timeout_connect=None, timeout_server=None, service_id=None):
+                   timeout_connect=None, timeout_server=None, service_id=None,
+                   auth=None):
     """Create (or update) everything needed to serve `pub` from `tgts`.
 
     Re-running for the same public host updates that mapping instead of adding
@@ -425,6 +426,24 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
         "timeout_connect": timeout_connect or "",
         "timeout_server": timeout_server or "",
     }
+    # A sign-in in front of the service. Silence leaves whatever the pool has:
+    # an edit that does not mention it must not switch it off.
+    if auth is not None:
+        want = bool(auth.get("enabled")) and not is_tcp
+        if want and not access.users_with_passwords(cfg):
+            raise ValueError("there is nobody to sign in yet -- add a user under "
+                             "Basic auth > Users first")
+        known = {g["id"] for g in access.section(cfg)["groups"] if g.get("id")}
+        missing = [g for g in (auth.get("groups") or []) if g not in known]
+        if missing:
+            raise ValueError("that group no longer exists")
+        pool_opts["auth_enabled"] = want
+        pool_opts["auth_groups"] = [g for g in (auth.get("groups") or [])] if want else []
+        pool_opts["auth_realm"] = (auth.get("realm") or "").strip() if want else ""
+        if bool(auth.get("enabled")) and is_tcp:
+            warns.append("A tcp:// service forwards a raw port, which carries no place to "
+                         "put a sign-in, so it was not applied. Publish the service over "
+                         "HTTPS to require one.")
 
     # -- Health Monitor ---------------------------------------------------
     monitor = None

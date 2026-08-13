@@ -18,6 +18,7 @@ from . import (
     config,
     util,
     auth,
+    access,
     validate,
     crud,
     haproxy,
@@ -46,8 +47,8 @@ from . import (
 # Imported for their side effect -- defining routes on `app` -- and named
 # here so that is deliberate rather than something a tidy-up removes.
 __all__ = [
-    "app", "log", "VERSION", "config", "util", "auth", "validate", "crud",
-    "haproxy", "keepalived", "apply", "acme", "notify", "watchdog",
+    "app", "log", "VERSION", "config", "util", "auth", "access", "validate",
+    "crud", "haproxy", "keepalived", "apply", "acme", "notify", "watchdog",
     "sync", "setup", "peering", "vrrp", "cluster", "stats", "traffic", "logs",
     "updates", "wizard", "dnsapi", "webui", "recipes", "backup", "static"
 ]

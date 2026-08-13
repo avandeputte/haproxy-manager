@@ -28,7 +28,7 @@ export const E={
   cols:[["name","Name"],["mode","Mode"],["balance","Balance",r=>r.balance||"roundrobin"],
         ["servers","Servers",r=>(r.servers||[]).map(id=>esc(nameOf("haproxy/servers",id))).join(", ")||"—"],
         ["hc","Check",r=>r.healthcheck_enabled?esc(nameOf("haproxy/healthchecks",r.healthcheck)):"off"]],
-  refs:["haproxy/servers","haproxy/healthchecks"],
+  refs:["haproxy/servers","haproxy/healthchecks","access/groups"],
   fields:[
    {k:"name",l:"Name",t:"text"},
    {k:"enabled",l:"Enabled",t:"bool",d:true},
@@ -46,6 +46,9 @@ export const E={
    {k:"stick_size",l:"Stick table size",t:"text",h:"For source persistence, e.g. 50k"},
    {k:"stick_expire",l:"Stick table expiry",t:"text",h:"For source persistence, e.g. 30m"},
    {k:"log_health_checks",l:"Log health check changes",t:"bool",h:"option log-health-checks"},
+   {k:"auth_enabled",l:"Require a sign-in",t:"bool",h:"HTTP basic authentication in front of this pool. HTTP mode only -- a raw TCP port has nowhere to put one."},
+   {k:"auth_groups",l:"Allowed groups",t:"refmulti",ref:"access/groups",h:"Leave nothing ticked to admit any user"},
+   {k:"auth_realm",l:"Sign-in prompt",t:"text",h:"What the browser shows above its password box. Defaults to the pool name."},
    {k:"custom",l:"Extra directives",t:"textarea",h:"Advanced. Raw lines added inside this backend, for anything the fields above do not cover -- for example \"http-reuse safe\". One per line. See the HAProxy configuration manual: https://docs.haproxy.org/2.6/configuration.html"}]},
 
  "haproxy/frontends":{title:"Public Services",add:"Add service",
@@ -114,6 +117,32 @@ export const E={
    {k:"http_host",l:"Host header",t:"text",h:"Only for the HTTP check"},
    {k:"db_user",l:"Database user",t:"text",h:"For the PostgreSQL and MySQL/MariaDB checks. Only the login handshake is performed -- no password is sent, so an account with no privileges is enough."},
    {k:"mysql_post41",l:"MySQL 4.1+ authentication",t:"bool",d:true,h:"Leave on for MariaDB and any modern MySQL"}]},
+
+ /* Who a service may ask to sign in. Nothing to do with the login for this UI:
+    these credentials are checked by HAProxy, in front of the service. */
+ "access/users":{title:"Users",add:"Add user",
+  intro:"People who may sign in to a service that asks for a password. HAProxy checks them itself, "+
+        "so a request without a valid password never reaches the servers behind it. "+
+        "They have no access to this management UI.",
+  cols:[["username","User name"],
+        ["groups","Groups",r=>(r.groups||[]).map(id=>esc(nameOf("access/groups",id))).join(", ")||"—"],
+        ["pw","Password",r=>r.has_password?"set":'<span class="pill warn">not set</span>'],
+        ["enabled","Enabled",r=>r.enabled!==false?"yes":"no"]],
+  refs:["access/groups"],
+  fields:[
+   {k:"username",l:"User name",t:"text",h:"What they type in the browser's password box"},
+   {k:"password",l:"Password",t:"password",h:"At least 8 characters. Leave empty when editing to keep the current one -- it cannot be read back."},
+   {k:"groups",l:"Groups",t:"refmulti",ref:"access/groups",h:"A service can admit whole groups rather than naming people one at a time"},
+   {k:"enabled",l:"Enabled",t:"bool",d:true,h:"Off keeps the account but stops it signing in anywhere"},
+   {k:"description",l:"Description",t:"text"}]},
+
+ "access/groups":{title:"Groups",add:"Add group",
+  intro:"Named sets of users. A service admits groups, so who may reach it changes by moving people "+
+        "in and out of a group rather than by editing the service.",
+  cols:[["name","Name"],["description","Description"]],
+  fields:[
+   {k:"name",l:"Name",t:"text"},
+   {k:"description",l:"Description",t:"text"}]},
 
  "acme/accounts":{title:"ACME Accounts",add:"Add account",
   intro:"ACME accounts used to request certificates.",

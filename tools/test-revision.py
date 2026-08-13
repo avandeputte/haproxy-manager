@@ -75,8 +75,8 @@ ok(shared_fingerprint(load_config()) != before,
    "the order of the objects is part of what is compared")
 ok(rev() > start + 1, "and reordering counts as a change")
 
-ok(set(shared_view(load_config())) == {"haproxy", "acme", "cluster", "notify"},
-   "the shared view is exactly the four shared sections")
+ok(set(shared_view(load_config())) == {"haproxy", "acme", "access", "cluster", "notify"},
+   "the shared view is exactly the five shared sections")
 ok("own-ui" not in [x.get("name") for x in shared_view(load_config())["haproxy"]["backends"]],
    "and carries none of this node's own objects")
 

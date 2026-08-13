@@ -48,13 +48,21 @@ def api_export_config():
     private keys under the certificate directory are deliberately left out: a
     backup should be safe to copy around, and node-local settings differ per
     node by design.
+
+    Service users and groups are included, without their passwords, so the
+    services that admit them restore intact. Each restored user has to be
+    given a password again before they can sign in.
     """
     cfg = load_config()
+    users = [{k: v for k, v in u.items() if k != "hash"}
+             for u in (cfg.get("access") or {}).get("users") or []]
     payload = {
         "format": BACKUP_FORMAT,
         "exported": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "source": socket.gethostname(),
-        "config": {"haproxy": cfg["haproxy"], "acme": cfg["acme"]},
+        "config": {"haproxy": cfg["haproxy"], "acme": cfg["acme"],
+                   "access": {"users": users,
+                              "groups": (cfg.get("access") or {}).get("groups") or []}},
     }
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     return _download(json.dumps(payload, indent=2) + "\n",
@@ -98,6 +106,25 @@ def api_import_config():
                                     "%s/%s should be a list" % (section, coll)}), 400
             cfg[section] = _merge_defaults(copy.deepcopy(part), DEFAULT_CONFIG[section])
             restored[section] = _count_objects(cfg[section])
+        part = incoming.get("access")
+        if isinstance(part, dict):
+            # A backup carries no passwords. A user who is already here keeps
+            # the one this node has -- restoring a backup should not log
+            # everybody out of the services they can currently reach.
+            had = {u.get("id"): u.get("hash") for u in (cfg.get("access") or {}).get("users") or []}
+            users = []
+            for u in part.get("users") or []:
+                if not isinstance(u, dict):
+                    continue
+                u = dict(u)
+                u.setdefault("id", str(uuid.uuid4()))
+                u["hash"] = had.get(u["id"], "")
+                users.append(u)
+            groups = [g for g in part.get("groups") or [] if isinstance(g, dict)]
+            for g in groups:
+                g.setdefault("id", str(uuid.uuid4()))
+            cfg["access"] = {"users": users, "groups": groups}
+            restored["access"] = _count_objects(cfg["access"])
         # Anything without an id would be invisible to the CRUD endpoints.
         for section in ("haproxy", "acme"):
             for coll in VALID_COLLECTIONS[section]:

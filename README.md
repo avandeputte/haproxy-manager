@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.80.0_all.deb
+sudo apt-get install -y ./haproxy-manager_1.81.0_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -173,6 +173,44 @@ and the resulting `haproxy.cfg`, before anything is written.
   node health, certificates and the generated configuration. **Services** shows
   the same table on its own. Delete removes the objects that mapping alone was
   using.
+
+## Requiring a sign-in
+
+A service can ask visitors for a user name and password before it lets them
+through — HTTP basic authentication, checked by HAProxy itself, so a request
+without valid credentials never reaches the servers behind it.
+
+Tick **Require a sign-in** in the publish wizard (or on a Backend Pool under
+Advanced), and manage who may answer it under **Basic auth**:
+
+- **Users** — a name and a password. The password is stored only as a SHA-512
+  crypt hash, the format HAProxy reads, and cannot be read back: editing a user
+  and leaving the password field empty keeps the current one. A user can be
+  disabled without being deleted.
+- **Groups** — named sets of users. A service admits groups rather than people,
+  so who may reach it changes by moving someone in or out of a group. Leave no
+  group ticked on a service and any user may sign in. A group a service depends
+  on cannot be deleted until that service stops admitting it.
+
+These accounts have nothing to do with the login for this management UI. They
+are shared across the cluster, like the services that check them, so a failover
+meets the same credentials. What ends up in `haproxy.cfg` is a `userlist` and
+one line per protected pool:
+
+```
+userlist ham_users
+    group staff
+    user alice password $6$... groups staff
+
+backend be_shop
+    http-request auth realm "The Shop" unless { http_auth_group(ham_users) staff }
+```
+
+A service that requires a sign-in nobody can give — no users yet, or the only
+group it admits has been removed — refuses every request rather than serving
+itself to everyone. Basic authentication is part of HTTP, so a `tcp://` service
+cannot use it, and the wizard does not offer it there. Use it over HTTPS: on
+plain HTTP the credentials cross the network in the clear.
 
 The **Advanced** section still exposes every object individually, for the cases
 the wizard does not cover (header rewriting, custom ACLs, per-object tuning). It
@@ -751,10 +789,13 @@ until it is put right. Apply names that case when it happens.
   changes nothing on the node.
 - **Configuration backup** — a JSON file holding everything the UI manages
   (Real Servers, Backend Pools, Public Services, Conditions, Rules, Health
-  Monitors, HAProxy Settings and every ACME object). Restoring replaces all of
-  those and leaves node-local settings — Keepalived, Sync, the login, the API
-  key — untouched, so the same file can seed a second node. Nothing is applied
-  until you press **Apply**, so you can review the result first.
+  Monitors, HAProxy Settings, every ACME object, and the users and groups a
+  service can ask visitors to sign in with — without their passwords).
+  Restoring replaces all of those and leaves node-local settings — Keepalived,
+  Sync, the login, the API key — untouched, so the same file can seed a second
+  node. A restored user keeps no password, and one already on the node keeps
+  the one it has. Nothing is applied until you press **Apply**, so you can
+  review the result first.
 
 The backup deliberately contains **no secrets**: no API key, no login, and no
 private keys from the certificate directory. Certificates move between nodes
@@ -776,7 +817,7 @@ over Sync, or are re-issued.
   Until then only the calls that create it answer — everything else returns 401 —
   so a node waiting to be set up does not hand its configuration to whoever
   reaches it first.
-- **Every API endpoint requires a session or the API key.** Of 65 routes exactly
+- **Every API endpoint requires a session or the API key.** Of 69 routes exactly
   three answer without either: `/api/login`, `/api/whoami` (which
   unauthenticated returns nothing but whether an administrator exists), and
   `/api/setup`, which refuses once an administrator exists. This is verified by
