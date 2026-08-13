@@ -20,25 +20,61 @@ export function since(sec){
   if(n<60)return n+"s";if(n<3600)return Math.floor(n/60)+"m";
   if(n<86400)return Math.floor(n/3600)+"h";return Math.floor(n/86400)+"d";
 }
+/* The page refreshes every five seconds, and rebuilding it wholesale made it
+   blink: emptying the container removes everything on screen for the moment it
+   takes to build the replacement, and takes the table sorting and any text
+   selection with it. So each card is built as a string, compared with what is
+   already there, and only written when it has actually changed -- which on a
+   quiet proxy is almost never. */
+function paint(cards){
+  const c=$("#content");
+  const have={};
+  [...c.children].forEach(el=>{
+    if(el.dataset.card)have[el.dataset.card]=el; else el.remove();
+  });
+  let previous=null;
+  cards.forEach(({key,html})=>{
+    let el=have[key];
+    if(!el){
+      el=document.createElement("div");el.className="card";el.dataset.card=key;
+      c.insertBefore(el,previous?previous.nextSibling:c.firstChild);
+    }
+    if(el.dataset.html!==html){
+      el.innerHTML=html;
+      el.dataset.html=html;
+    }
+    delete have[key];
+    previous=el;
+  });
+  Object.values(have).forEach(el=>el.remove());   /* pools that have gone */
+}
+
+/* The history changes once a minute; the live figures every five seconds.
+   Re-fetching it on every refresh would be five times the work for one
+   twelfth of the news. */
+let historyAt=0, historyHtml="";
+
 export async function renderStats(){
   const c=$("#content");
   let st;
-  try{st=await api("stats");}catch(e){c.innerHTML='<div class="card"><div class="bd">'+esc(e.message)+"</div></div>";return;}
-  c.innerHTML="";
+  try{st=await api("stats");}
+  catch(e){c.innerHTML='<div class="card"><div class="bd">'+esc(e.message)+"</div></div>";return;}
   if(!st.ok){
     c.innerHTML='<div class="card"><div class=hd><h2>Statistics</h2></div><div class="bd"><p class=hint>'+esc(st.error)+"</p></div></div>";
     return;
   }
 
-  /* The figures above are what is happening now; this is what happened.
-     "When did it start" is not answerable from a live gauge. */
-  try{
-    const h=await api("traffic");
-    if((h.at||[]).length>1)c.appendChild(historyCard(h));
-  }catch(e){/* history is a nicety; the live figures are the page */}
+  if(Date.now()-historyAt>60000){
+    historyAt=Date.now();
+    try{
+      const h=await api("traffic");
+      historyHtml=(h.at||[]).length>1?historyCard(h):"";
+    }catch(e){/* history is a nicety; the live figures are the page */}
+  }
 
-  const fe=document.createElement("div");fe.className="card";
-  fe.innerHTML='<div class=hd><h2>Listeners</h2><div class=sp></div><span class=hint>refreshes every 5s</span></div>'+
+  const cards=[];
+  if(historyHtml)cards.push({key:"traffic",html:historyHtml});
+  cards.push({key:"listeners",html:'<div class=hd><h2>Listeners</h2><div class=sp></div><span class=hint>refreshes every 5s</span></div>'+
     (st.frontends.length?"<table><thead><tr><th>Name</th><th>Status</th><th>Sessions</th><th>Rate</th>"+
       "<th>In</th><th>Out</th><th>Denied</th><th>Errors</th></tr></thead><tbody>"+
       st.frontends.map(f=>"<tr><td class=mono>"+esc(f.proxy)+"</td><td>"+statusPill(f.status)+"</td>"+
@@ -46,13 +82,11 @@ export async function renderStats(){
         "<td>"+num(f.rate)+"/s <span class=sub>max "+num(f.rate_max)+"</span></td>"+
         "<td>"+bytes(f.bin)+"</td><td>"+bytes(f.bout)+"</td>"+
         "<td>"+num(f.dreq)+"</td><td>"+num(f.ereq)+"</td></tr>").join("")+"</tbody></table>"
-     :'<div class=empty>No listeners are running. Publish a service and press Apply.</div>');
-  c.appendChild(fe);
+     :'<div class=empty>No listeners are running. Publish a service and press Apply.</div>')});
 
   st.backends.forEach(be=>{
-    const card=document.createElement("div");card.className="card";
     const allUp=be.servers_total&&be.servers_up===be.servers_total;
-    card.innerHTML='<div class=hd><h2>'+esc(be.proxy)+'</h2><div class=sp></div>'+
+    cards.push({key:"be:"+be.proxy,html:'<div class=hd><h2>'+esc(be.proxy)+'</h2><div class=sp></div>'+
         statusPill(be.status)+' <span class="pill '+(be.servers_total?(allUp?"up":be.servers_up?"warn":"down"):"off")+'">'+
         be.servers_up+"/"+be.servers_total+" up</span></div>"+
       "<table><thead><tr><th>Server</th><th>Status</th><th>Role</th><th>Sessions</th><th>Queue</th>"+
@@ -72,20 +106,18 @@ export async function renderStats(){
         "<td>"+num(be.scur)+" <span class=sub>total "+num(be.stot)+"</span></td><td>"+num(be.qcur)+"</td>"+
         "<td>"+bytes(be.bin)+"</td><td>"+bytes(be.bout)+"</td><td>—</td>"+
         "<td>"+num(be.econ)+" conn err</td><td>"+since(be.downtime)+"</td></tr>"+
-      "</tbody></table>";
-    c.appendChild(card);
+      "</tbody></table>"});
   });
 
+  paint(cards);
   state.pageTimer=setTimeout(()=>{if(location.hash==="#/p:stats")renderStats();},5000);
 }
 
 
 /* ---- what happened, a minute at a time ---- */
+/* Returns markup rather than an element, like every other card here, so the
+   page can tell whether anything has changed by comparing strings. */
 function historyCard(h){
-  const card=document.createElement("div");card.className="card";
-  card.innerHTML='<div class=hd><h2>Traffic</h2><div class=sp></div>'+
-    "<span class=hint>"+esc(h.span)+" of history, one point a minute</span></div>";
-  const bd=document.createElement("div");bd.className="bd";
   /* Busiest first: a page of flat lines with the interesting one at the
      bottom is a page nobody reads to the bottom of. */
   const rows=Object.keys(h.series||{}).map(name=>{
@@ -94,12 +126,13 @@ function historyCard(h){
             req:(s.req||[]).reduce((a,b)=>a+b,0),
             err:(s.e5||[]).reduce((a,b)=>a+b,0)};
   }).filter(r=>r.req||r.err).sort((a,b)=>b.req-a.req);
-  if(!rows.length){
-    bd.innerHTML='<p class=hint>Nothing has been served yet in the recorded window.</p>';
-    card.appendChild(bd);return card;
-  }
-  bd.innerHTML="<table><thead><tr><th>Pool</th><th>Traffic</th><th>Requests</th>"+
-    "<th>Server errors</th><th>Busiest minute</th></tr></thead><tbody>"+
+  const head='<div class=hd><h2>Traffic</h2><div class=sp></div>'+
+    "<span class=hint>"+esc(h.span)+" of history, one point a minute</span></div>";
+  if(!rows.length)
+    return head+'<div class="bd"><p class=hint>Nothing has been served yet in the '+
+      "recorded window.</p></div>";
+  return head+'<div class="bd"><table><thead><tr><th>Pool</th><th>Traffic</th>'+
+    "<th>Requests</th><th>Server errors</th><th>Busiest minute</th></tr></thead><tbody>"+
     rows.map(r=>{
       const peak=Math.max(0,...(r.s.req||[]));
       return "<tr><td class=mono>"+esc(r.name.replace(/^b[ek]_/,""))+"</td>"+
@@ -107,11 +140,8 @@ function historyCard(h){
         "<td>"+num(r.req)+"</td>"+
         "<td>"+(r.err?'<span style="color:var(--down)">'+num(r.err)+"</span>":"0")+"</td>"+
         "<td>"+num(peak)+" <span class=sub>req/min</span></td></tr>";
-    }).join("")+"</tbody></table>";
-  const foot=document.createElement("div");foot.className="hint";
-  foot.style.padding="8px 16px";
-  foot.textContent="Collected on this node only, and only while it is running -- "+
-    "a gap in the line is a gap in the recording, not in the traffic.";
-  bd.appendChild(foot);
-  card.appendChild(bd);return card;
+    }).join("")+"</tbody></table>"+
+    '<div class=hint style="padding:8px 16px">Collected on this node only, and '+
+    "only while it is running &mdash; a gap in the line is a gap in the recording, "+
+    "not in the traffic.</div></div>";
 }
