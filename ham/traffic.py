@@ -8,6 +8,8 @@ import os
 import time
 
 from .base import DATA_DIR, _lock, app, log
+from .config import merged
+from .util import _sec
 from . import auth, notify, stats
 
 # One sample a minute for a day. Enough to see when something began and how
@@ -197,18 +199,37 @@ def _pool_label(name):
     return name
 
 
+def notify_modes(cfg):
+    """Each pool's "Alert when" setting, keyed by the name HAProxy reports.
+
+    Not every pool means the same thing by a failing server. A load-balanced
+    pool losing one of three is degraded; a Patroni pool is *designed* to have
+    one server passing and the rest failing -- the health check is doing the
+    routing -- so "down to 1 of 3" is its healthy state, and the only news
+    would be nobody passing at all.
+    """
+    return {"be_" + _sec(b.get("name") or ""): b.get("notify_mode") or "servers"
+            for b in merged(cfg)["haproxy"]["backends"]}
+
+
 def check_services(cfg, data):
     """Say when a service loses servers, and when it gets them back.
 
     From the health checks HAProxy is already running -- it knows which servers
     are up long before anything here would, and it is the thing actually
     deciding where traffic goes. Only changes are reported: a service that has
-    been down for a week does not need saying again.
+    been down for a week does not need saying again. What counts as news is
+    the pool's own "Alert when" setting: any server lost, only a full outage,
+    or nothing at all.
     """
+    modes = notify_modes(cfg)
     for be in data.get("backends") or []:
         name = be.get("proxy") or ""
         if name in INTERNAL_POOLS:
             continue
+        mode = modes.get(name, "servers")
+        if mode == "off":
+            continue                      # this service looks after itself
         total = int(be.get("servers_total") or 0)
         if not total:
             continue                      # nothing to be up or down
@@ -226,18 +247,25 @@ def check_services(cfg, data):
                 "%s has no servers left" % label,
                 "Every server behind %s is failing its health check, so requests for it "
                 "get a 503.\n\n%s" % (label, detail), "error", cfg)
-        elif down:
+        elif down and mode == "servers":
             notify.notify_transition(
                 "service:" + name, "degraded", "service",
                 "%s is down to %d of %d servers" % (label, up, total),
                 "%s is still serving on the servers that are up.\n\n%s" % (label, detail),
                 "warning", cfg)
         else:
+            # Healthy -- which for an outage-only pool includes servers
+            # failing their checks, so the recovery text must not claim they
+            # all pass when the point of the setting is that they need not.
+            body = ("All %d server%s behind %s are passing their health checks."
+                    % (total, "" if total == 1 else "s", label)) if not down else \
+                   ("%d of %d servers behind %s pass the health check, which is how "
+                    "this pool is meant to run -- it alerts only when none are left."
+                    % (up, total, label))
             notify.notify_transition(
                 "service:" + name, "ok", "service",
-                "%s is healthy again" % label,
-                "All %d server%s behind %s are passing their health checks."
-                % (total, "" if total == 1 else "s", label), "info", cfg)
+                "%s is %s again" % (label, "healthy" if not down else "serving"),
+                body, "info", cfg)
 
 
 def history(pool=None, minutes=None):

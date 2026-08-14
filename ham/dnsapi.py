@@ -331,7 +331,7 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
                    balance=None, persistence=None, stick_size=None, stick_expire=None,
                    stick_type=None, log_health_checks=False, check_port=None,
                    timeout_connect=None, timeout_server=None, service_id=None,
-                   auth=None, allow_src=None):
+                   auth=None, allow_src=None, notify_mode=None):
     """Create (or update) everything needed to serve `pub` from `tgts`.
 
     Re-running for the same public host updates that mapping instead of adding
@@ -425,6 +425,10 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
         "log_health_checks": bool(log_health_checks),
         "timeout_connect": timeout_connect or "",
         "timeout_server": timeout_server or "",
+        # What losing a server means for this pool: news, or Tuesday. A
+        # Patroni pool is designed to have one server passing, so "some are
+        # down" is its healthy state and only a full outage is worth a word.
+        "notify_mode": notify_mode if notify_mode in ("servers", "outage", "off") else "servers",
     }
     # Who may reach it by source address. Same contract as auth: silence
     # leaves the pool as it is, an empty string switches it off. Refused here

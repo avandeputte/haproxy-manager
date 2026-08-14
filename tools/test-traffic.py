@@ -12,7 +12,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 os.environ.setdefault("HAM_DATA_DIR", tempfile.mkdtemp(prefix="ham-traffic-"))
 os.environ["HAM_DRY_RUN"] = "1"
 
-import ham                                        # noqa: E402
+import ham; ham                                   # noqa: E402  (route registration)
 from ham import auth, notify, traffic             # noqa: E402
 from ham.config import load_config                # noqa: E402
 
@@ -91,6 +91,40 @@ sent.clear()
 traffic.check_services(cfg, {"ok": True, "backends": [
     {"proxy": "bk_acme_challenge", "servers_up": 0, "servers_total": 1, "servers": []}]})
 ok(sent == [], "the app's own acme pool is not a service anybody published")
+
+# -- what losing a server means is the pool's own business -------------------
+# A Patroni pool is designed to have one server passing its check -- the check
+# IS the routing -- so "down to 1 of 3" is its healthy state, and reporting it
+# as degraded cried wolf on every round. Its news is nobody passing at all.
+sent.clear()
+notify._notify_state.clear()
+cfg["haproxy"]["backends"] = [{"id": "pg", "name": "shop", "servers": [],
+                               "notify_mode": "outage"}]
+traffic.check_services(cfg, stats_for(1, 3))
+ok(sent == [], "an outage-only pool with one of three passing is healthy, not degraded")
+traffic.check_services(cfg, stats_for(0, 3))
+ok(len(sent) == 1 and "no servers left" in sent[0][0],
+   "losing the last one is still the emergency it always was")
+traffic.check_services(cfg, stats_for(1, 3))
+ok(len(sent) == 2 and "serving again" in sent[1][0],
+   "and one server coming back closes it: %s" % (sent[-1:],))
+ok("meant to run" not in sent[1][0], "with a subject that does not overclaim")
+
+sent.clear()
+notify._notify_state.clear()
+cfg["haproxy"]["backends"][0]["notify_mode"] = "off"
+traffic.check_services(cfg, stats_for(0, 3))
+traffic.check_services(cfg, stats_for(3, 3))
+ok(sent == [], "a pool set to never is never spoken about, even for an outage")
+
+sent.clear()
+notify._notify_state.clear()
+cfg["haproxy"]["backends"][0]["notify_mode"] = "servers"
+traffic.check_services(cfg, stats_for(1, 3))
+ok(len(sent) == 1 and "1 of 3" in sent[0][0],
+   "the default still treats any lost server as news")
+cfg["haproxy"]["backends"] = []
+notify._notify_state.clear()
 
 # -- the history -----------------------------------------------------------
 traffic._state.update({"loaded": True, "at": [], "series": {}, "last": {}, "sampled": 0.0})

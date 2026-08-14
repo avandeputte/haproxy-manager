@@ -415,6 +415,7 @@ def api_services():
             "stick_size": pool.get("stick_size") or "50k",
             "stick_expire": pool.get("stick_expire") or "30m",
             "log_health_checks": bool(pool.get("log_health_checks")),
+            "notify_mode": pool.get("notify_mode") or "servers",
             "check_port": first.get("check_port") or "",
             "timeout_connect": pool.get("timeout_connect") or "",
             "timeout_server": pool.get("timeout_server") or "",

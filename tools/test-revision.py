@@ -18,10 +18,9 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 os.environ.setdefault("HAM_DATA_DIR", tempfile.mkdtemp(prefix="ham-rev-"))
 os.environ["HAM_DRY_RUN"] = "1"
 
-import ham   # noqa: E402
-from ham import wizard   # noqa: E402
+import ham; ham   # noqa: E402  (route registration)
 from ham.config import (load_config, save_config, shared_fingerprint,   # noqa: E402
-                        shared_view, WEBUI_NAME)
+                        shared_view)
 
 fails = []
 

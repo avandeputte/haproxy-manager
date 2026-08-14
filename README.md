@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.84.2_all.deb
+sudo apt-get install -y ./haproxy-manager_1.85.0_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -597,6 +597,23 @@ deciding where traffic goes — so that is what the alerts come from. A service
 whose servers all fail their checks is reported as down, one that loses some
 of them as degraded, naming the servers and what their last check said. When
 it recovers, that is reported too.
+
+**What losing a server means is the service's own business.** Not every pool
+means the same thing by a failing check. A load-balanced pool losing one of
+three is degraded — but a Patroni pool is *designed* to have exactly one
+server passing, because the health check is what does the routing: "down to
+1 of 3" is its healthy state, and alerting on it is crying wolf on every
+round. So each service carries an **Alert when** setting, in the publish
+wizard beside the health check:
+
+- **a server is lost** (the default) — any failing server is a warning, a
+  pool with none left is an error
+- **no server is left** — only the outage is news; servers failing their
+  checks is normal running. The right choice for leader-election pools, and
+  what the Patroni recipes now set by themselves. Recovery is reported the
+  moment one server passes again, worded for what it is — "serving again",
+  not a false "all servers healthy".
+- **never** — this service looks after itself
 
 **Only the node holding the virtual IP says anything about services.** Every
 node runs the same checks, so three nodes would send three copies of every

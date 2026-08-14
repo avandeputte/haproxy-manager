@@ -2,7 +2,7 @@
   "name": "PostgreSQL — Patroni, writes",
   "category": "Databases",
   "summary": "TCP 5432 to whichever node is the leader, found by asking Patroni.",
-  "notes": "Patroni answers GET /primary with 200 on the leader and 503 everywhere else, so the health check does the routing: every replica is simply down for this pool, and a failover moves traffic without changing anything here. Traffic goes to 5432 while the check goes to Patroni's REST API on 8008.",
+  "notes": "Patroni answers GET /primary with 200 on the leader and 503 everywhere else, so the health check does the routing: every replica is simply down for this pool, and a failover moves traffic without changing anything here. Traffic goes to 5432 while the check goes to Patroni's REST API on 8008. The pool alerts only when no server is left: servers failing the check is its normal running state.",
   "fields": {
     "url": "tcp://0.0.0.0:5432",
     "target": "pg1=10.0.0.1:5432, pg2=10.0.0.2:5432, pg3=10.0.0.3:5432",
@@ -16,6 +16,7 @@
     "health_interval": "3s",
     "timeout_server": "30m",
     "timeout_connect": "5s",
-    "log_health_checks": true
+    "log_health_checks": true,
+    "notify_mode": "outage"
   }
 }

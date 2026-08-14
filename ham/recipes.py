@@ -146,6 +146,7 @@ def api_wizard_publish():
                 timeout_server=body.get("timeout_server") or None,
                 auth=body.get("auth") if isinstance(body.get("auth"), dict) else None,
                 allow_src=body.get("allow_src") if isinstance(body.get("allow_src"), str) else None,
+                notify_mode=body.get("notify_mode") or None,
             )
         except ValueError as e:                     # a rejected request, not a crash
             return jsonify({"ok": False, "error": str(e)}), 400

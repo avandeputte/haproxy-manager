@@ -2,7 +2,7 @@
   "name": "PostgreSQL — Patroni, read-only",
   "category": "Databases",
   "summary": "TCP 5433 spread across the replicas, never the leader.",
-  "notes": "The mirror image of the writes recipe: GET /replica answers 200 on the followers only. Publish it on a different port from the writes pool so an application can choose which it wants.",
+  "notes": "The mirror image of the writes recipe: GET /replica answers 200 on the followers only. Publish it on a different port from the writes pool so an application can choose which it wants. The pool alerts only when no server is left: servers failing the check is its normal running state.",
   "fields": {
     "url": "tcp://0.0.0.0:5433",
     "target": "pg1=10.0.0.1:5432, pg2=10.0.0.2:5432, pg3=10.0.0.3:5432",
@@ -16,6 +16,7 @@
     "health_interval": "3s",
     "timeout_server": "30m",
     "timeout_connect": "5s",
-    "log_health_checks": true
+    "log_health_checks": true,
+    "notify_mode": "outage"
   }
 }

@@ -55,6 +55,7 @@ reloads. A configuration that does not validate is never written.
 | Certificate | reuse an existing one, issue a new one, use a wildcard that already covers the name, or none |
 | Health check | none, TCP connect, HTTP request, PostgreSQL login, MySQL/MariaDB login |
 | Balance | round robin, least connections, source |
+| Alert when | what losing a server means here: any server lost (default), only a full outage — for pools where one passing server is the design, like Patroni — or never |
 | Persistence | none, or source-IP stickiness with a table size and expiry |
 
 ### Recipes

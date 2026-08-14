@@ -46,6 +46,8 @@ export const E={
    {k:"stick_size",l:"Stick table size",t:"text",h:"For source persistence, e.g. 50k"},
    {k:"stick_expire",l:"Stick table expiry",t:"text",h:"For source persistence, e.g. 30m"},
    {k:"log_health_checks",l:"Log health check changes",t:"bool",h:"option log-health-checks"},
+   {k:"notify_mode",l:"Alert when",t:"select",o:["servers","outage","off"],d:"servers",
+    h:"servers: any server lost is a warning. outage: alert only when no server is left -- for pools where only one is meant to pass, like a Patroni leader. off: never."},
    {k:"allow_src",l:"Allowed networks",t:"textarea",h:"Optional. One address or CIDR per line; requests from anywhere else are refused. Works in TCP mode too. An entry that does not parse refuses everyone rather than being ignored."},
    {k:"auth_enabled",l:"Require a sign-in",t:"bool",h:"HTTP basic authentication in front of this pool. HTTP mode only -- a raw TCP port has nowhere to put one."},
    {k:"auth_groups",l:"Allowed groups",t:"refmulti",ref:"access/groups",h:"Leave nothing ticked to admit any user"},

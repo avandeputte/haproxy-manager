@@ -40,6 +40,8 @@ export const WIZ_FIELDS=[
  {k:"timeout_connect",l:"Connect timeout",t:"text",h:"Optional, for this pool only, e.g. 5s"},
  {k:"timeout_server",l:"Server timeout",t:"text",h:"Optional, for this pool only, e.g. 30s. Long-lived connections such as databases usually need more than the default."},
  {k:"log_health_checks",l:"Log health check changes",t:"bool",h:"option log-health-checks -- records every up/down transition"},
+ {k:"notify_mode",l:"Alert when",t:"select",d:"servers",o:["servers","outage","off"],
+  h:"What losing a server means here. For a pool where only one server is meant to pass -- a Patroni leader, a primary with standbys -- the rest failing is normal running, so alert only when no server is left."},
  {k:"allow_src",l:"Allowed networks",t:"textarea",
   h:"Optional. One address or CIDR per line, e.g. 192.168.0.0/16 -- requests from anywhere else are refused. Works for tcp:// services too. Empty allows all."},
  {k:"auth_enabled",l:"Require a sign-in",t:"bool",
@@ -60,6 +62,9 @@ export const HEALTH_SHOWS={none:[],tcp:["health_interval"],
 export const CERT_MODE_LABEL={auto:"auto -- reuse one that covers this host",
                        new:"always request a new certificate",
                        none:"no certificate"};
+export const NOTIFY_MODE_LABEL={servers:"a server is lost",
+                       outage:"no server is left -- some servers down is normal here",
+                       off:"never -- this service looks after itself"};
 
 /* Tell the user which certificate a host will end up using, before they commit. */
 export async function updateCertNote(note){
@@ -151,6 +156,8 @@ export function openWizard(prefill){
   if(sel)[...sel.options].forEach(o=>{o.textContent=CERT_MODE_LABEL[o.value]||o.value;});
   const hsel=frm.querySelector("#f_health");
   if(hsel)[...hsel.options].forEach(o=>{o.textContent=HEALTH_LABEL[o.value]||o.value;});
+  const nsel=frm.querySelector("#f_notify_mode");
+  if(nsel)[...nsel.options].forEach(o=>{o.textContent=NOTIFY_MODE_LABEL[o.value]||o.value;});
   const setRow=(k,on)=>{(rows[k]||[]).forEach(el=>{el.style.display=on?"":"none";});};
   const val=k=>((fieldEl(k)||{}).value||"");
   const syncRows=()=>{
@@ -319,6 +326,7 @@ export async function servicesCard(){
         balance:s.balance,persistence:s.persistence,stick_type:s.stick_type,
         stick_size:s.stick_size,stick_expire:s.stick_expire,
         log_health_checks:s.log_health_checks,check_port:s.check_port,
+        notify_mode:s.notify_mode,
         health:(s.health||{}).type,health_interval:(s.health||{}).interval,
         health_uri:(s.health||{}).uri,health_status:(s.health||{}).status,
         health_user:(s.health||{}).user,health_method:(s.health||{}).method,
