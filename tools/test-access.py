@@ -149,6 +149,49 @@ out = haproxy.render_haproxy(cfg)
 ok("http-request auth" not in out and "http-request deny" not in out,
    "a TCP pool gets no sign-in: there is nowhere in the protocol to put one")
 
+# -- source addresses -------------------------------------------------------
+ok(access.networks("192.168.0.0/16\n10.0.0.5")[0] == ["192.168.0.0/16", "10.0.0.5/32"],
+   "a bare address is one host, a CIDR is itself")
+ok(access.networks("192.168.1.7/24")[0] == ["192.168.1.0/24"],
+   "host bits under a prefix are masked rather than refused")
+ok(access.networks("not-a-net 10.0.0.0/8")[1] == ["not-a-net"],
+   "what does not parse is reported, not dropped in silence")
+
+cfg = fresh()
+cfg["haproxy"]["backends"][0]["allow_src"] = "192.168.0.0/16\n10.0.0.5"
+out = haproxy.render_haproxy(cfg)
+ok("http-request deny unless { src 192.168.0.0/16 10.0.0.5/32 }" in out,
+   "an allow list refuses everyone it does not name")
+ok(out.index("http-request deny unless") < out.index("http-request auth"),
+   "and is checked before the sign-in")
+
+cfg = fresh()
+cfg["haproxy"]["backends"][0]["mode"] = "tcp"
+cfg["haproxy"]["backends"][0]["allow_src"] = "192.168.0.0/16"
+out = haproxy.render_haproxy(cfg)
+ok("tcp-request content reject unless { src 192.168.0.0/16 }" in out,
+   "a TCP pool gets the same restriction in its own dialect")
+
+cfg = fresh()
+cfg["haproxy"]["backends"][0]["auth_enabled"] = False
+cfg["haproxy"]["backends"][0]["allow_src"] = "not-a-network"
+out = haproxy.render_haproxy(cfg)
+ok("http-request deny" in out and "unless" not in out.split("backend be_shop")[1],
+   "an allow list nobody can parse refuses everyone rather than admitting everyone")
+
+cfg = fresh()
+cfg["haproxy"]["backends"][0]["auth_exempt_src"] = "192.168.1.0/24"
+out = haproxy.render_haproxy(cfg)
+ok('unless { src 192.168.1.0/24 } or { http_auth_group(ham_users) staff }' in out,
+   "an exempt network skips the prompt, everyone else is asked")
+
+cfg = fresh()
+cfg["access"]["users"] = []
+cfg["haproxy"]["backends"][0]["auth_exempt_src"] = "192.168.1.0/24"
+out = haproxy.render_haproxy(cfg)
+ok("http-request deny unless { src 192.168.1.0/24 }" in out,
+   "with nobody able to sign in, the exempt networks still get in and nobody else does")
+
 # -- what is shared ---------------------------------------------------------
 cfg = fresh()
 ok("access" in shared_view(cfg),

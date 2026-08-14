@@ -22,6 +22,7 @@ from . import (
     validate,
     crud,
     haproxy,
+    history,
     keepalived,
     apply,
     acme,
@@ -30,6 +31,7 @@ from . import (
     sync,
     setup,
     peering,
+    probe,
     vrrp,
     cluster,
     stats,
@@ -48,7 +50,8 @@ from . import (
 # here so that is deliberate rather than something a tidy-up removes.
 __all__ = [
     "app", "log", "VERSION", "config", "util", "auth", "access", "validate",
-    "crud", "haproxy", "keepalived", "apply", "acme", "notify", "watchdog",
-    "sync", "setup", "peering", "vrrp", "cluster", "stats", "traffic", "logs",
+    "crud", "haproxy", "history", "keepalived", "apply", "acme", "notify",
+    "watchdog",
+    "sync", "setup", "peering", "probe", "vrrp", "cluster", "stats", "traffic", "logs",
     "updates", "wizard", "dnsapi", "webui", "recipes", "backup", "static"
 ]

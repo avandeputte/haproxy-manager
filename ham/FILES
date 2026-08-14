@@ -10,10 +10,12 @@ config.py
 crud.py
 dnsapi.py
 haproxy.py
+history.py
 keepalived.py
 logs.py
 notify.py
 peering.py
+probe.py
 recipes.py
 setup.py
 static.py

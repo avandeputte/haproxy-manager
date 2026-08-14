@@ -331,7 +331,7 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
                    balance=None, persistence=None, stick_size=None, stick_expire=None,
                    stick_type=None, log_health_checks=False, check_port=None,
                    timeout_connect=None, timeout_server=None, service_id=None,
-                   auth=None):
+                   auth=None, allow_src=None):
     """Create (or update) everything needed to serve `pub` from `tgts`.
 
     Re-running for the same public host updates that mapping instead of adding
@@ -426,6 +426,16 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
         "timeout_connect": timeout_connect or "",
         "timeout_server": timeout_server or "",
     }
+    # Who may reach it by source address. Same contract as auth: silence
+    # leaves the pool as it is, an empty string switches it off. Refused here
+    # when an entry does not parse -- at the form, where the typo can be
+    # fixed, rather than at the renderer, which can only fail closed.
+    if allow_src is not None:
+        good, bad = access.networks(allow_src)
+        if bad:
+            raise ValueError("not a network: %s -- one address or CIDR per line, "
+                             "e.g. 192.168.0.0/16" % ", ".join(bad[:3]))
+        pool_opts["allow_src"] = "\n".join(good)
     # A sign-in in front of the service. Silence leaves whatever the pool has:
     # an edit that does not mention it must not switch it off.
     if auth is not None:
@@ -440,6 +450,11 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
         pool_opts["auth_enabled"] = want
         pool_opts["auth_groups"] = [g for g in (auth.get("groups") or [])] if want else []
         pool_opts["auth_realm"] = (auth.get("realm") or "").strip() if want else ""
+        good, bad = access.networks(auth.get("exempt") or "")
+        if bad:
+            raise ValueError("not a network: %s -- one address or CIDR per line, "
+                             "e.g. 192.168.0.0/16" % ", ".join(bad[:3]))
+        pool_opts["auth_exempt_src"] = "\n".join(good) if want else ""
         if bool(auth.get("enabled")) and is_tcp:
             warns.append("A tcp:// service forwards a raw port, which carries no place to "
                          "put a sign-in, so it was not applied. Publish the service over "

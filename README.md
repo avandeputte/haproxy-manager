@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.82.0_all.deb
+sudo apt-get install -y ./haproxy-manager_1.83.0_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -227,6 +227,20 @@ group it admits has been removed — refuses every request rather than serving
 itself to everyone. Basic authentication is part of HTTP, so a `tcp://` service
 cannot use it, and the wizard does not offer it there. Use it over HTTPS: on
 plain HTTP the credentials cross the network in the clear.
+
+Two source-address controls sit beside it, in the same wizard section:
+
+- **Allowed networks** — one address or CIDR per line; requests from anywhere
+  else are refused with a 403. Unlike the sign-in this works for `tcp://`
+  services too (`tcp-request content reject`), which is how a database port is
+  kept to the LAN. An entry that does not parse is refused at the form; one
+  that somehow reaches the renderer anyway is left out, which only ever
+  narrows who gets in — and a list with no readable entries refuses everyone
+  rather than admitting everyone.
+- **Skip the sign-in from** — networks trusted without a password, typically
+  the LAN: `192.168.1.0/24` browses freely while everyone else meets the
+  password box. The addresses HAProxy tests are the TCP source — behind
+  another proxy that is the proxy's address, not the visitor's.
 
 The **Advanced** section still exposes every object individually, for the cases
 the wizard does not cover (header rewriting, custom ACLs, per-object tuning). It
@@ -650,6 +664,31 @@ It restarts deliberately, not reflexively:
   it stops and reports, so a failing service stays visible instead of flapping.
 - Everything it does is logged, so the **Logs** page carries the history.
 
+### The published URLs are asked, the way a browser would ask
+
+Every check above looks at a piece: the health checks watch the backend
+servers, the watchdog watches the processes, the VRRP tracking script watches
+the admin socket. All of them can be green while `https://app.example.com`
+answers nobody — DNS pointing at the wrong machine, another host claiming the
+address, a listener that lost its certificate. So once a minute, the node
+holding the virtual IP requests every published URL exactly as a visitor
+would: resolve the name, connect, speak TLS, ask.
+
+Three answers. *It answers* — any HTTP status counts, including the 401 of a
+service behind a sign-in, and the 503 of a pool whose servers are down (that
+one is already alerted on by the health checks, so the probe stays quiet
+about it). *It answers but the certificate does not verify* — expired, the
+wrong name, or an issuer this machine does not trust; a visitor would get a
+warning page, so this is a warning here. *No answer at all* — including a
+name DNS cannot resolve, which is reported as exactly that. TCP services are
+a connection attempt to their port.
+
+Failures show beside the URL on the Services page and go out as
+notifications (the *service* event), with what failed and what the name
+resolved to. Only changes are reported, and recovery closes the loop.
+Turn it off under **Settings → Watchdog** if your names only resolve from
+outside your network.
+
 ### Two machines using one address
 
 Every few minutes the watchdog asks the network whether anything else answers
@@ -796,6 +835,28 @@ was serving: an HTTPS listener with no certificate fails validation, and Apply
 refuses rather than writing it, which leaves the node showing unapplied changes
 until it is put right. Apply names that case when it happens.
 
+## Configuration history
+
+**Settings → History** lists every state the shared configuration has passed
+through on this node — the last 50, newest first, each entry saying what it
+changed ("haproxy.backends: 1 added, 1 changed"). A snapshot is taken whenever
+the shared configuration actually changes, including when a **peer pushes a
+configuration over this node's** — that one deliberately does not count as a
+change of this node's own, so counting revisions would miss it, and it is
+precisely the case worth being able to undo.
+
+**Diff vs now** names the objects that stand between then and now — added,
+removed, or changed — the same way the Cluster page compares two nodes.
+**Restore** puts a state back *as a new change*: it takes the next revision
+rather than the old one, so the rest of the cluster sees it as the newest
+configuration, which happens to have older contents. Nothing is applied or
+synced until you press Apply, so the result can be reviewed first. Node-local
+settings — Keepalived, the login, the API key — are untouched.
+
+The snapshots live on each node's own disk (`history/` in the data
+directory, mode 0600 like the configuration itself); each node remembers what
+it saw.
+
 ## Backup & Export
 
 **System → Backup & Export** covers two different jobs:
@@ -833,7 +894,7 @@ over Sync, or are re-issued.
   Until then only the calls that create it answer — everything else returns 401 —
   so a node waiting to be set up does not hand its configuration to whoever
   reaches it first.
-- **Every API endpoint requires a session or the API key.** Of 69 routes exactly
+- **Every API endpoint requires a session or the API key.** Of 73 routes exactly
   three answer without either: `/api/login`, `/api/whoami` (which
   unauthenticated returns nothing but whether an administrator exists), and
   `/api/setup`, which refuses once an administrator exists. This is verified by

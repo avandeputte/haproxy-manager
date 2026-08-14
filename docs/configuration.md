@@ -18,6 +18,7 @@ them by hand is pointless, because the next Apply overwrites them (keeping a
 - [Notifications](#notifications)
 - [Logs](#logs)
 - [Backup and restore](#backup-and-restore)
+- [Configuration history](#configuration-history)
 - [What is shared and what is per node](#what-is-shared-and-what-is-per-node)
 - [Environment variables](#environment-variables)
 - [Ports](#ports)
@@ -257,9 +258,14 @@ it.
 Every one carries example servers, so the shape of the answer is visible before
 you replace it with your own.
 
-Recipes are one JSON file each in `static/recipes/`, read when the wizard asks
-for them. Adding your own is a matter of dropping a file in — no restart — and
-an upgrade will not remove it. A file that is not valid JSON is skipped and the
+Recipes are one JSON file each, read when the wizard asks for them — no
+restart. The shipped ones live in `static/recipes/` inside the application
+directory; put your own in `/var/lib/haproxy-manager/recipes/` (the data
+directory), which is where they survive an upgrade — in Docker the
+application directory is the image itself, replaced wholesale by the next
+pull, while the data directory is the volume. A local file with the same
+name as a shipped one replaces it, so a shipped recipe can also be adjusted
+without touching the image. A file that is not valid JSON is skipped and the
 reason logged, so one bad recipe cannot empty the list. The filename is the
 recipe's identity; a minimal one looks like this:
 
@@ -323,6 +329,8 @@ On the service itself (the publish wizard, or a Backend Pool under Advanced):
 | Require a sign-in | HTTP services only — a raw TCP port has nowhere to carry one |
 | Allowed groups | none ticked admits any user; otherwise only members of those groups |
 | Sign-in prompt | the realm the browser shows above its password box; defaults to the pool name |
+| Skip the sign-in from | networks trusted without a password, one per line — typically the LAN |
+| Allowed networks | one address or CIDR per line; requests from anywhere else get a 403. Works for `tcp://` services too, as `tcp-request content reject`. |
 
 Two edges are deliberate. A group that a service admits cannot be deleted while
 that service admits it — the request is refused and names the service. And a
@@ -564,6 +572,13 @@ systemd only when a real request to its own listener succeeds. In Docker there
 is no systemd, so a hung manager is reported by the container health check but
 not repaired.
 
+**Probe the published URLs** (on by default) asks for every public name once
+a minute from the node holding the virtual IP, the way a browser would — DNS,
+connection, TLS, request. Failures appear beside the URL on the Services page
+and as notifications under the *service* event. A 401 from a sign-in and a
+503 from a pool already alerted on are both counted as answering. Turn it off
+when the names only resolve from outside your network.
+
 ## Notifications
 
 <img src="img/notifications.png" alt="Notification destinations, what they are told about, and recent attempts" width="900">
@@ -694,6 +709,20 @@ node into a copy of another one. Nothing is applied until you press Apply.
 
 The JSON backup contains secrets. Store it accordingly.
 
+## Configuration history
+
+**Settings → History.** A snapshot of the shared configuration is kept each
+time it changes — the last 50 states, on each node's own disk, in `history/`
+under the data directory. Adopting a peer's configuration is snapshotted too,
+although it does not move the revision counter: a peer overwriting this
+node's configuration is the first thing you would want to undo.
+
+Each entry says what it changed against the one before. **Diff vs now** names
+every object between that state and the present one; **Restore** puts the
+state back as a new change — next revision, nothing applied or synced until
+Apply — and leaves node-local settings alone. The restored state is itself
+snapshotted, so a restore can be undone the same way.
+
 ## What is shared and what is per node
 
 | Shared (propagates) | Per node (never propagates) |
@@ -702,7 +731,7 @@ The JSON backup contains secrets. Store it accordingly.
 | ACME accounts, challenge types, certificates | This node's URL |
 | Cluster VRRP settings: VRID, VIPs, auth, interval | Keepalived interface, priority, state |
 | Notification settings and destinations | The UI's own HTTPS service, and its certificate |
-| Service sign-in users and groups | |
+| Service sign-in users and groups | Configuration history (each node remembers what it saw) |
 | | Administrator login |
 | | Watchdog settings |
 

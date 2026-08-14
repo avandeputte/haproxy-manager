@@ -12,6 +12,7 @@ js/pages/acme.js
 js/pages/backup.js
 js/pages/certificates.js
 js/pages/cluster.js
+js/pages/history.js
 js/pages/logs.js
 js/pages/notify.js
 js/pages/overview.js

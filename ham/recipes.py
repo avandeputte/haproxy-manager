@@ -6,7 +6,7 @@ import copy
 import json
 import re
 
-from .base import STATIC_DIR, _lock, app, log
+from .base import DATA_DIR, STATIC_DIR, _lock, app, log
 from .config import load_config, save_config
 from . import apply, dnsapi, haproxy, wizard
 
@@ -17,19 +17,28 @@ from . import apply, dnsapi, haproxy, wizard
 # and leaves the two things only the operator knows -- the name to publish and
 # the servers behind it.
 #
-# One JSON file per recipe in static/recipes/, read when asked for rather than
-# compiled in: a new one is a file to drop in, and a local one is not lost on
-# upgrade the way an edit to this file would be. A broken file is skipped and
-# logged, because one bad recipe should not empty the list.
+# One JSON file per recipe, read when asked for rather than compiled in.
+# Two directories: the ones shipped with the application in static/recipes/,
+# and the operator's own in $HAM_DATA_DIR/recipes/. They are kept apart
+# because their lives are different -- in Docker the application directory IS
+# the image, replaced wholesale on upgrade, so a file dropped in there
+# vanishes with the next pull. The data directory is the volume, which is
+# what survives. A local recipe with the same filename as a shipped one wins,
+# so a shipped recipe can be adjusted without editing the image's copy.
+# A broken file is skipped and logged: one bad recipe should not empty the list.
 # --------------------------------------------------------------------------
 
 RECIPE_DIR = STATIC_DIR / "recipes"
+LOCAL_RECIPE_DIR = DATA_DIR / "recipes"
 
 
 def load_recipes():
     """Every recipe on disk, ordered for the picker."""
-    out = []
-    for path in sorted(RECIPE_DIR.glob("*.json")):
+    seen, out = set(), []
+    local = sorted(LOCAL_RECIPE_DIR.glob("*.json")) if LOCAL_RECIPE_DIR.is_dir() else []
+    for path in local + sorted(RECIPE_DIR.glob("*.json")):
+        if path.stem in seen:           # the operator's copy came first
+            continue
         try:
             data = json.loads(path.read_text())
         except (ValueError, OSError) as e:
@@ -40,6 +49,7 @@ def load_recipes():
             log.warning("ignoring recipe %s: it needs a name and a fields object",
                         path.name)
             continue
+        seen.add(path.stem)
         data["id"] = path.stem          # the filename is the identity
         data.setdefault("category", "Other")
         data.setdefault("summary", "")
@@ -135,6 +145,7 @@ def api_wizard_publish():
                 timeout_connect=body.get("timeout_connect") or None,
                 timeout_server=body.get("timeout_server") or None,
                 auth=body.get("auth") if isinstance(body.get("auth"), dict) else None,
+                allow_src=body.get("allow_src") if isinstance(body.get("allow_src"), str) else None,
             )
         except ValueError as e:                     # a rejected request, not a crash
             return jsonify({"ok": False, "error": str(e)}), 400

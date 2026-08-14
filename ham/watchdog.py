@@ -18,7 +18,7 @@ from .base import (CLUSTER_POLL_SECONDS, HAPROXY_CFG, KEEPALIVED_CFG, PORT,
     STATS_SOCK, WATCHDOG_PROBE_TIMEOUT, WATCHDOG_SELF_TIMEOUT, _lock, app, log)
 from .config import load_config, save_config
 from .util import run
-from . import apply, cluster, notify, sync, traffic, vrrp, webui
+from . import apply, cluster, notify, probe, sync, traffic, vrrp, webui
 
 #
 # `systemctl is-active` answers "is the process there", which is not the
@@ -184,12 +184,14 @@ def _watchdog_round_locked(cfg=None):
     window = int(wd.get("window") or 900)
     report = {}
 
-    for unit, probe in (("haproxy", probe_haproxy), ("keepalived", probe_keepalived)):
+    # "check", not "probe": a local called probe would shadow the probe module,
+    # which is imported above and used later in the loop that runs it.
+    for unit, check in (("haproxy", probe_haproxy), ("keepalived", probe_keepalived)):
         if not wd.get(unit, True):
             report[unit] = {"state": "unwatched", "detail": "not supervised by the watchdog"}
             continue
         try:
-            state, detail = probe(cfg)
+            state, detail = check(cfg)
         except Exception as e:                    # a broken probe must not stop the loop
             log.exception("watchdog: the %s probe failed", unit)
             report[unit] = {"state": "unknown", "detail": "the probe itself failed: %s" % e}
@@ -250,7 +252,7 @@ def _watchdog_round_locked(cfg=None):
                     # fine, and "the restart failed" next to a working service
                     # is worse than no message at all.
                     time.sleep(2)                  # let it come up before re-probing
-                    after, adetail = probe(cfg)
+                    after, adetail = check(cfg)
                     entry["state"], entry["detail"] = after, adetail
                     if after in ("ok", "starting", "idle", "disabled"):
                         _wd_event(unit, "restarted; it is now %s (%s)" % (after, adetail), "info")
@@ -496,6 +498,7 @@ def _watchdog_loop():
                 log.exception("watchdog: checking the management UI service failed")
             _check_addresses(cfg)
             traffic.poll(cfg)
+            probe.poll(cfg)
         else:
             _watchdog["running"] = False
 
@@ -536,7 +539,8 @@ def api_watchdog():
 @app.put("/api/watchdog")
 def api_watchdog_settings():
     body = request.get_json(force=True, silent=True) or {}
-    keys = ("enabled", "interval", "haproxy", "keepalived", "max_restarts", "window")
+    keys = ("enabled", "interval", "haproxy", "keepalived", "max_restarts", "window",
+            "probe_urls")
     with _lock:
         cfg = load_config()
         wd = cfg["local"].setdefault("watchdog", {})

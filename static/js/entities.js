@@ -46,9 +46,11 @@ export const E={
    {k:"stick_size",l:"Stick table size",t:"text",h:"For source persistence, e.g. 50k"},
    {k:"stick_expire",l:"Stick table expiry",t:"text",h:"For source persistence, e.g. 30m"},
    {k:"log_health_checks",l:"Log health check changes",t:"bool",h:"option log-health-checks"},
+   {k:"allow_src",l:"Allowed networks",t:"textarea",h:"Optional. One address or CIDR per line; requests from anywhere else are refused. Works in TCP mode too. An entry that does not parse refuses everyone rather than being ignored."},
    {k:"auth_enabled",l:"Require a sign-in",t:"bool",h:"HTTP basic authentication in front of this pool. HTTP mode only -- a raw TCP port has nowhere to put one."},
    {k:"auth_groups",l:"Allowed groups",t:"refmulti",ref:"access/groups",h:"Leave nothing ticked to admit any user"},
    {k:"auth_realm",l:"Sign-in prompt",t:"text",h:"What the browser shows above its password box. Defaults to the pool name."},
+   {k:"auth_exempt_src",l:"Skip the sign-in from",t:"textarea",h:"Networks trusted without a password, one per line -- typically the LAN"},
    {k:"custom",l:"Extra directives",t:"textarea",h:"Advanced. Raw lines added inside this backend, for anything the fields above do not cover -- for example \"http-reuse safe\". One per line. See the HAProxy configuration manual: https://docs.haproxy.org/2.6/configuration.html"}]},
 
  "haproxy/frontends":{title:"Public Services",add:"Add service",

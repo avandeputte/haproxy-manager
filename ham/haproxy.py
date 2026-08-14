@@ -273,6 +273,21 @@ def render_haproxy(cfg):
             # "tcp" needs nothing here: `check` on the server line is a connect test
         if be.get("log_health_checks"):
             A("    option log-health-checks")
+        # Who may reach this pool by source address. Works for TCP too --
+        # unlike the sign-in, an address needs no place in the protocol to
+        # carry it. A list where every entry is malformed refuses everyone:
+        # dropping the list because it could not be read would open the
+        # service to exactly the people it names by not naming them.
+        if (be.get("allow_src") or "").strip():
+            nets, bad = access.networks(be.get("allow_src"))
+            for token in bad:
+                A("    # not a valid network, left out: %s" % _sec(token))
+            deny = "http-request deny" if mode == "http" else "tcp-request content reject"
+            if nets:
+                A("    %s unless { src %s }" % (deny, " ".join(nets)))
+            else:
+                A("    # every allowed network is malformed, so nobody is")
+                A("    " + deny)
         # A sign-in in front of this pool. HAProxy checks it against the
         # userlist itself, so a request without credentials is answered with a
         # 401 here and never reaches a server. Only in HTTP mode: there is no
@@ -280,13 +295,21 @@ def render_haproxy(cfg):
         if be.get("auth_enabled") and mode == "http":
             wanted = be.get("auth_groups") or []
             allowed = [_sec(n) for n in access.group_names(cfg, wanted)]
+            # Addresses that are trusted without a password -- the LAN, most
+            # of the time. They go in front of both halves below: they skip
+            # the prompt, and they still get in when nobody else could.
+            exempt, _bad = access.networks(be.get("auth_exempt_src") or "")
+            skip = ("{ src %s } or " % " ".join(exempt)) if exempt else ""
             if not access.users_with_passwords(cfg) or (wanted and not allowed):
                 # Either nobody can give the sign-in this service asks for, or
                 # the only groups it admits no longer exist. Refusing every
                 # request is the one safe reading: serving it openly would turn
                 # a missing user or a deleted group into no protection at all.
                 A("    # a sign-in is required here and nobody can satisfy it")
-                A("    http-request deny")
+                if exempt:
+                    A("    http-request deny unless { src %s }" % " ".join(exempt))
+                else:
+                    A("    http-request deny")
             else:
                 # No group named means anybody in the list, which is what the
                 # form says an empty selection does.
@@ -296,7 +319,7 @@ def render_haproxy(cfg):
                 # so it keeps its spaces and is quoted rather than sanitised
                 # into something nobody would recognise.
                 realm = re.sub(r'["\\\n]', "", be.get("auth_realm") or be.get("name") or "Restricted")
-                A('    http-request auth realm "%s" unless { %s }' % (realm, test))
+                A('    http-request auth realm "%s" unless %s{ %s }' % (realm, skip, test))
         for key, directive in (("timeout_connect", "timeout connect"),
                                ("timeout_server", "timeout server"),
                                ("timeout_check", "timeout check")):

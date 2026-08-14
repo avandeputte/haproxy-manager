@@ -46,6 +46,7 @@ export const NAV=[
  ["p:watchdog","Watchdog"],
  ["p:notify","Notifications"],
  ["p:backup","Backup & Export"],
+ ["p:history","History"],
  ["p:updates","Updates"],
 ];
 /* pages with a hand-written renderer (neither CRUD nor a settings form) */

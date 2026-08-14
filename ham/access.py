@@ -11,6 +11,7 @@ same format as /etc/shadow. Nothing here can recover one.
 
 from flask import jsonify, request
 import hashlib
+import ipaddress
 import os
 import re
 import uuid
@@ -174,6 +175,28 @@ def used_by(cfg, group_id):
     """The pools that let this group in, by name."""
     return [b.get("name") or "?" for b in cfg["haproxy"]["backends"]
             if group_id in (b.get("auth_groups") or [])]
+
+
+# --------------------------------------------------------------------------
+# source addresses
+
+def networks(text):
+    """The valid networks in a one-per-line list, and the entries that are not.
+
+    An address without a prefix is one host. What is malformed is returned
+    separately rather than silently dropped, so the caller can choose: the
+    wizard refuses the input, and the renderer leaves the bad entry out --
+    which only ever narrows who gets in, never widens it.
+    """
+    good, bad = [], []
+    for token in re.split(r"[\s,]+", text or ""):
+        if not token:
+            continue
+        try:
+            good.append(str(ipaddress.ip_network(token, strict=False)))
+        except ValueError:
+            bad.append(token)
+    return good, bad
 
 
 # --------------------------------------------------------------------------

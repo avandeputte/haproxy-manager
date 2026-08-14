@@ -1,5 +1,7 @@
 """The configuration store: defaults, migrations, atomic save."""
 
+from datetime import datetime
+from datetime import timezone
 import copy
 import hashlib
 import json
@@ -133,6 +135,9 @@ DEFAULT_CONFIG = {
             "keepalived": True,
             "max_restarts": 3,          # per window, before it stops trying
             "window": 900,
+            # Ask for every published URL the way a browser would, from the
+            # active node. The one check that sees the whole chain.
+            "probe_urls": True,
         },
         "sync": {
             # One entry per other node: {id, name, url, api_key, verify_tls, enabled}
@@ -421,6 +426,60 @@ def shared_parts(cfg):
     return out
 
 
+# --------------------------------------------------------------------------
+# History: the shared configuration as it was, kept so a bad change can be
+# looked at and undone. One file per state it has passed through, on this
+# node's own disk -- each node remembers what it saw, which includes what a
+# peer pushed over it.
+
+HISTORY_DIR = DATA_DIR / "history"
+HISTORY_KEEP = 50
+
+
+def _history_files():
+    try:
+        return sorted(p for p in HISTORY_DIR.iterdir()
+                      if p.name.endswith(".json") and not p.name.startswith("."))
+    except OSError:
+        return []
+
+
+def _snapshot(cfg, fp):
+    """Keep this state, if it is not the one already kept.
+
+    Compared against the newest snapshot rather than against the revision:
+    adopting a peer's configuration takes the peer's revision number without
+    counting as a change of our own, and that is exactly the moment worth
+    remembering -- it is how a good configuration gets overwritten by a bad
+    one.
+    """
+    files = _history_files()
+    if files:
+        try:
+            if json.loads(files[-1].read_text()).get("fp") == fp:
+                return
+        except (OSError, ValueError):
+            pass
+    try:
+        HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+        now = datetime.now(timezone.utc)
+        name = "%s-r%d.json" % (now.strftime("%Y%m%d-%H%M%S-%f"),
+                                int(cfg["_meta"].get("shared_rev") or 0))
+        tmp = HISTORY_DIR / ("." + name)
+        tmp.write_text(json.dumps({
+            "at": now.isoformat(timespec="seconds"),
+            "rev": int(cfg["_meta"].get("shared_rev") or 0),
+            "fp": fp,
+            "view": shared_view(cfg),
+        }, separators=(",", ":")))
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, HISTORY_DIR / name)
+        for old in _history_files()[:-HISTORY_KEEP]:
+            old.unlink(missing_ok=True)
+    except OSError as e:
+        log.warning("could not keep a configuration snapshot: %s", e)
+
+
 def save_config(cfg):
     with _lock:
         # The revision counts changes to the shared configuration, and is what
@@ -434,6 +493,7 @@ def save_config(cfg):
         if fp != meta.get("shared_fp"):
             meta["shared_fp"] = fp
             meta["shared_rev"] = int(meta.get("shared_rev") or 0) + 1
+        _snapshot(cfg, fp)
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         # The previous configuration, kept beside the current one. haproxy.cfg
         # has had this from the start and config.json has not, which is the

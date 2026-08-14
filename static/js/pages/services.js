@@ -40,12 +40,16 @@ export const WIZ_FIELDS=[
  {k:"timeout_connect",l:"Connect timeout",t:"text",h:"Optional, for this pool only, e.g. 5s"},
  {k:"timeout_server",l:"Server timeout",t:"text",h:"Optional, for this pool only, e.g. 30s. Long-lived connections such as databases usually need more than the default."},
  {k:"log_health_checks",l:"Log health check changes",t:"bool",h:"option log-health-checks -- records every up/down transition"},
+ {k:"allow_src",l:"Allowed networks",t:"textarea",
+  h:"Optional. One address or CIDR per line, e.g. 192.168.0.0/16 -- requests from anywhere else are refused. Works for tcp:// services too. Empty allows all."},
  {k:"auth_enabled",l:"Require a sign-in",t:"bool",
   h:"Ask visitors for a user name and password before letting them through. HAProxy checks it, so an unauthenticated request never reaches the servers. Manage the accounts under Basic auth."},
  {k:"auth_groups",l:"Allowed groups",t:"refmulti",ref:"access/groups",
   h:"Leave nothing ticked to admit any user"},
  {k:"auth_realm",l:"Sign-in prompt",t:"text",
   h:"What the browser shows above its password box. Defaults to the service name."},
+ {k:"auth_exempt",l:"Skip the sign-in from",t:"textarea",
+  h:"Optional. Networks trusted without a password -- typically the LAN, e.g. 192.168.1.0/24. Everyone else is asked to sign in."},
  {k:"http_redirect",l:"Redirect HTTP to HTTPS",t:"bool",d:true,h:"Also listens on port 80 and sends visitors to HTTPS"},
  {k:"apply",l:"Apply immediately",t:"bool",d:true,h:"Write haproxy.cfg and reload once the objects are created"},
 ];
@@ -161,7 +165,7 @@ export function openWizard(prefill){
        carry it, so the whole idea is hidden rather than offered and refused. */
     const authOn=!isTcp&&!!(fieldEl("auth_enabled")||{}).checked;
     setRow("auth_enabled",!isTcp);
-    ["auth_groups","auth_realm"].forEach(k=>setRow(k,authOn));
+    ["auth_groups","auth_realm","auth_exempt"].forEach(k=>setRow(k,authOn));
     ["stick_type","stick_size","stick_expire"].forEach(k=>setRow(k,val("persistence")==="source"));
     /* A raw TCP port cannot answer an HTTP check -- unless the check is aimed at
        a different port, which is exactly how Patroni is fronted: traffic to
@@ -183,10 +187,11 @@ export function openWizard(prefill){
     d.health={type:d.health,interval:d.health_interval,uri:d.health_uri,
               status:d.health_status,user:d.health_user,method:d.health_method,
               version:d.health_version,host:d.health_host};
-    d.auth={enabled:d.auth_enabled,groups:d.auth_groups,realm:d.auth_realm};
+    d.auth={enabled:d.auth_enabled,groups:d.auth_groups,realm:d.auth_realm,
+            exempt:d.auth_exempt};
     ["cert_mode","health_interval","health_uri","health_status","health_user",
      "health_method","health_version","health_host",
-     "auth_enabled","auth_groups","auth_realm"].forEach(k=>delete d[k]);
+     "auth_enabled","auth_groups","auth_realm","auth_exempt"].forEach(k=>delete d[k]);
     return d;   // balance / persistence / stick_* / check_port / log_health_checks pass straight through
   };
   const show=(r,saved)=>{
@@ -249,12 +254,18 @@ export async function renderServices(){
 export async function servicesCard(){
   /* The history is a separate read and a failure to get it must not take the
      page with it: a sparkline is the least important thing on it. */
-  const [svcs,traffic]=await Promise.all([
+  const [svcs,traffic,probes]=await Promise.all([
     api("services"),
     api("traffic").catch(()=>({at:[],series:{}})),
+    /* the last round of URL probes; their absence must not cost the page */
+    api("probes").catch(()=>({results:[]})),
     list("acme/accounts",true),list("acme/challenges",true),
     /* the wizard's group picker reads this cache */
     list("access/groups",true)]);
+  /* keyed by URL, kept only when something is wrong: a page dotted with green
+     "fine" pills says less than one red pill on the row that is not */
+  const probeBad={};
+  (probes.results||[]).forEach(p=>{if(p.state!=="ok")probeBad[p.url]=p;});
   const card=document.createElement("div");card.className="card";
   const hd=document.createElement("div");hd.className="hd";
   hd.innerHTML="<h2>Services</h2><div class=sp></div>";
@@ -273,13 +284,19 @@ export async function servicesCard(){
     svcs.forEach(s=>{
       const tr=document.createElement("tr");
       const auth=s.auth||{};
-      tr.innerHTML="<td>"+(s.urls||[s.url]).map(u=>"<span class=mono>"+esc(u)+"</span>").join("<br>")+
+      tr.innerHTML="<td>"+(s.urls||[s.url]).map(u=>"<span class=mono>"+esc(u)+"</span>"+
+          (probeBad[u]?' <span class="pill '+(probeBad[u].state==="down"?"down":"warn")+
+            '" title="'+esc(probeBad[u].note)+'">'+
+            (probeBad[u].state==="down"?"not answering":"certificate")+"</span>":"")).join("<br>")+
           (s.managed==="web-ui"?'<div class=sub>this node\'s own web UI &mdash; managed under '+
              'Settings &rsaquo; Web UI access, and never synced to the other nodes</div>':"")+
           /* Whether a visitor is asked to sign in belongs beside the address:
              it is part of what this URL does, not a detail of the pool. */
           (auth.enabled?'<div class=sub>sign-in required &mdash; '+
-             ((auth.group_names||[]).length?esc(auth.group_names.join(", ")):"any user")+"</div>":"")+
+             ((auth.group_names||[]).length?esc(auth.group_names.join(", ")):"any user")+
+             (auth.exempt?", except from "+esc(auth.exempt.split("\n").join(", ")):"")+"</div>":"")+
+          (s.allow_src?'<div class=sub>only from '+
+             esc(s.allow_src.split("\n").join(", "))+"</div>":"")+
           (s.enabled?"":"<div class=sub>disabled</div>")+"</td>"+
         "<td class=mono>"+(s.targets.length?s.targets.map(esc).join("<br>"):"<span class=sub>no server</span>")+
           "<div class=sub>pool "+esc(s.pool||"—")+"</div></td>"+
@@ -308,7 +325,8 @@ export async function servicesCard(){
         health_version:(s.health||{}).version,health_host:(s.health||{}).host,
         timeout_connect:s.timeout_connect,timeout_server:s.timeout_server,
         auth_enabled:(s.auth||{}).enabled,auth_groups:(s.auth||{}).groups,
-        auth_realm:(s.auth||{}).realm,
+        auth_realm:(s.auth||{}).realm,auth_exempt:(s.auth||{}).exempt,
+        allow_src:s.allow_src,
         certificate_id:s.certificate_id,
       })));
       act.appendChild(document.createTextNode(" "));

@@ -70,6 +70,8 @@ export async function renderWatchdog(){
    {k:"enabled",l:"Run the watchdog on this node",t:"bool"},
    {k:"haproxy",l:"Supervise HAProxy",t:"bool"},
    {k:"keepalived",l:"Supervise Keepalived",t:"bool"},
+   {k:"probe_urls",l:"Probe the published URLs",t:"bool",
+    h:"Once a minute, from the node holding the virtual IP, each public name is requested the way a browser would -- DNS, connection, certificate. Failures appear on the Services page and in notifications. Turn off if the names only resolve from outside your network."},
    {k:"interval",l:"Check every (seconds)",t:"text",h:"minimum 5"},
    {k:"max_restarts",l:"Restarts allowed per window",t:"text",
     h:"after this many it stops trying, so a broken service stays visible instead of flapping"},
