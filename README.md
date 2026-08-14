@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.84.0_all.deb
+sudo apt-get install -y ./haproxy-manager_1.84.1_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -620,6 +620,15 @@ arrive thousands of times a week, so alerts fire on **transitions** and an
 unresolved problem is repeated only every `repeat_hours` (6 by default) until it
 clears. Six watchdog rounds against one dead service produce two messages — "was
 restarted", then "is healthy again" — not six.
+
+One alert waits deliberately: **the nodes holding different configurations**.
+Saving a change makes the cluster disagree *by design* — the other nodes catch
+up when Apply pushes to them — so the moment of divergence is nearly always
+the middle of ordinary work. That alert is sent only once the disagreement has
+stood for **30 minutes**, longer than an edit-then-Apply should take, and its
+subject says how long — so the reader knows it is not the save they made a
+minute ago. The Cluster page still shows the disagreement immediately; it is
+only the email that waits.
 
 What it can tell you about, each switchable:
 

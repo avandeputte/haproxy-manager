@@ -160,6 +160,17 @@ def notify(event, subject, body, severity="warning", cfg=None, force=False):
     return {"sent": sent, "destinations": len(dests)}
 
 
+def transition_state(key):
+    """What state a transition key currently holds, or None for never-seen.
+
+    For callers that want to speak only when something is genuinely open --
+    an all-clear for a report nobody made is noise, and the first round after
+    a restart would otherwise record None -> ok as a change worth announcing.
+    """
+    with _notify_lock:
+        return (_notify_state.get(key) or {}).get("state")
+
+
 def notify_transition(key, state, event, subject, body, severity="warning", cfg=None):
     """Alert when something *changes*, not while it stays broken.
 

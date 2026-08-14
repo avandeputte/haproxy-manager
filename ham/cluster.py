@@ -17,6 +17,50 @@ from . import apply, notify, peering
 _cluster_cache = {"at": 0.0, "value": None}
 _cluster_cache_lock = threading.Lock()
 
+# Disagreement between the nodes is only worth an email once it has lasted.
+# Saving a change on one node makes the cluster disagree *by design* -- the
+# others catch up when Apply pushes to them -- so the moment of divergence is
+# nearly always the middle of ordinary work, and an alert sent then names a
+# problem that heals itself two clicks later. What deserves attention is
+# disagreement that persists: a push that failed, a node that was edited and
+# forgotten. Half an hour is long enough to finish what anyone was doing.
+CONFIG_DRIFT_GRACE = 30 * 60
+_drift = {"since": None}
+
+
+def _report_drift(cfg, diverged, detail):
+    """The cluster:config notification, with its grace period.
+
+    The UI is told immediately -- the Cluster page showing "configurations
+    differ" during an edit is information. The email waits, and when it does
+    go out it says how long the disagreement has stood, so the reader knows it
+    is not the one they caused a minute ago.
+    """
+    if not diverged:
+        _drift["since"] = None
+        # Only close what was opened: agreement is the normal state of
+        # affairs, not news. And "ok" rather than a synonym -- it is the state
+        # notify_transition recognises as closing an open report, which is
+        # what forces the recovery past the severity floor.
+        if notify.transition_state("cluster:config") not in (None, "ok"):
+            notify.notify_transition(
+                "cluster:config", "ok", "cluster",
+                "The nodes hold the same configuration again",
+                "The nodes agree again.", "info", cfg)
+        return
+    if _drift["since"] is None:
+        _drift["since"] = time.time()
+    stood = time.time() - _drift["since"]
+    if stood < CONFIG_DRIFT_GRACE:
+        return
+    notify.notify_transition(
+        "cluster:config", "diverged", "cluster",
+        "The nodes have not held the same configuration for %d minutes" % (stood // 60),
+        "%s.\n\nThis has stood for %d minutes -- longer than an edit-then-Apply "
+        "should take -- so it will not settle on its own. A node with an older "
+        "configuration serves it the moment it takes the virtual IP."
+        % (detail.rstrip("."), stood // 60), "warning", cfg)
+
 
 def invalidate():
     """Forget the collected health, so the next read goes and asks.
@@ -144,13 +188,8 @@ def cluster_snapshot(cfg=None):
                               "virtual IP, check that another node has taken it over."
                               % (n.get("url"), socket.gethostname(), n.get("error")),
                               "error", cfg)
-    notify.notify_transition(
-        "cluster:config", "agreed" if agree and not behind else "diverged", "cluster",
-        "The nodes no longer hold the same configuration",
-        "%s.\n\nA node with an older configuration serves it the moment it takes "
-        "the virtual IP." % (warnings[-1].rstrip(".") if (behind or not agree)
-                             else "The nodes agree again"),
-        "warning" if (behind or not agree) else "info", cfg)
+    _report_drift(cfg, bool(behind or not agree),
+                  warnings[-1] if (behind or not agree) else "")
 
     if len(holders) > 1:
         notify.notify_transition("cluster:splitbrain", "split", "cluster",
