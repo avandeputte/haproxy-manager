@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.83.0_all.deb
+sudo apt-get install -y ./haproxy-manager_1.84.0_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -271,6 +271,10 @@ renewal happens on its own.)
 ## How it works
 
 - All state lives in a single JSON file (`$HAM_DATA_DIR/config.json`). No database.
+- **Timestamps are stored and sent in UTC, and shown in the browser's own
+  timezone** — certificate expiries, snapshots, the watchdog's actions, log
+  lines. The server has no idea where the reader is; the browser is the one
+  thing that does.
 - **Apply** renders `haproxy.cfg`, validates it with `haproxy -c` *before* writing
   anything, then writes the file (keeping a `.bak`) and reloads HAProxy. If
   Keepalived is enabled it renders and reloads `keepalived.conf` too.

@@ -40,6 +40,26 @@ document.addEventListener("keydown",e=>{if(e.key==="Escape")closeDlg();});
 export function btn(label,cls,fn){const b=document.createElement("button");b.className="btn "+(cls||"");b.textContent=label;b.onclick=fn;return b;}
 export function showText(title,text){const p=document.createElement("pre");p.textContent=text;openDlg(title,p,[btn("Close","",closeDlg)]);}
 
+/* ---- timestamps ---- */
+/* The server speaks UTC, always -- every timestamp it sends is
+   datetime.now(timezone.utc) and carries its +00:00. What a person wants to
+   read is their own clock: "the certificate renewed at 03:12" should mean
+   three in the morning where they are sitting, not in Greenwich. So every
+   absolute timestamp is converted here, in the browser, which is the only
+   place that knows the reader's timezone. */
+export function localTime(iso){
+  const s=String(iso??"");
+  if(!s)return "";
+  /* A timestamp with no timezone on it is the server forgetting to say UTC,
+     not the server speaking local time -- it has no idea where the reader is.
+     Read it as the UTC it is rather than misparsing it as local. */
+  const d=new Date(/T\d\d:\d\d(:\d\d)?(\.\d+)?$/.test(s)?s+"Z":s);
+  if(isNaN(d))return s;                  /* not a date: show what was sent */
+  const p=n=>String(n).padStart(2,"0");
+  return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+" "+
+         p(d.getHours())+":"+p(d.getMinutes())+":"+p(d.getSeconds());
+}
+
 /* health check kinds, shared by the wizard and the Health Monitors page */
 export const HEALTH_LABEL={
   none:"none -- always considered up",

@@ -1,4 +1,4 @@
-import { $, api, btn, closeDlg, esc, openDlg } from "../core.js";
+import { $, api, btn, closeDlg, esc, localTime, openDlg } from "../core.js";
 import { refreshStatus, route } from "../shell.js";
 import { state } from "../state.js";
 
@@ -53,7 +53,7 @@ export async function renderHistory(){
     const tb=document.createElement("tbody");
     snaps.forEach(s=>{
       const tr=document.createElement("tr");
-      tr.innerHTML="<td class=mono>"+esc((s.at||"").replace("T"," ").replace("+00:00"," UTC"))+
+      tr.innerHTML="<td class=mono>"+esc(localTime(s.at))+
           (s.current?' <span class="pill up">current</span>':"")+"</td>"+
         "<td class=mono>"+esc(s.rev)+"</td>"+
         "<td>"+(s.summary?esc(s.summary):'<span class=sub>'+
@@ -67,13 +67,13 @@ export async function renderHistory(){
           note.textContent="Against the current configuration. \"added\" exists now and Restore "+
             "would remove it; \"removed\" would come back; \"changed\" would revert.";
           wrap.appendChild(note);wrap.appendChild(diffTable(d.parts||[]));
-          openDlg("This node at "+(s.at||"").replace("T"," "),wrap,[btn("Close","",closeDlg)]);
+          openDlg("This node at "+localTime(s.at),wrap,[btn("Close","",closeDlg)]);
         }catch(e){alert(e.message);}
       }));
       if(!state.readOnly&&!s.current){
         act.appendChild(document.createTextNode(" "));
         act.appendChild(btn("Restore","sm warn",async()=>{
-          if(!confirm("Put the configuration of "+(s.at||"")+" (revision "+s.rev+") back?\n\n"+
+          if(!confirm("Put the configuration of "+localTime(s.at)+" (revision "+s.rev+") back?\n\n"+
                       "It becomes a NEW change: the services, certificates, users and cluster "+
                       "settings return to that state, node-local settings stay as they are, "+
                       "and nothing is applied or synced until you press Apply."))return;

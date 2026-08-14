@@ -1,4 +1,4 @@
-import { $, api, btn, closeDlg, esc, fieldRow, list, lists, openDlg, readForm, showText } from "../core.js";
+import { $, api, btn, closeDlg, esc, fieldRow, list, lists, localTime, openDlg, readForm, showText } from "../core.js";
 import { E, renderEntity } from "../entities.js";
 import { refreshStatus, route } from "../shell.js";
 import { state } from "../state.js";
@@ -244,12 +244,13 @@ export function certStatusCell(r){
        s.not_issued_for.map(esc).join(", ")+" — press Issue</div>";
   return h;
 }
-export function fmtTime(t){return esc(String(t||"").replace("T"," ").replace("+00:00"," UTC"));}
+/* Shown in the reader's own timezone; the server only ever speaks UTC. */
+export function fmtTime(t){return esc(localTime(t));}
 export function certExpiryCell(r){
   const s=certStat[r.id];
   if(!s||!(s.expires_iso||s.expires))return '<span class=sub>—</span>';
   const d=s.days_left;
-  let h='<span class=mono>'+(s.expires_iso?fmtTime(s.expires_iso):esc(s.expires))+"</span>";
+  let h='<span class=mono>'+fmtTime(s.expires_iso||s.expires)+"</span>";
   if(d!==null&&d!==undefined){
     const n=Math.abs(d),unit=" day"+(n===1?"":"s");
     h+='<div class=sub>'+(d<0?("expired "+n+unit+" ago"):("in "+d+unit))+"</div>";

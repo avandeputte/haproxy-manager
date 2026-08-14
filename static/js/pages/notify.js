@@ -1,4 +1,4 @@
-import { $, api, btn, closeDlg, esc, fieldRow, openDlg, readForm } from "../core.js";
+import { $, api, btn, closeDlg, esc, fieldRow, localTime, openDlg, readForm } from "../core.js";
 
 /* ---- notifications ---- */
 export const NOTIFY_TYPES={
@@ -179,7 +179,7 @@ export async function renderNotify(){
   rc.innerHTML='<div class=hd><h2>Recent attempts</h2></div>'+
     ((n.recent||[]).length
       ? "<table><thead><tr><th>When</th><th>Destination</th><th>Result</th></tr></thead><tbody>"+
-        n.recent.map(r=>"<tr><td class=mono style=white-space:nowrap>"+esc(r.time)+"</td>"+
+        n.recent.map(r=>"<tr><td class=mono style=white-space:nowrap>"+esc(localTime(r.time))+"</td>"+
           "<td>"+esc(r.destination)+"</td><td"+(r.ok?"":' style="color:var(--down)"')+">"+
           esc(r.ok?"sent":r.detail)+"</td></tr>").join("")+"</tbody></table>"
       : '<div class=empty>Nothing has been sent yet.</div>');

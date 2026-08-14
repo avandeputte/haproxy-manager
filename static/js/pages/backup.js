@@ -1,4 +1,4 @@
-import { $, api, btn, download, esc, showText } from "../core.js";
+import { $, api, btn, download, esc, localTime, showText } from "../core.js";
 import { refreshStatus } from "../shell.js";
 
 /* ---- backup / export ---- */
@@ -45,7 +45,7 @@ export async function renderBackup(){
         Object.keys(counts).sort().forEach(k=>{if(counts[k])parts.push(counts[k]+" "+k);});
       });
       msg.innerHTML="Restored "+(parts.join(", ")||"nothing")+
-        (r.source?" (from "+esc(r.source)+(r.exported?", "+esc(r.exported):"")+")":"")+
+        (r.source?" (from "+esc(r.source)+(r.exported?", "+esc(localTime(r.exported)):"")+")":"")+
         ". <b>Review the objects, then press Apply.</b>";
       refreshStatus();
     }catch(e){msg.textContent="Restore failed: "+e.message;}

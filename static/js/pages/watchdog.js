@@ -1,4 +1,4 @@
-import { $, api, btn, esc, fieldRow, readForm } from "../core.js";
+import { $, api, btn, esc, fieldRow, localTime, readForm } from "../core.js";
 import { state } from "../state.js";
 
 /* ---- watchdog ---- */
@@ -40,7 +40,7 @@ export async function renderWatchdog(){
       ? "systemd is watching: if this stops answering, it is restarted."
       : "systemd is not watching this process (no WatchdogSec in the unit), so a hang here "+
         "is reported but not repaired.")+"</div>"+
-    (wd.last_run?'<div class=hint style="margin-top:4px">Last round '+esc(wd.last_run)+".</div>":"");
+    (wd.last_run?'<div class=hint style="margin-top:4px">Last round '+esc(localTime(wd.last_run))+".</div>":"");
   /* Two machines using one address is invisible from every layer above it:
      the address is configured here, the socket is listening here, and a client
      reaches whichever machine won the last ARP exchange. */
@@ -103,7 +103,7 @@ export async function renderWatchdog(){
   ev.innerHTML='<div class=hd><h2>Recent actions</h2></div>'+
     ((wd.events||[]).length
       ? "<table><thead><tr><th>When</th><th>Service</th><th>What happened</th></tr></thead><tbody>"+
-        wd.events.map(e=>"<tr><td class=mono style=white-space:nowrap>"+esc(e.time)+"</td>"+
+        wd.events.map(e=>"<tr><td class=mono style=white-space:nowrap>"+esc(localTime(e.time))+"</td>"+
           "<td class=mono>"+esc(e.unit)+"</td><td"+
           (e.level==="error"?' style="color:var(--down)"':e.level==="warning"?' style="color:var(--drift)"':"")+
           ">"+esc(e.message)+"</td></tr>").join("")+"</tbody></table>"
