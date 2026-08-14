@@ -61,40 +61,44 @@ def render_metrics(cfg):
     head("ham_haproxy_up", "gauge", "1 when HAProxy answers on its stats socket.")
     _line(out, "ham_haproxy_up", {}, 1 if st.get("ok") else 0)
     if st.get("ok"):
-        head("ham_pool_servers_up", "gauge", "Servers passing their health check, per pool.")
-        head_done = set()
-        for be in st.get("backends") or []:
-            name = be.get("proxy") or ""
-            _line(out, "ham_pool_servers_up", {"pool": name}, be.get("servers_up", 0))
-            for metric, col, text in (
-                    ("ham_pool_servers", "servers_total", "Servers configured, per pool."),
-                    ("ham_pool_requests_total", "stot", "Requests HAProxy has counted, per pool. "
-                     "A raw counter from HAProxy: it includes this app's own URL probes."),
-                    ("ham_pool_http_5xx_total", "hrsp_5xx", "5xx responses, per pool."),
-                    ("ham_pool_http_4xx_total", "hrsp_4xx", "4xx responses, per pool."),
-                    ("ham_pool_sessions", "scur", "Sessions open right now, per pool.")):
-                if metric not in head_done:
-                    head_done.add(metric)
-                    head(metric, "counter" if metric.endswith("_total") else "gauge", text)
+        # Metric by metric, every pool under it: the exposition format wants
+        # all samples of one metric consecutive under its TYPE line, and
+        # writing pool-by-pool interleaved the families -- which the stricter
+        # parsers reject outright.
+        backends = st.get("backends") or []
+        for metric, col, text in (
+                ("ham_pool_servers_up", "servers_up", "Servers passing their health check, per pool."),
+                ("ham_pool_servers", "servers_total", "Servers configured, per pool."),
+                ("ham_pool_requests_total", "stot", "Requests HAProxy has counted, per pool. "
+                 "A raw counter from HAProxy: it includes this app's own URL probes."),
+                ("ham_pool_http_5xx_total", "hrsp_5xx", "5xx responses, per pool."),
+                ("ham_pool_http_4xx_total", "hrsp_4xx", "4xx responses, per pool."),
+                ("ham_pool_sessions", "scur", "Sessions open right now, per pool.")):
+            head(metric, "counter" if metric.endswith("_total") else "gauge", text)
+            for be in backends:
                 try:
-                    _line(out, metric, {"pool": name}, int(be.get(col) or 0))
+                    _line(out, metric, {"pool": be.get("proxy") or ""}, int(be.get(col) or 0))
                 except (TypeError, ValueError):
                     pass
 
-    head("ham_certificate_expiry_seconds", "gauge",
-         "When the deployed certificate file expires, as a Unix timestamp; "
-         "0 when no file is deployed.")
-    head("ham_certificate_placeholder", "gauge",
-         "1 while the deployed file is the self-signed stand-in, not an issued certificate.")
+    certs = []
     for c in merged(cfg)["acme"]["certificates"]:
         info = cert_details(cert_path(c))
-        labels = {"name": c.get("name") or "?",
-                  "domains": " ".join(parse_domains(c))}
         expires = 0
         if info.get("expires_iso") and info.get("days_left") is not None:
             expires = int(time.time()) + info["days_left"] * 86400
+        certs.append(({"name": c.get("name") or "?",
+                       "domains": " ".join(parse_domains(c))},
+                      expires, 1 if info.get("self_signed") else 0))
+    head("ham_certificate_expiry_seconds", "gauge",
+         "When the deployed certificate file expires, as a Unix timestamp; "
+         "0 when no file is deployed.")
+    for labels, expires, _ph in certs:
         _line(out, "ham_certificate_expiry_seconds", labels, expires)
-        _line(out, "ham_certificate_placeholder", labels, 1 if info.get("self_signed") else 0)
+    head("ham_certificate_placeholder", "gauge",
+         "1 while the deployed file is the self-signed stand-in, not an issued certificate.")
+    for labels, _expires, ph in certs:
+        _line(out, "ham_certificate_placeholder", labels, ph)
 
     with probe._state_lock:
         results = list(probe._state["results"])
@@ -103,9 +107,10 @@ def render_metrics(cfg):
         head("ham_probe_up", "gauge",
              "The URL probe's verdict: 1 answers, 0.5 answers with a certificate "
              "problem, 0 no answer. Probed from the node holding the virtual IP.")
-        head("ham_probe_duration_ms", "gauge", "How long the probe took, per URL.")
         for r in results:
             _line(out, "ham_probe_up", {"url": r["url"]}, _STATE_VALUE.get(r["state"], 0))
+        head("ham_probe_duration_ms", "gauge", "How long the probe took, per URL.")
+        for r in results:
             _line(out, "ham_probe_duration_ms", {"url": r["url"]}, r.get("ms", 0))
         head("ham_probe_age_seconds", "gauge", "Seconds since the last probe round.")
         _line(out, "ham_probe_age_seconds", {}, int(time.time() - probed_at) if probed_at else -1)

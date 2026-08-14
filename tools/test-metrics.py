@@ -58,6 +58,23 @@ ok('ham_probe_up{url="https://shop.example.com"} 1' in body, "a probed URL that 
 ok('ham_probe_up{url="https://media.example.com"} 0' in body, "one that does not is 0")
 ok("# TYPE ham_pool_requests_total counter" in body, "counters say they are counters")
 ok("# TYPE ham_pool_servers_up gauge" in body, "and gauges say they are gauges")
+# every metric family must be one consecutive group -- the stricter parsers
+# reject interleaved samples outright
+seen_done = set()
+current = None
+grouped = True
+for line in body.splitlines():
+    if line.startswith("# TYPE "):
+        name = line.split()[2]
+        if name in seen_done:
+            grouped = False
+        current = name
+    elif line and not line.startswith("#"):
+        name = line.split("{")[0].split(" ")[0]
+        if name != current:
+            grouped = False
+        seen_done.add(current)
+ok(grouped, "every metric's samples sit together under its TYPE line")
 for line in body.splitlines():
     if line and not line.startswith("#"):
         parts = line.rsplit(" ", 1)
