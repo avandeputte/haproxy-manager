@@ -61,6 +61,11 @@
 :root{color-scheme:light}
 :root[data-theme=dark]{color-scheme:dark}
 *{box-sizing:border-box;margin:0}
+/* The hidden attribute always wins. The browser's own [hidden]{display:none}
+   loses to any display a class sets -- .frm says display:grid, so a hidden
+   form stayed exactly where it was, which is how the editor's cfg tab showed
+   both panes at once. */
+[hidden]{display:none!important}
 body{font:14px/1.5 var(--sans);color:var(--ink);background:var(--paper);display:flex;min-height:100vh}
 a{color:var(--line)}
 button{font:inherit;cursor:pointer}
