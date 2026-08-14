@@ -9,6 +9,7 @@ import { THEMES, applyTheme, currentTheme } from "./theme.js";
 
 export function showLogin(setup){
   const s=setup!==undefined?setup:state.who.needs_setup;
+  $("#lcodewrap").hidden=true;$("#lcode").value="";
   $("#logintitle").textContent=s?"Create an administrator":"Sign in";
   $("#loginintro").textContent=s
     ? "This node has no administrator yet. Choose the credentials you will use to sign in."
@@ -21,7 +22,71 @@ export function showLogin(setup){
   $("#login").classList.add("show");
   setTimeout(()=>{($("#lu").value?$("#lp"):$("#lu")).focus();},30);
 }
-export function hideLogin(){$("#login").classList.remove("show");$("#lp").value="";$("#lp2").value="";}
+export function hideLogin(){$("#login").classList.remove("show");$("#lp").value="";$("#lp2").value="";$("#lcode").value="";$("#lcodewrap").hidden=true;}
+/* The QR code as SVG: dark modules on light, with the quiet zone the spec
+   asks for. Drawn from a matrix the server computed -- no library, no CDN. */
+function qrSvg(matrix){
+  const n=matrix.length,q=4;
+  let d="";
+  for(let r=0;r<n;r++)for(let c=0;c<n;c++)
+    if(matrix[r][c])d+="M"+(c+q)+" "+(r+q)+"h1v1h-1z";
+  return '<svg viewBox="0 0 '+(n+2*q)+" "+(n+2*q)+'" width="196" height="196" '+
+    'style="background:#fff;display:block" shape-rendering="crispEdges">'+
+    '<path d="'+d+'" fill="#000"/></svg>';
+}
+
+/* Enrolment: scan, prove the phone holds the secret, keep the recovery codes.
+   Nothing is stored until the proof: enabling 2FA against a secret that was
+   never scanned locks the account, which is the one outcome worse than none. */
+async function openTwoFactor(){
+  let setup;
+  try{setup=await api("2fa/setup","POST",{});}catch(e){alert(e.message);return;}
+  const wrap=document.createElement("div");
+  wrap.innerHTML='<p class=hint style="margin-bottom:12px">Scan this with an authenticator app '+
+    '(Aegis, Google Authenticator, 1Password...), then enter the six digits it shows to prove '+
+    'the phone holds the secret. Nothing changes until then.</p>'+
+    '<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">'+qrSvg(setup.matrix)+
+    '<div style="min-width:200px;flex:1"><div class=fl>Or enter it by hand</div>'+
+    '<div class=mono style="word-break:break-all;margin:6px 0 14px">'+esc(setup.secret)+"</div>"+
+    '<label class=fl for="f_totp_code">Code from the app</label>'+
+    '<input id="f_totp_code" data-field="totp_code" inputmode="numeric" autocomplete="one-time-code" '+
+    'style="width:120px;padding:7px 9px;border:1px solid var(--hair);border-radius:4px;'+
+    'background:var(--field);color:var(--ink);font:15px var(--mono);margin-top:6px">'+
+    "</div></div>";
+  const err=document.createElement("div");err.className="err";
+  openDlg("Two-factor authentication",wrap,[err,btn("Cancel","",()=>{closeDlg();openAccount();}),
+    btn("Verify and turn on","pri",async()=>{
+      err.textContent="";
+      try{
+        const r=await api("2fa/enable","POST",{secret:setup.secret,code:fieldEl("totp_code").value});
+        const done=document.createElement("div");
+        done.innerHTML='<p class=hint style="margin-bottom:10px">Two-factor authentication is on. '+
+          "These recovery codes each work once, in place of a code, if the phone is gone. "+
+          "<b>Keep them somewhere that is not the phone</b> \u2014 they are shown only now.</p>"+
+          '<pre style="user-select:all">'+r.recovery.map(esc).join("\n")+"</pre>";
+        openDlg("Recovery codes",done,[btn("I have saved them","pri",async()=>{
+          closeDlg();await refreshWho();})]);
+      }catch(e){err.textContent=e.message;}
+    })]);
+  setTimeout(()=>{const el=fieldEl("totp_code");if(el)el.focus();},50);
+}
+
+async function disableTwoFactor(){
+  const wrap=document.createElement("div");wrap.className="frm";
+  fieldRow({k:"pw_off",l:"Current password",t:"password",
+            h:"Turning the second factor off changes how you sign in, so it asks for the password."},"")
+    .forEach(el=>wrap.appendChild(el));
+  const err=document.createElement("div");err.className="err";
+  openDlg("Turn off two-factor authentication",wrap,[err,
+    btn("Cancel","",()=>{closeDlg();openAccount();}),
+    btn("Turn off","warn",async()=>{
+      try{
+        await api("2fa/disable","POST",{password:fieldEl("pw_off").value});
+        closeDlg();await refreshWho();openAccount();
+      }catch(e){err.textContent=e.message;}
+    })]);
+}
+
 /* The account dialog: the username, an email and the password, opened by the
    gear beside the name. It is reachable from every page because changing a
    password is something you do from wherever you happen to be. */
@@ -52,6 +117,21 @@ export function openAccount(){
                  .forEach(el=>body.appendChild(el)));
   const err=document.createElement("div");err.className="err";
   const out=document.createElement("div");out.className="hint";out.style.marginTop="10px";
+  /* The second factor: a state and one action, not a form. */
+  const tfLab=document.createElement("label");tfLab.className="fl";tfLab.textContent="Two-factor";
+  const tfCell=document.createElement("div");
+  const on=!!state.who.totp_enabled;
+  tfCell.innerHTML='<span class="pill '+(on?"up":"off")+'" style="margin-right:10px">'+
+    (on?"on":"off")+"</span>";
+  tfCell.appendChild(btn(on?"Turn off...":"Set up...","sm",()=>{closeDlg();
+    (on?disableTwoFactor:openTwoFactor)();}));
+  const tfHint=document.createElement("div");tfHint.className="hint";
+  tfHint.textContent=on
+    ?"Signing in asks for a code from your authenticator app. Lost phone: a recovery code, "+
+     "or app.py disable-2fa on the node's shell."
+    :"Ask for a six-digit code from an authenticator app at every sign-in.";
+  tfCell.appendChild(tfHint);
+  body.appendChild(tfLab);body.appendChild(tfCell);
   body.appendChild(out);
   /* Applied as it is chosen: an appearance you cannot see until you save is a
      guess. Choosing and then closing without saving puts it back. */
@@ -126,10 +206,18 @@ $("#loginbox").addEventListener("submit",async e=>{
   if(setup&&p!==$("#lp2").value){err.textContent="The two passwords do not match.";return;}
   b.disabled=true;err.textContent="";
   try{
-    await api(setup?"setup":"login","POST",{username:u,password:p});
+    await api(setup?"setup":"login","POST",{username:u,password:p,code:$("#lcode").value.trim()});
     hideLogin();await refreshWho();boot();
     maybeSetupWizard();
-  }catch(ex){err.textContent=ex.message;}
+  }catch(ex){
+    /* The password was right and the account carries a second factor: not a
+       failure, a second question. */
+    if(ex.totp_required){
+      $("#lcodewrap").hidden=false;
+      err.textContent=$("#lcode").value?ex.message:"";
+      setTimeout(()=>$("#lcode").focus(),30);
+    }else err.textContent=ex.message;
+  }
   b.disabled=false;
 });
 

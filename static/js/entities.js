@@ -313,6 +313,12 @@ export async function renderEntity(key,into){
 export function openEditor(key,item){
   const def=E[key];
   const wrap=document.createElement("div");
+  /* HAProxy objects get two tabs: the fields, and the exact haproxy.cfg they
+     render to -- recomputed from what is currently typed, because a preview
+     of the past answers a question nobody asked. Editing raw text happens in
+     the Extra directives field; parsing a hand-written haproxy.cfg back into
+     objects would be lossy guesswork dressed up as a feature. */
+  const isHap=key.startsWith("haproxy/")&&key!=="haproxy/settings";
   if(item&&item.managed_by){
     /* Editing here is allowed -- sometimes it is the only way to set something
        the wizard does not expose -- but the next publish of that service will
@@ -331,7 +337,37 @@ export function openEditor(key,item){
   const frm=document.createElement("div");frm.className="frm";
   def.fields.forEach(f=>fieldRow(f,item?item[f.k]:undefined).forEach(el=>frm.appendChild(el)));
   if(def.editorExtra)def.editorExtra(frm,item);
+  const cfgPane=document.createElement("div");cfgPane.hidden=true;
+  if(isHap){
+    const tabs=document.createElement("div");
+    tabs.style.cssText="display:flex;gap:6px;border-bottom:1px solid var(--hair);margin-bottom:14px";
+    const mk=label=>{const b=document.createElement("button");b.type="button";b.className="btn sm";
+      b.style.cssText="border:0;border-radius:4px 4px 0 0;border-bottom:2px solid transparent";
+      b.textContent=label;tabs.appendChild(b);return b;};
+    const tFields=mk("Settings"),tCfg=mk("haproxy.cfg");
+    const pre=document.createElement("pre");pre.textContent="";
+    const note=document.createElement("div");note.className="hint";note.style.marginTop="8px";
+    note.textContent="Exactly what Apply will write for this object, from the values as they "+
+      "are now. Raw lines the fields do not cover go in Extra directives, under Settings.";
+    cfgPane.appendChild(pre);cfgPane.appendChild(note);
+    const show=which=>{
+      frm.hidden=which!=="fields";cfgPane.hidden=which!=="cfg";
+      tFields.style.borderBottomColor=which==="fields"?"var(--line)":"transparent";
+      tCfg.style.borderBottomColor=which==="cfg"?"var(--line)":"transparent";
+      if(which==="cfg"){
+        pre.textContent="rendering...";
+        api("haproxy/preview-object","POST",{col:key.split("/")[1],
+            item:Object.assign({},item||{},readForm(def.fields))})
+          .then(r=>{pre.textContent=r.text||r.note||"";})
+          .catch(e=>{pre.textContent=e.message;});
+      }
+    };
+    tFields.onclick=()=>show("fields");tCfg.onclick=()=>show("cfg");
+    wrap.appendChild(tabs);
+    show("fields");
+  }
   wrap.appendChild(frm);
+  wrap.appendChild(cfgPane);
   const err=document.createElement("div");err.className="err";
   openDlg((item?"Edit ":"New ")+def.title.replace(/s$/,""),wrap,[err,
     btn("Cancel","",closeDlg),

@@ -17,6 +17,7 @@ them by hand is pointless, because the next Apply overwrites them (keeping a
 - [Watchdog](#watchdog)
 - [Notifications](#notifications)
 - [Logs](#logs)
+- [Metrics](#metrics)
 - [Backup and restore](#backup-and-restore)
 - [Configuration history](#configuration-history)
 - [What is shared and what is per node](#what-is-shared-and-what-is-per-node)
@@ -388,6 +389,13 @@ reason, and keep the login they had.
 
 The login is node-local: set it on each node.
 
+**Two-factor authentication** is optional, per administrator, from the same
+dialog: standard TOTP, six digits every thirty seconds. Setup shows a QR code
+and only completes when the current code proves the app holds the secret;
+eight single-use recovery codes are shown once. *Apply to the other nodes*
+carries the second factor with the login. The escape hatch for a lost phone
+is `app.py disable-2fa` on the node's shell.
+
 ## Serving the UI over HTTPS
 
 <img src="img/webui.png" alt="Web UI access: this node's address, the shared address, and which names it answers for" width="900">
@@ -699,6 +707,13 @@ that has gone backwards is treated as HAProxy having restarted rather than as
 negative traffic. Every series carries one value per timestamp, so a pool that
 appeared later shows zeros before it existed rather than having its history
 slid backwards in time.
+
+## Metrics
+
+`GET /metrics` is Prometheus exposition, guarded by the node's API key sent
+as `Authorization: Bearer <key>` (or `X-API-Key`). Scrape every node. The
+pool counters are HAProxy's own and include the app's URL probes; the
+built-in traffic history subtracts them, the raw counters do not.
 
 ## Backup and restore
 

@@ -15,7 +15,7 @@ import time
 from .base import PORT, VERSION, _lock, app, log
 from .config import load_config, save_config
 from .util import run
-from . import sync, vrrp
+from . import sync, twofactor, vrrp
 
 # --------------------------------------------------------------------------
 # authentication: interactive login for people, API key for the peer/scripts
@@ -282,6 +282,7 @@ def api_whoami():
         "username": user,
         "email": (cfg["local"].get("admin") or {}).get("email", ""),
         "theme": (cfg["local"].get("admin") or {}).get("theme", "system"),
+        "totp_enabled": twofactor.enabled(cfg["local"].get("admin") or {}),
         "version": VERSION,
         "hostname": socket.gethostname(),
         "needs_setup": False,
@@ -347,7 +348,9 @@ def api_login():
     username = (body.get("username") or "").strip()
     ok = (hmac.compare_digest(username.encode(), admin.get("username", "").encode()) and
           verify_password(body.get("password") or "", admin))
-    if not ok:
+
+    def failed(message, status=401):
+        nonlocal fails
         fails += 1
         if fails >= LOGIN_MAX_FAILS:
             _login_fails[ip] = [0, time.time() + LOGIN_LOCK_SECONDS]   # locked; counter restarts
@@ -356,7 +359,38 @@ def api_login():
         _prune_login_fails()
         log.warning("failed sign-in for %r from %s (%d in a row)", username, ip, fails)
         time.sleep(0.5)  # blunt the rate of online guessing
-        return jsonify({"ok": False, "error": "invalid username or password"}), 401
+        return jsonify({"ok": False, "error": message}), status
+
+    if not ok:
+        return failed("invalid username or password")
+
+    # The second factor, for accounts that carry one. The password was right,
+    # so asking for the code is not a failure -- and does not count as one.
+    if twofactor.enabled(admin):
+        code = (body.get("code") or "").strip()
+        if not code:
+            return jsonify({"ok": False, "totp_required": True,
+                            "error": "enter the six-digit code from your "
+                                     "authenticator app"}), 401
+        counter = twofactor.verify_totp(admin.get("totp_secret"), code,
+                                        last_counter=int(admin.get("totp_last") or 0))
+        if counter is not None:
+            # A one-time password is one-time: remember the counter so the
+            # same code cannot be replayed by someone who watched it typed.
+            with _lock:
+                cur = load_config()
+                cur["local"].setdefault("admin", {})["totp_last"] = counter
+                save_config(cur)
+        elif twofactor.use_recovery(admin, code):
+            with _lock:
+                cur = load_config()
+                cur["local"]["admin"]["totp_recovery"] = admin.get("totp_recovery") or []
+                save_config(cur)
+            left = len(admin.get("totp_recovery") or [])
+            log.warning("a recovery code was used to sign in as %s; %d remain%s",
+                        username, left, "" if left != 1 else "s")
+        else:
+            return failed("that code is not right, or was already used")
 
     _login_fails.pop(ip, None)
     log.info("signed in: %s from %s", username, ip)
@@ -420,6 +454,16 @@ def api_admin_receive():
             "email": str(rec.get("email") or ""),
             "updated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         }
+        # The same login everywhere means the same second factor everywhere:
+        # a failover node that suddenly stopped asking for the code would be
+        # the door left open exactly when nobody is watching.
+        if rec.get("totp_secret") and rec.get("totp_enabled"):
+            cfg["local"]["admin"].update({
+                "totp_secret": str(rec["totp_secret"]),
+                "totp_enabled": True,
+                "totp_recovery": [str(h) for h in rec.get("totp_recovery") or []],
+                "totp_last": int(rec.get("totp_last") or 0),
+            })
         # Rotate the session secret, which is what signs the cookies: every
         # session on this node is now invalid. That is correct -- the
         # credential changed, and anyone signed in here was signed in with the

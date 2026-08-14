@@ -13,8 +13,12 @@ export async function api(path,method="GET",body){
   const r=await fetch("/api/"+path,{method,headers:{"Content-Type":"application/json"},
     body:body!==undefined?JSON.stringify(body):undefined});
   const data=await r.json().catch(()=>({}));
-  if(r.status===401){onUnauthorised();throw new Error(data.error||"Your session has expired -- sign in again.");}
-  if(!r.ok)throw new Error(data.error||("HTTP "+r.status));
+  if(r.status===401&&!data.totp_required){onUnauthorised();throw new Error(data.error||"Your session has expired -- sign in again.");}
+  if(!r.ok){
+    const e=new Error(data.error||("HTTP "+r.status));
+    e.totp_required=!!data.totp_required;    /* the login dialog asks for the code */
+    throw e;
+  }
   return data;
 }
 export function download(path){                       // let the browser save the response

@@ -29,14 +29,15 @@ let dlg = document.querySelector("#dlgbody").children.map(x => x.text).join("");
 ok(dlg.includes("belongs to the service"), "the editor warns for an owned object");
 ok(dlg.includes("publishing that service again rebuilds"), "it says why");
 const wrapOwned = document.querySelector("#dlgbody").children[0];
-ok(wrapOwned && wrapOwned.children.length === 2,
-   "the dialog holds the warning and the form, not one instead of the other");
+/* warning + tab strip + form + cfg pane: the warning must not displace the rest */
+ok(wrapOwned && wrapOwned.children.length === 4,
+   "the dialog holds the warning, the tabs, the form and the cfg pane");
 
 openEditor("haproxy/backends", MINE);
 const wrapMine = document.querySelector("#dlgbody").children.slice(-1)[0];
 dlg = wrapMine ? wrapMine.text : "";
 ok(!dlg.includes("belongs to the service"), "no warning for a hand-made object");
-ok(wrapMine && wrapMine.children.length === 1, "and just the form");
+ok(wrapMine && wrapMine.children.length === 3, "and no warning block, just tabs, form and cfg pane");
 
 console.log(fail ? "\n"+fail+" FAILED" : "\nservice-owned objects are marked and explained");
 process.exit(fail?1:0);

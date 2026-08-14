@@ -54,6 +54,11 @@
       <label for="lp2">Repeat password</label>
       <input id="lp2" type="password" autocomplete="new-password">
     </div>
+    <div id="lcodewrap" hidden>
+      <label for="lcode">Authentication code</label>
+      <input id="lcode" inputmode="numeric" autocomplete="one-time-code"
+             placeholder="6 digits, or a recovery code">
+    </div>
     <button class="btn pri" id="lbtn" type="submit">Sign in</button>
     <div class="err" id="lerr"></div>
   </form>

@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.85.2_all.deb
+sudo apt-get install -y ./haproxy-manager_1.86.0_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -244,8 +244,13 @@ Two source-address controls sit beside it, in the same wizard section:
 
 The **Advanced · HAProxy** menu group still exposes every object individually,
 for the cases the wizard does not cover (header rewriting, custom ACLs,
-per-object tuning). Its pages mirror the OPNsense plugins this UI was modeled
-on:
+per-object tuning). Every editor there carries a second tab, **haproxy.cfg**,
+showing exactly what Apply will write for that object — recomputed from the
+values as they stand in the form, not as they were saved, so an edit can be
+read before it is committed. Raw lines the fields do not cover go in each
+object's *Extra directives*; the file itself stays generated, because parsing
+a hand-written haproxy.cfg back into objects would be guesswork dressed up as
+a feature. The pages mirror the OPNsense plugins this UI was modeled on:
 
 | This UI | OPNsense `net/haproxy` |
 |---|---|
@@ -587,6 +592,32 @@ drops below 10 requests a minute: a trickle draws as the low band it is, and
 anything actually busy still gets its own scale. Server errors are drawn on
 the same scale as the requests, for the same reason.
 
+## Metrics for Prometheus
+
+`GET /metrics` speaks the Prometheus exposition format: per-pool request and
+error counters straight from HAProxy, servers up per pool, certificate expiry
+timestamps (and whether the deployed file is still the self-signed stand-in),
+the URL probes' verdicts, cluster agreement, and the watchdog's view of each
+service. Everything is read from state the app already keeps, so a scrape
+costs what a page load costs. Note the request counters are HAProxy's own and
+include this app's URL probes — the subtraction only applies to the built-in
+traffic history.
+
+It requires the node's API key, because service names and certificate
+expiries are not for whoever can reach the port:
+
+```yaml
+scrape_configs:
+  - job_name: haproxy-manager
+    authorization:
+      credentials: <the API key from Cluster - This node>
+    static_configs:
+      - targets: ["proxy1:8080", "proxy2:8080", "proxy3:8080"]
+```
+
+Scrape every node: each answers for itself, and `ham_node_active` says which
+one holds the virtual IP.
+
 ## Notifications
 
 **Notifications** sends when something needs a person. Nothing extra is
@@ -926,6 +957,17 @@ over Sync, or are re-issued.
 
 ## Security
 
+- **A second factor, if you want one.** The account dialog can require a
+  six-digit code from an authenticator app at every sign-in — standard TOTP,
+  which any app produces. Enrolment only completes once the phone proves it
+  holds the secret, so an unscanned QR code can never lock the account, and
+  eight single-use recovery codes are shown once at setup. The pushed
+  administrator record carries the second factor too, so a failover node asks
+  for the same code. Lost phone, no recovery codes: `app.py disable-2fa` on
+  the node's own shell — deliberately physical, because whoever can run that
+  already owns the machine. The QR code is drawn by a small vendored encoder,
+  verified module-for-module against a reference implementation; no
+  dependency was added.
 - **Sign in with a username and password.** The installer creates the
   administrator and prints the generated password (also written to
   `/var/lib/haproxy-manager/admin-credentials.txt`, mode 0600); change it from
@@ -940,7 +982,7 @@ over Sync, or are re-issued.
   Until then only the calls that create it answer — everything else returns 401 —
   so a node waiting to be set up does not hand its configuration to whoever
   reaches it first.
-- **Every API endpoint requires a session or the API key.** Of 73 routes exactly
+- **Every API endpoint requires a session or the API key.** Of 78 routes exactly
   three answer without either: `/api/login`, `/api/whoami` (which
   unauthenticated returns nothing but whether an administrator exists), and
   `/api/setup`, which refuses once an administrator exists. This is verified by

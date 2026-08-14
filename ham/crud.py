@@ -5,11 +5,13 @@ from flask import jsonify
 from flask import request
 import uuid
 
+import copy
+
 from .base import _lock, app
 from .config import VALID_COLLECTIONS, load_config, merged, save_config
-from .util import _by_id
+from .util import _by_id, _sec
 from .validate import check_setting_types
-from . import apply
+from . import apply, haproxy
 
 # --------------------------------------------------------------------------
 
@@ -157,6 +159,74 @@ def local_settings():
                 cfg["local"][key] = body[key].strip() if isinstance(body[key], str) else body[key]
         save_config(cfg)
         return jsonify(cfg["local"])
+
+
+def _paragraphs(text):
+    """The rendered file as blocks, keyed by their first line."""
+    out = {}
+    for block in text.split("\n\n"):
+        block = block.strip("\n")
+        if block:
+            out[block.splitlines()[0]] = block
+    return out
+
+
+def _object_token(col, item):
+    """The text this object is recognisable by in the rendered file."""
+    name = _sec(item.get("name") or "")
+    return {"frontends": "frontend fe_" + name,
+            "backends": "backend be_" + name,
+            "servers": "server " + name + " ",
+            "conditions": "acl_" + name}.get(col, "\x00never")
+
+
+@app.post("/api/haproxy/preview-object")
+def api_preview_object():
+    """The haproxy.cfg this one object becomes, with the form's values in it.
+
+    The editor shows this beside the fields, recomputed from what is typed
+    rather than from what was saved -- a preview of the past would answer a
+    question nobody asked. The blocks returned are the ones this object
+    changes or appears in; an edit is easiest to trust when you can read
+    exactly what it writes.
+    """
+    body = request.get_json(force=True, silent=True) or {}
+    col = body.get("col")
+    item = body.get("item") or {}
+    if col not in VALID_COLLECTIONS["haproxy"]:
+        abort(404)
+    base_cfg = load_config()
+    draft = copy.deepcopy(base_cfg)
+
+    def apply_item(cfg):
+        iid = item.get("id")
+        for where in (cfg["haproxy"].get(col) or [],
+                      (cfg["local"].get("haproxy") or {}).get(col) or []):
+            for i, existing in enumerate(where):
+                if iid and existing.get("id") == iid:
+                    where[i] = dict(existing, **item)
+                    return
+        row = dict(item)
+        row.setdefault("id", "preview")
+        cfg["haproxy"].setdefault(col, []).append(row)
+
+    apply_item(draft)
+    try:
+        base = _paragraphs(haproxy.render_haproxy(base_cfg))
+        now = _paragraphs(haproxy.render_haproxy(draft))
+    except Exception as e:
+        return jsonify({"ok": False, "error": "this does not render: %s" % e}), 400
+
+    token = _object_token(col, item)
+    blocks = [block for head, block in now.items()
+              if base.get(head) != block or token in block]
+    if not blocks:
+        blocks = [block for block in now.values() if token in block]
+    return jsonify({"ok": True,
+                    "text": "\n\n".join(blocks),
+                    "note": "" if blocks else
+                            "This object renders nothing on its own yet -- a condition or "
+                            "server appears once a rule or pool uses it."})
 
 
 # --------------------------------------------------------------------------

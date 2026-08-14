@@ -53,6 +53,7 @@ def _cli(argv):
         app.py set-api-key <key>                 set this node's API key
         app.py set-api-key -                     read it from stdin
         app.py keys                              print key fingerprints, for comparing nodes
+        app.py disable-2fa                       turn off two-factor auth (lost phone)
     """
     cmd = argv[0]
     if cmd == "set-admin":
@@ -112,6 +113,21 @@ def _cli(argv):
             cfg["local"]["api_key"] = key
             save_config(cfg)
         print(key_fingerprint(key))
+        return 0
+    if cmd == "disable-2fa":
+        # The escape hatch for a lost phone. Deliberately a command on the
+        # node's own shell: whoever can run it already owns the machine, so
+        # this adds no door that was not open.
+        with _lock:
+            cfg = load_config()
+            admin = cfg["local"].get("admin") or {}
+            if not admin.get("totp_secret"):
+                print("two-factor authentication is not enabled")
+                return 0
+            for key in ("totp_secret", "totp_enabled", "totp_recovery", "totp_last"):
+                admin.pop(key, None)
+            save_config(cfg)
+        print("two-factor authentication disabled for '%s'" % admin.get("username", "admin"))
         return 0
     if cmd == "show-admin":
         admin = load_config()["local"].get("admin") or {}
