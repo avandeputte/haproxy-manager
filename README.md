@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.85.0_all.deb
+sudo apt-get install -y ./haproxy-manager_1.85.1_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -865,6 +865,8 @@ refuses rather than writing it, which leaves the node showing unapplied changes
 until it is put right. Apply names that case when it happens.
 
 ## Configuration history
+
+<img src="docs/img/history.png" alt="The History page: every state the shared configuration has passed through, with what each change touched, a diff, and Restore" width="900">
 
 **Settings → History** lists every state the shared configuration has passed
 through on this node — the last 50, newest first, each entry saying what it

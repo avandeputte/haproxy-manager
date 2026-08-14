@@ -22,6 +22,7 @@ const SHOTS = [
   { file: "webui",        hash: "#/p:webui",          wait: ".frm" },
   { file: "notifications", hash: "#/p:notify",        wait: ".card" },
   { file: "backends",     hash: "#/haproxy/backends", wait: "table" },
+  { file: "history",      hash: "#/p:history",       wait: "table" },
 ];
 
 (async () => {
