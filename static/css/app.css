@@ -55,6 +55,11 @@
   --spark-fill:rgba(62,207,168,.16);
   --spark-fill-bad:rgba(240,138,114,.20);
 }
+/* What the browser paints for itself -- the inside of a dropdown, scrollbars,
+   a checkbox -- follows the theme too. Without this a menu opens white on a
+   dark page. */
+:root{color-scheme:light}
+:root[data-theme=dark]{color-scheme:dark}
 *{box-sizing:border-box;margin:0}
 body{font:14px/1.5 var(--sans);color:var(--ink);background:var(--paper);display:flex;min-height:100vh}
 a{color:var(--line)}
@@ -92,7 +97,14 @@ button{font:inherit;cursor:pointer}
 /* ---- main ---- */
 #main{flex:1;min-width:0;display:flex;flex-direction:column}
 #topbar{display:flex;align-items:center;gap:12px;padding:14px 24px;background:var(--card);border-bottom:1px solid var(--hair)}
-#topbar h1{font:600 16px/1.2 var(--sans)}
+#topbar h1{font:600 16px/1.2 var(--sans);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* The hamburger only exists where the sidebar has become a drawer. */
+#navtoggle{display:none;flex:none;width:38px;height:34px;padding:8px 7px;margin-left:-6px;
+  background:none;border:1px solid transparent;border-radius:5px}
+#navtoggle span{display:block;height:2px;border-radius:2px;background:var(--ink)}
+#navtoggle span+span{margin-top:4px}
+#navtoggle:hover{border-color:var(--hair)}
+#scrim{display:none;position:fixed;inset:0;background:var(--shade);z-index:15}
 #nodestrip{margin-left:auto;display:flex;align-items:center;gap:8px;font:12px var(--mono)}
 .chip{padding:3px 9px;border-radius:4px;border:1px solid var(--hair);background:var(--paper)}
 .chip.role-active{border-color:var(--up);color:var(--up)}
@@ -160,6 +172,11 @@ pre{font:12px/1.5 var(--mono);background:#0f191e;color:#d5e2e0;padding:14px;bord
   width:100%;max-width:460px;padding:7px 9px;border:1px solid var(--hair);border-radius:4px;font:13px var(--sans);background:var(--field);color:var(--ink)}
 .frm textarea{font-family:var(--mono);font-size:12.5px;min-height:74px}
 .frm input:focus,.frm select:focus,.frm textarea:focus,button:focus-visible{outline:2px solid var(--line);outline-offset:1px}
+/* A field that is not part of a .frm grid -- the wizard's recipe picker --
+   still looks like a field rather than like whatever the browser draws. */
+#dlgbody select,#content .bd select{width:100%;max-width:460px;padding:7px 9px;
+  border:1px solid var(--hair);border-radius:4px;font:13px var(--sans);
+  background:var(--field);color:var(--ink)}
 .ckbox{display:flex;align-items:center;gap:8px;padding-top:7px}
 .cklist{border:1px solid var(--hair);border-radius:4px;max-width:460px;max-height:170px;overflow:auto;padding:6px 8px;background:var(--field)}
 .cklist label{display:flex;gap:8px;align-items:center;padding:3px 0;font-size:13px}
@@ -194,16 +211,97 @@ pre{font:12px/1.5 var(--mono);background:#0f191e;color:#d5e2e0;padding:14px;bord
 #dlg .ft{padding:12px 18px;border-top:1px solid var(--hair);display:flex;gap:10px;justify-content:flex-end}
 .err{color:var(--down);font-size:13px;margin-right:auto;align-self:center}
 
+/* ==========================================================================
+   Narrow screens
+   ========================================================================== */
 @media (max-width:840px){
-  body{flex-direction:column}
-  /* Stacked on a narrow screen, so the sidebar is a header: full width, its own
-     height, and no sticking -- a full-height sticky column would leave no room
-     for the page. */
-  #nav{width:100%;flex:none;position:static;height:auto;align-self:auto}
-  #navlinks{overflow:visible;min-height:0}
-  .frm{grid-template-columns:1fr}
+  /* The sidebar becomes a drawer: off screen until the menu button is pressed,
+     then over the page rather than above it. Stacking it as a header instead
+     meant scrolling past twenty links to reach the page they lead to. */
+  #nav{position:fixed;top:0;left:0;z-index:16;width:270px;flex-basis:270px;
+    height:100vh;height:100dvh;transform:translateX(-100%);
+    box-shadow:0 0 24px rgba(0,0,0,.28)}
+  .navopen #nav{transform:none}
+  .navopen #scrim{display:block}
+  #navtoggle{display:block}
+  /* The bar with the menu button stays reachable however far the page scrolls;
+     on a phone the alternative is scrolling back to the top to change page.
+     Apply keeps the top line -- it is the one button that matters -- and the
+     node chips take a line of their own underneath. */
+  #topbar{position:sticky;top:0;z-index:10;padding:11px 14px;flex-wrap:wrap;gap:8px}
+  #topbar h1{flex:1}
+  #nodestrip{order:3;flex-basis:100%;margin-left:0;flex-wrap:wrap;font-size:11px;gap:6px}
+  #content{padding:14px}
+  #banner{padding:12px 14px 0}
+  .frm{grid-template-columns:1fr;gap:10px}
   .frm label.fl{text-align:left;padding-top:0}
-  #nodestrip{display:none}
+  .frm input[type=text],.frm input[type=number],.frm input[type=password],
+  .frm select,.frm textarea,.cklist{max-width:none}
+  .card>.hd{flex-wrap:wrap}
+  .card>.bd{padding:14px}
+  /* A table too wide for the screen scrolls inside its card. The page itself
+     never scrolls sideways: on a phone that is answered by zooming the whole
+     UI out until the widest thing on it fits. */
+  .tscroll{overflow-x:auto}
+  /* Sized for a thumb rather than a pointer. */
+  #nav a.item{padding:11px 16px;font-size:14px}
+  #nav button.grp{padding:16px 16px 10px}
+  .frm input[type=checkbox],.cklist input[type=checkbox]{width:18px;height:18px}
+  .cklist label{padding:6px 0}
+}
+@media (prefers-reduced-motion:no-preference){
+  #nav{transition:transform .18s ease}
+}
+
+@media (max-width:680px){
+  /* A table of five columns cannot be made to fit a phone by narrowing it, so
+     each row becomes a block: one line per field, the column name in front of
+     the value. The label comes from the heading, put on each cell as it is
+     rendered. */
+  #content table,#content thead,#content tbody,#content tr,#content td{display:block;width:auto}
+  #content thead{display:none}
+  #content table{padding:12px 12px 2px}
+  #content .bd table{padding:0}          /* that card already has padding */
+  #content tbody tr{border:1px solid var(--hair);border-radius:6px;padding:2px 0;margin-bottom:10px}
+  /* The label goes above the value rather than beside it. A cell is not one
+     string -- it holds several addresses separated by line breaks, a note under
+     a name, a chart -- and laying the cell out in columns puts all of that side
+     by side instead, which is how two host names ended up in two columns. */
+  #content td{border-bottom:0;padding:6px 12px;min-width:0}
+  /* A URL is one long word. Left to itself it sets the width of the whole page,
+     which the phone then answers by zooming out -- every other page shrinks to
+     make room for one address. It breaks instead. */
+  #content td,#content td .mono,#content td .sub{overflow-wrap:anywhere}
+  #content td[data-label]::before{content:attr(data-label);display:block;
+    font:600 10px var(--mono);letter-spacing:.06em;text-transform:uppercase;
+    color:var(--mist);margin-bottom:2px}
+  /* The buttons at the end of a row are the row's actions, not another field. */
+  #content td[data-actions]{display:flex;flex-wrap:wrap;gap:8px;
+    text-align:left!important;padding:8px 12px;
+    border-top:1px solid var(--hair);margin-top:4px}
+  /* The log stays a stream: it is already narrow, and reads as lines. */
+  #content .logview table,#content .logview tbody,#content .logview tr{display:table;width:100%}
+  #content .logview tr{display:table-row;border:0;margin:0}
+  #content .logview td{display:table-cell;padding:1px 10px}
+  /* Anything below 16px makes a phone zoom in when the field is focused, and
+     it does not zoom back out afterwards. */
+  .frm input,.frm select,.frm textarea,#loginbox input{font-size:16px}
+  /* A dialog is the whole screen: a centred box with 6vh above it wastes the
+     little room there is, and its buttons ended up below the fold. */
+  #ovl{padding:0;align-items:stretch}
+  #dlg{max-width:none;max-height:none;height:100%;border-radius:0}
+  #dlg .ft{flex-wrap:wrap}
+  #dlg .ft .btn{flex:1}
+  .err{flex-basis:100%;margin:0 0 4px;text-align:center}
+  .btn{padding:8px 12px}
+  .btn.sm{padding:6px 10px}
+  #topbar h1{font-size:15px}
+  /* minmax(0,...) rather than a plain 1fr, which will not shrink below the
+     widest word inside it: one long value in one card widened the whole page,
+     and the phone answered by zooming the entire UI out to fit it. */
+  .grid{grid-template-columns:minmax(0,1fr);gap:10px}
+  .grid.row5{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .stat{overflow-wrap:anywhere}
 }
 @media (prefers-reduced-motion:no-preference){
   #dlg{animation:pop .12s ease-out}

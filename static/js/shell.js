@@ -95,8 +95,42 @@ export function buildNav(){
     }
   });
 }
-export async function route(){
+/* ---- the menu on a narrow screen ----
+   There it is a drawer over the page rather than a column beside it: a menu of
+   twenty entries stacked above the content means scrolling past all of it to
+   reach anything, and the page you navigated to starts below the fold. */
+export function setNavOpen(on){
+  const want=on===undefined?!document.body.classList.contains("navopen"):!!on;
+  document.body.classList.toggle("navopen",want);
+  const b=$("#navtoggle");
+  if(b)b.setAttribute("aria-expanded",want?"true":"false");
+}
+export function wireNav(){
+  const b=$("#navtoggle");
+  if(b)b.addEventListener("click",()=>setNavOpen());
+  const scrim=$("#scrim");
+  if(scrim)scrim.addEventListener("click",()=>setNavOpen(false));
+  /* A menu that stays open over the page it just navigated to is a menu in the
+     way, so anything that routes closes it. */
+  document.addEventListener("keydown",e=>{if(e.key==="Escape")setNavOpen(false);});
+}
+
+/* One page is drawn at a time.
+   Every renderer empties #content and then waits for what it needs before
+   filling it again, so two renders that overlap both empty it and both fill
+   it -- the page ends up with two of everything. Renders are therefore run one
+   after another, and one that has already been overtaken is dropped rather
+   than drawn and immediately replaced. */
+let drawing=Promise.resolve(), asked=0;
+export function route(){
+  const mine=++asked;
+  drawing=drawing.then(()=>mine===asked?draw():undefined,()=>{});
+  return drawing;
+}
+
+async function draw(){
   if(state.pageTimer){clearTimeout(state.pageTimer);state.pageTimer=null;}
+  setNavOpen(false);
   const key=location.hash.replace(/^#\//,"");
   document.querySelectorAll("#nav a.item").forEach(a=>{
     const on=a.dataset.key===key;

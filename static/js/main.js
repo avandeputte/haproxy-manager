@@ -15,7 +15,7 @@ import { renderUpdates } from "./pages/updates.js";
 import { renderWatchdog } from "./pages/watchdog.js";
 import { renderWebui } from "./pages/webui.js";
 import { state } from "./state.js";
-import { boot, buildNav, doApply, route, setPages, setRenderers } from "./shell.js";
+import { boot, buildNav, doApply, route, setPages, setRenderers, wireNav } from "./shell.js";
 
 const P={acme:renderAcmeSettings,services:renderServices,stats:renderStats,backup:renderBackup,
          updates:renderUpdates,webui:renderWebui,cluster:renderCluster,logs:renderLogs,
@@ -39,6 +39,7 @@ setPages(P);
 setRenderers({entities:E, entity:renderEntity, settings:renderSettings,
               overview:renderOverview});
 buildNav();
+wireNav();
 $("#applybtn").onclick=doApply;
 window.addEventListener("hashchange",route);
 

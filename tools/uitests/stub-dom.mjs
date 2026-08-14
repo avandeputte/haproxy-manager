@@ -77,7 +77,7 @@ class El {
 /* The ids the real page actually contains. Anything else must come back null,
    exactly as a browser would: a stub that conjures elements on demand hides
    every lookup that happens before its element is in the document. */
-const PAGE_IDS = new Set(["applybtn", "banner", "brandhost", "content", "dlg", "dlgbody", "dlgclose", "dlgfoot", "dlgtitle", "lbtn", "lerr", "login", "loginbox", "loginintro", "logintitle", "lp", "lp2", "lp2wrap", "lu", "main", "nav", "navlinks", "nodestrip", "ovl", "pagetitle", "topbar", "whofoot"]);
+const PAGE_IDS = new Set(["applybtn", "banner", "brandhost", "content", "dlg", "dlgbody", "dlgclose", "dlgfoot", "dlgtitle", "lbtn", "lerr", "login", "loginbox", "loginintro", "logintitle", "lp", "lp2", "lp2wrap", "lu", "main", "nav", "navlinks", "navtoggle", "nodestrip", "ovl", "pagetitle", "scrim", "topbar", "whofoot"]);
 const VOID = new Set(["br","hr","img","input","meta","link","source","path","circle","rect","use"]);
 function parseInto(parent, html){
   const stack = [parent];

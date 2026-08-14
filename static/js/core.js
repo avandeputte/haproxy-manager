@@ -295,6 +295,52 @@ export function makeSortable(t){
   if(remembered)applySort(t,remembered.index,remembered.dir);
 }
 
+/* Every cell carries the name of its column.
+   A table of five columns has nowhere to go on a phone: it either overflows the
+   screen or squeezes each column to a few characters. On a narrow screen the
+   stylesheet lays each row out as a block instead, one line per field, and a
+   value with no label in front of it is unreadable -- so the label each cell
+   would have had at the top of its column is written onto the cell here, once,
+   where the table is already being walked. Nothing changes on a wide screen:
+   the attribute is only ever drawn by a media query. */
+export function labelCells(t){
+  const heads=[...t.querySelectorAll("thead th")].map(h=>h.textContent.trim());
+  if(!heads.length)return;
+  t.querySelectorAll("tbody tr").forEach(tr=>{
+    [...tr.children].forEach((td,i)=>{
+      /* A cell spanning the table is a note or a total, not a field. */
+      if(td.getAttribute&&td.getAttribute("colspan"))return;
+      const label=heads[i]||"";
+      if(label&&td.dataset.label!==label)td.dataset.label=label;
+      /* The actions column has no heading; marked so it can be laid out as a
+         row of buttons rather than as a nameless field. */
+      if(!label&&!td.dataset.actions)td.dataset.actions="1";
+    });
+  });
+}
+
+/* A box a table can be wider than.
+   Between a phone and a desktop there is a width where a table of eight
+   columns still will not fit but laying every row out as a block wastes the
+   room there is. There the table scrolls sideways inside its own card --
+   which is only possible if something around it can scroll, so it is put
+   there. */
+export function scrollWrap(t){
+  const p=t.parentNode;
+  if(!p||(p.classList&&p.classList.contains("tscroll")))return;
+  const box=document.createElement("div");
+  box.className="tscroll";
+  p.insertBefore(box,t);
+  box.appendChild(t);
+}
+
 export function enhanceTables(root){
-  (root||document).querySelectorAll("table").forEach(makeSortable);
+  (root||document).querySelectorAll("table").forEach(t=>{
+    makeSortable(t);
+    /* The log is a fixed three-column stream, already sized for a narrow
+       screen and read as a stream rather than as fields. */
+    if(t.closest(".logview"))return;
+    labelCells(t);
+    scrollWrap(t);
+  });
 }

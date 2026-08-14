@@ -22,6 +22,7 @@
 </script>
 </head>
 <body>
+<div id="scrim"></div>
 <aside id="nav">
   <div class="brand"><img src="/static/icon.svg" alt="" width="26" height="26">
     <span>haproxy<br><span class=brand2>cluster manager</span><small id="brandhost">&nbsp;</small></span></div>
@@ -30,6 +31,8 @@
 </aside>
 <div id="main">
   <div id="topbar">
+    <button id="navtoggle" aria-label="Menu" aria-expanded="false" aria-controls="nav">
+      <span></span><span></span><span></span></button>
     <h1 id="pagetitle">Overview</h1>
     <div id="nodestrip"></div>
     <button class="btn pri" id="applybtn" title="Validate and write haproxy.cfg / keepalived.conf, then reload services">Apply</button>

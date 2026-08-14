@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.81.0_all.deb
+sudo apt-get install -y ./haproxy-manager_1.82.0_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -61,6 +61,22 @@ system's own light/dark setting and changes with it. The choice is stored with
 the node's administrator so it survives a new browser, and also remembered
 locally so the page is painted in the right colours before it has asked the
 server anything.
+
+## On a phone
+
+The same application, laid out for the screen it is on rather than shrunk to
+fit it. Below 840px the menu becomes a drawer behind a button in the bar, which
+stays put as the page scrolls; below 680px each row of a table becomes a block
+with its column names in front of the values, dialogs take the whole screen,
+and fields are large enough that a phone does not zoom in when you tap one.
+In between, a table too wide for the screen scrolls inside its own card. The
+page itself never scrolls sideways — a phone answers that by zooming the whole
+interface out until the widest thing on it fits.
+
+<p>
+<img src="docs/img/phone-services.png" alt="The Services page on a phone: each service as a card, its fields labelled" width="290">
+<img src="docs/img/phone-menu.png" alt="The menu on a phone: a drawer over the page" width="290">
+</p>
 
 ## Publishing a service
 

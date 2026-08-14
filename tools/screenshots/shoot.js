@@ -32,6 +32,9 @@ const SHOTS = [
   });
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 900, deviceScaleFactor: 2 });
+  // Pinned, so the pictures do not change with the theme of whatever machine
+  // takes them.
+  await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "light" }]);
 
   await page.goto(BASE + "/", { waitUntil: "networkidle2" });
   await page.waitForSelector("#lu");
@@ -77,6 +80,32 @@ const SHOTS = [
     await page.screenshot({ path: path.join(OUT, "wizard-recipe.png") });
     console.log("  wizard-recipe");
   }
+
+  // The same application on a phone, which is a different layout rather than
+  // the same one made small: a drawer for the menu, and every row of a table
+  // laid out as a block.
+  const phone = await browser.newPage();
+  await phone.setViewport({ width: 390, height: 844, deviceScaleFactor: 2,
+                            isMobile: true, hasTouch: true });
+  await phone.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "light" }]);
+  await phone.goto(BASE + "/", { waitUntil: "networkidle2" });
+  await new Promise(r => setTimeout(r, 600));
+  if (await phone.evaluate(() => document.querySelector("#login").classList.contains("show"))) {
+    await phone.type("#lu", USER);
+    await phone.type("#lp", PASS);
+    await Promise.all([
+      phone.click("#lbtn"),
+      phone.waitForFunction(() => !document.querySelector("#login").classList.contains("show")),
+    ]);
+  }
+  await phone.evaluate(() => { location.hash = "#/p:services"; });
+  await new Promise(r => setTimeout(r, 1400));
+  await phone.screenshot({ path: path.join(OUT, "phone-services.png") });
+  console.log("  phone-services");
+  await phone.tap("#navtoggle");
+  await new Promise(r => setTimeout(r, 500));
+  await phone.screenshot({ path: path.join(OUT, "phone-menu.png") });
+  console.log("  phone-menu");
 
   await browser.close();
 })().catch(e => { console.error("FAILED:", e.message); process.exit(1); });
