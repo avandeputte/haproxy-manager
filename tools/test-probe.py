@@ -115,6 +115,19 @@ ok(r["state"] == "down" and "resolve" in r["note"],
 r = probe.probe_one({"kind": "https", "url": "u", "host": "127.0.0.1", "port": port, "path": "/"})
 ok(r["state"] == "down", "https against something that does not speak TLS is down")
 
+# -- counting what we put through ourselves ----------------------------------
+probe.drain_generated()
+urls2 = probe.published_urls(cfg)
+ok(all(u.get("pool") for u in urls2), "every probed URL knows which pool it counts against")
+probe._count_self("be_shop", 200)
+probe._count_self("be_shop", 401)
+probe._count_self("be_db", None)          # a TCP connect: a session, no status
+mine = probe.drain_generated()
+ok(mine["be_shop"] == {"req": 2, "e4": 1, "e5": 0},
+   "requests and the 401s they were answered with are both counted")
+ok(mine["be_db"] == {"req": 1, "e4": 0, "e5": 0}, "a TCP session counts as one request")
+ok(probe.drain_generated() == {}, "draining hands the counts over exactly once")
+
 srv.shutdown()
 
 print("\n" + ("%d failed" % len(fails) if fails else "the probes ask the way a browser would"))

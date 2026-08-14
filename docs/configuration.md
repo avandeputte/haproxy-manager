@@ -692,6 +692,7 @@ shows a sparkline per service.
 | Kept | 24 hours |
 | Scope | this node only |
 | Written to | `traffic.json`, never the configuration — it must not move the shared revision |
+| Not counted | requests the app makes itself (the URL probes), subtracted per pool at sampling time |
 
 Counts are what happened during that minute, not running totals, and a counter
 that has gone backwards is treated as HAProxy having restarted rather than as

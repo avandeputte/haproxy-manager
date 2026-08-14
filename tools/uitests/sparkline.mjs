@@ -48,5 +48,23 @@ ok(sparkCaption([]) === "", "and says nothing when there is nothing");
 ok(!/<script|onerror=/i.test(sparkline([1, 2], { label: '"><script>x</script>' })),
    "a label cannot inject markup");
 
+/* -- the scale floor --------------------------------------------------------
+   Scaled purely to its own peak, a flat 1 request a minute fills the box
+   solid and reads as MORE traffic than a real rush on the row above it. */
+const yTop = svg => Math.min(...[...svg.matchAll(/[\d.]+,([\d.]+)/g)].map(m => Number(m[1])));
+ok(yTop(sparkline([1,1,1,1], {height:24, floor:10})) > 18,
+   "with a floor, a trickle draws as the low band it is");
+ok(yTop(sparkline([120,150,90], {height:24, floor:10})) < 4,
+   "while anything actually busy still climbs to the top");
+ok(yTop(trafficSpark({req:[1,1,1,1], e5:[]}, {})) > 18,
+   "the traffic chart applies it: one probe a minute is not a wall");
+ok(/no traffic in the window/.test(trafficSpark({req:[0,0,0], e5:[0,0,0]}, {})),
+   "a window of nothing says so instead of drawing a flat line of zero");
+/* errors share the requests' scale: three errors over three hundred requests
+   are a hairline, not a second mountain drawn over the first */
+const both = trafficSpark({req:[300,300,300], e5:[3,0,3]}, {});
+const errSvg = "<svg" + both.split("<svg")[2];
+ok(yTop(errSvg) > 20, "errors are drawn on the same scale as the requests");
+
 console.log(fail ? `\n${fail} failed` : "\nthe sparklines draw what they are given");
 process.exit(fail ? 1 : 0);

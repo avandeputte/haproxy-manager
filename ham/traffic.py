@@ -10,7 +10,7 @@ import time
 from .base import DATA_DIR, _lock, app, log
 from .config import merged
 from .util import _sec
-from . import auth, notify, stats
+from . import auth, notify, probe, stats
 
 # One sample a minute for a day. Enough to see when something began and how
 # long it lasted; not enough to be a monitoring system, which is deliberate --
@@ -92,6 +92,13 @@ def record(data):
     at = int(time.time())
     n = len(_state["at"])
     seen = set()
+    # The requests this app made itself since the last sample -- the URL
+    # probes, which go through HAProxy on purpose and are counted by it like
+    # anyone else's. A service nobody visited should read as zero, not as a
+    # steady line of the app talking to itself. Floored at zero: the probe
+    # rounds and the sampling are not in step, so a count can land one minute
+    # to either side of the delta it belongs to.
+    ours = probe.drain_generated()
     for be in data.get("backends") or []:
         name = be.get("proxy")
         if not name:
@@ -99,6 +106,7 @@ def record(data):
         seen.add(name)
         new_pool = name not in _state["series"]
         row = _state["series"].setdefault(name, {})
+        mine = ours.get(name) or {}
 
         def put(key, value):
             values = row.get(key)
@@ -110,7 +118,8 @@ def record(data):
 
         for col, key in COUNTERS.items():
             try:
-                put(key, _delta(name, key, int(be.get(col) or 0)))
+                put(key, max(0, _delta(name, key, int(be.get(col) or 0))
+                             - int(mine.get(key) or 0)))
             except ValueError:
                 put(key, 0)
         for col, key in LEVELS.items():

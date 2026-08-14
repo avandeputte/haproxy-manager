@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.85.1_all.deb
+sudo apt-get install -y ./haproxy-manager_1.85.2_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -571,6 +571,21 @@ It is per node and only covers time the app was running: a gap in the line is
 a gap in the recording, not in the traffic. Counts are per minute rather than
 totals, and a counter that goes backwards is treated as HAProxy having
 restarted rather than as negative traffic.
+
+**The traffic this app generates itself is not counted.** The once-a-minute
+URL probes go through HAProxy on purpose — that is what makes them honest —
+so HAProxy counts them like anyone else's requests, and a service nobody
+visits would show a steady line of the app talking to itself. The history
+subtracts what the probes put through, including the 401 a sign-in answers a
+probe with, so zero visitors reads as zero. (HAProxy's backend *health
+checks* were never in these numbers — HAProxy accounts for them separately.)
+
+**The charts cannot overstate a trickle.** A sparkline scaled purely to its
+own peak turns a flat 1 request a minute into a solid block that reads as
+more traffic than a real rush on the row above it. The scale therefore never
+drops below 10 requests a minute: a trickle draws as the low band it is, and
+anything actually busy still gets its own scale. Server errors are drawn on
+the same scale as the requests, for the same reason.
 
 ## Notifications
 

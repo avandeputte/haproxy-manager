@@ -25,10 +25,10 @@ def ok(cond, msg):
         fails.append(msg)
 
 
-def stats_for(up, total, req=0, e5=0, pool="be_shop"):
+def stats_for(up, total, req=0, e5=0, e4=0, pool="be_shop"):
     return {"ok": True, "backends": [{
         "proxy": pool, "servers_up": up, "servers_total": total,
-        "stot": str(req), "hrsp_4xx": "0", "hrsp_5xx": str(e5), "econ": "0",
+        "stot": str(req), "hrsp_4xx": str(e4), "hrsp_5xx": str(e5), "econ": "0",
         "eresp": "0", "scur": "1",
         "servers": [{"name": "web%d" % i, "addr": "10.0.0.%d:80" % i,
                      "status": "UP" if i <= up else "DOWN",
@@ -125,6 +125,32 @@ ok(len(sent) == 1 and "1 of 3" in sent[0][0],
    "the default still treats any lost server as news")
 cfg["haproxy"]["backends"] = []
 notify._notify_state.clear()
+
+# -- our own requests are not traffic ----------------------------------------
+# The URL probes go through HAProxy on purpose, so HAProxy counts them like
+# anyone else's requests -- and a service nobody visits would show a steady
+# line of this app talking to itself.
+from ham import probe   # noqa: E402
+traffic._state.update({"loaded": True, "at": [], "series": {}, "last": {}, "sampled": 0.0})
+traffic.record(stats_for(2, 2, req=100))
+probe._count_self("be_shop", 200)
+probe._count_self("be_shop", 401)
+traffic.record(stats_for(2, 2, req=102))     # 2 more requests: both were ours
+h = traffic.history()
+ok(h["series"]["be_shop"]["req"][-1] == 0,
+   "requests the probes made are not counted as traffic: %s"
+   % h["series"]["be_shop"]["req"])
+ok(probe.drain_generated() == {}, "and the count is drained, not reused")
+probe._count_self("be_shop", 401)
+traffic.record(stats_for(2, 2, req=103, e4=1))   # 1 request, 1 4xx: the probe's 401
+ok(traffic.history()["series"]["be_shop"]["e4"][-1] == 0,
+   "and neither is the 401 a sign-in answers a probe with")
+probe._count_self("be_shop", 200)
+probe._count_self("be_shop", 200)
+probe._count_self("be_shop", 200)
+traffic.record(stats_for(2, 2, req=104))     # probes counted across the boundary
+ok(traffic.history()["series"]["be_shop"]["req"][-1] == 0,
+   "a probe landing on the wrong side of a sample floors at zero, never negative")
 
 # -- the history -----------------------------------------------------------
 traffic._state.update({"loaded": True, "at": [], "series": {}, "last": {}, "sampled": 0.0})

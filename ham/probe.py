@@ -22,7 +22,7 @@ import time
 
 from .base import app, log
 from .config import load_config, merged
-from .util import _by_id
+from .util import _by_id, _sec
 from . import auth, notify, wizard
 
 PROBE_SECONDS = 60
@@ -30,6 +30,34 @@ TIMEOUT = 5
 
 _state = {"at": 0.0, "results": [], "busy": False}
 _state_lock = threading.Lock()
+
+# What the probes themselves put through HAProxy, per pool, since the traffic
+# history last asked. The probes go through the whole chain on purpose -- that
+# is what makes them honest -- but it means HAProxy counts them like anyone
+# else's requests, and a service nobody visits then shows a steady line of
+# traffic that is only this app talking to itself. The history subtracts it.
+_generated = {}
+
+
+def _count_self(pool, status):
+    """One request of ours reached HAProxy and was counted against this pool."""
+    if not pool:
+        return
+    with _state_lock:
+        row = _generated.setdefault(pool, {"req": 0, "e4": 0, "e5": 0})
+        row["req"] += 1
+        if status is not None and 400 <= status < 500:
+            row["e4"] += 1              # the 401 a sign-in answers with
+        elif status is not None and status >= 500:
+            row["e5"] += 1
+
+
+def drain_generated():
+    """Hand over the per-pool counts and start again, for traffic.record()."""
+    with _state_lock:
+        out = _generated.copy()
+        _generated.clear()
+    return out
 
 
 def published_urls(cfg):
@@ -60,7 +88,8 @@ def published_urls(cfg):
             if key not in seen:
                 seen.add(key)
                 out.append({"kind": "tcp", "url": "tcp://%s:%d" % (host, ports[0]),
-                            "host": host, "port": ports[0]})
+                            "host": host, "port": ports[0],
+                            "pool": "be_" + _sec(pool.get("name") or "")})
             continue
         scheme = "https" if fe.get("ssl_enabled") else "http"
         default = 443 if scheme == "https" else 80
@@ -89,7 +118,8 @@ def published_urls(cfg):
                 seen.add(key)
                 shown = "" if port == default else ":%d" % port
                 out.append({"kind": scheme, "url": "%s://%s%s%s" % (scheme, host, shown, path or ""),
-                            "host": host, "port": port, "path": path or "/"})
+                            "host": host, "port": port, "path": path or "/",
+                            "pool": "be_" + _sec(pool.get("name") or "")})
     return out
 
 
@@ -197,6 +227,11 @@ def _run(cfg, entries):
     for entry in entries:
         r = probe_one(entry)
         results.append(r)
+        # A response means the request went through HAProxy and was counted
+        # against the pool; a TCP connect that was accepted is a session. A
+        # name that never resolved or connected reached nothing to count.
+        if r.get("status") is not None or (entry["kind"] == "tcp" and r["state"] == "ok"):
+            _count_self(entry.get("pool"), r.get("status"))
         try:
             _tell(cfg, r)
         except Exception:
