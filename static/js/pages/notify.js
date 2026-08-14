@@ -174,6 +174,57 @@ export async function renderNotify(){
   dc.appendChild(df);
   c.appendChild(dc);
 
+  /* --- Home Assistant, by MQTT discovery --- */
+  const mq=st.mqtt||{};
+  const hc=document.createElement("div");hc.className="card";
+  hc.innerHTML='<div class=hd><h2>Home Assistant</h2><div class=sp></div>'+
+    '<span class="pill '+(mq.enabled?"up":"off")+'">'+(mq.enabled?"on":"off")+"</span></div>";
+  const hb=document.createElement("div");hb.className="bd";
+  hb.innerHTML='<p class=hint style="margin-bottom:14px">Publishes every service, published URL, '+
+    'certificate and node over MQTT with Home Assistant discovery: the entities appear by '+
+    "themselves, grouped under a device per node plus one for the cluster, and the broker marks "+
+    "them unavailable the moment a node dies. Shared across the cluster; each node reports itself, "+
+    "and whichever node holds the virtual IP reports the services.</p>";
+  const HFIELDS=[
+   {k:"enabled",l:"Publish to MQTT",t:"bool"},
+   {k:"host",l:"Broker host",t:"text",h:"e.g. 192.168.1.50, or the name your broker answers to"},
+   {k:"port",l:"Port",t:"number",d:1883},
+   {k:"username",l:"Username",t:"text",h:"Leave empty if the broker allows anonymous access"},
+   {k:"password",l:"Password",t:"password",h:"Leave empty when editing to keep the stored one"},
+   {k:"tls",l:"TLS",t:"bool"},
+   {k:"discovery_prefix",l:"Discovery prefix",t:"text",d:"homeassistant",
+    h:"Home Assistant's MQTT discovery prefix -- homeassistant unless you changed it there"},
+   {k:"base_topic",l:"Topic prefix",t:"text",d:"haproxy-manager"},
+   {k:"allow_control",l:"Allow control from Home Assistant",t:"bool",
+    h:"Adds a maintenance switch per service: flipping it pauses the service with a clean 503, "+
+      "and resuming is instant. Off by default, deliberately: anyone who can publish to the "+
+      "broker holds this power the moment it is on."},
+  ];
+  const hfrm=document.createElement("div");hfrm.className="frm";
+  HFIELDS.forEach(f=>fieldRow(f,mq[f.k]).forEach(el=>hfrm.appendChild(el)));
+  hb.appendChild(hfrm);
+  const hnote=document.createElement("span");hnote.className="hint";hnote.style.marginLeft="10px";
+  const hfoot=document.createElement("div");hfoot.style.marginTop="16px";
+  hfoot.appendChild(btn("Save","pri",async()=>{
+    hnote.textContent="saving...";
+    try{
+      await api("notify","PUT",{mqtt:readForm(HFIELDS)});
+      hnote.textContent="Saved. The entities appear within a watchdog round.";
+    }catch(e){hnote.textContent=e.message;}
+  }));
+  hfoot.appendChild(document.createTextNode(" "));
+  hfoot.appendChild(btn("Test","",async()=>{
+    hnote.textContent="connecting...";
+    try{
+      const r=await api("hass/test","POST",readForm(HFIELDS));
+      hnote.textContent=r.ok?r.message:(r.error||"failed");
+    }catch(e){hnote.textContent=e.message;}
+  }));
+  hfoot.appendChild(hnote);
+  hb.appendChild(hfoot);
+  hc.appendChild(hb);
+  c.appendChild(hc);
+
   /* --- what has been sent --- */
   const rc=document.createElement("div");rc.className="card";
   rc.innerHTML='<div class=hd><h2>Recent attempts</h2></div>'+

@@ -273,6 +273,17 @@ def render_haproxy(cfg):
             # "tcp" needs nothing here: `check` on the server line is a connect test
         if be.get("log_health_checks"):
             A("    option log-health-checks")
+        # Maintenance: every request answered 503, cleanly, while the servers
+        # and their health checks stay exactly as they were -- pausing a
+        # service must not look like the service breaking, and resuming must
+        # not wait for checks to pass again. First among the rules, so it
+        # wins over the allow-list and the sign-in.
+        if be.get("maintenance"):
+            if mode == "http":
+                A('    http-request return status 503 content-type "text/plain" '
+                  'string "This service is down for maintenance."')
+            else:
+                A("    tcp-request content reject")
         # Who may reach this pool by source address. Works for TCP too --
         # unlike the sign-in, an address needs no place in the protocol to
         # carry it. A list where every entry is malformed refuses everyone:

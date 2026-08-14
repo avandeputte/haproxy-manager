@@ -87,6 +87,16 @@ DEFAULT_CONFIG = {
                    "cluster": True, "updates": True},
         # [{id, name, type, enabled, ...type-specific fields}]
         "destinations": [],
+        # Home Assistant, by MQTT discovery. Shared like the destinations:
+        # every node talks to the same broker, each reporting itself.
+        "mqtt": {"enabled": False, "host": "", "port": 1883, "username": "",
+                 "password": "", "tls": False,
+                 "discovery_prefix": "homeassistant",
+                 "base_topic": "haproxy-manager",
+                 # Whether Home Assistant may pause and resume services.
+                 # Off by default: whoever can publish to the broker holds
+                 # this power the moment it is on.
+                 "allow_control": False},
     },
     "local": {
         # node-local settings -- never overwritten by sync

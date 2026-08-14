@@ -10,10 +10,12 @@ config.py
 crud.py
 dnsapi.py
 haproxy.py
+hass.py
 history.py
 keepalived.py
 logs.py
 metrics.py
+mqtt.py
 notify.py
 peering.py
 probe.py

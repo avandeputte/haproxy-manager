@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.86.3_all.deb
+sudo apt-get install -y ./haproxy-manager_1.87.0_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -189,6 +189,13 @@ and the resulting `haproxy.cfg`, before anything is written.
   node health, certificates and the generated configuration. **Services** shows
   the same table on its own. Delete removes the objects that mapping alone was
   using.
+- **Pause** puts a service into maintenance mode: every request is answered
+  with a clean 503 ("This service is down for maintenance"), while the servers
+  and their health checks stay exactly as they were — pausing does not read as
+  an outage, and Resume takes effect immediately instead of waiting for checks
+  to pass again. The paused state is part of the shared configuration, so it
+  survives a failover. It is also a switch on the pool's edit dialog, and —
+  opted in — a switch in [Home Assistant](#home-assistant).
 
 ## Requiring a sign-in
 
@@ -618,6 +625,43 @@ scrape_configs:
 Scrape every node: each answers for itself, and `ham_node_active` says which
 one holds the virtual IP.
 
+## Home Assistant
+
+Point **Notifications → Home Assistant** at an MQTT broker and the entities
+appear in Home Assistant by themselves — MQTT discovery, no YAML, no polling,
+and nothing extra installed on either side. The **Test** button connects and
+publishes before anything depends on the settings.
+
+Each node publishes a small device of its own: whether it holds the virtual
+IP, and whether its HAProxy is answering. The node that *is* serving also
+publishes the cluster's view, as one shared device:
+
+- a **problem sensor per service**, honouring that service's *Alert when*
+  setting — a Patroni pool at 1 of 3 shows healthy here too
+- a **connectivity sensor per published URL**, from the URL probes
+- **days to expiry per certificate**, with its domains as attributes
+- **configuration drift** and **nodes reachable**, when there is a cluster
+- **requests per minute per service**, from the traffic history (with this
+  app's own probes already subtracted)
+
+On failover the new active node simply continues publishing the same topics,
+so the entities carry on rather than duplicating per node.
+
+The connection is held open for the sake of the **will**: the broker flips
+this node's availability topic to `offline` the moment the process dies, and
+Home Assistant greys the entities out — the one state a dead process cannot
+report for itself, and the reason MQTT beats polling here.
+
+**Allow control from Home Assistant** (off by default) adds a **maintenance
+switch per service**: flipping it pauses the service with a clean 503, exactly
+like Pause on the Services page, and flipping it back resumes. Leave it off
+unless you want it — anyone who can publish to the broker holds this power
+the moment it is on, so keep the broker behind credentials you trust.
+
+No broker, or no wish for MQTT? The webhook destination under Notifications
+posts JSON that a Home Assistant webhook trigger can consume directly — zero
+code, though it only carries alerts, not entities.
+
 ## Notifications
 
 **Notifications** sends when something needs a person. Nothing extra is
@@ -982,7 +1026,7 @@ over Sync, or are re-issued.
   Until then only the calls that create it answer — everything else returns 401 —
   so a node waiting to be set up does not hand its configuration to whoever
   reaches it first.
-- **Every API endpoint requires a session or the API key.** Of 78 routes exactly
+- **Every API endpoint requires a session or the API key.** Of 80 routes exactly
   three answer without either: `/api/login`, `/api/whoami` (which
   unauthenticated returns nothing but whether an administrator exists), and
   `/api/setup`, which refuses once an administrator exists. This is verified by

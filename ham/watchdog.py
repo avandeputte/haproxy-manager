@@ -18,7 +18,7 @@ from .base import (CLUSTER_POLL_SECONDS, HAPROXY_CFG, KEEPALIVED_CFG, PORT,
     STATS_SOCK, WATCHDOG_PROBE_TIMEOUT, WATCHDOG_SELF_TIMEOUT, _lock, app, log)
 from .config import load_config, save_config
 from .util import run
-from . import apply, cluster, notify, probe, sync, traffic, vrrp, webui
+from . import apply, cluster, hass, notify, probe, sync, traffic, vrrp, webui
 
 #
 # `systemctl is-active` answers "is the process there", which is not the
@@ -502,6 +502,7 @@ def _watchdog_loop():
             _check_addresses(cfg)
             traffic.poll(cfg)
             probe.poll(cfg)
+            hass.poll(cfg)
         else:
             _watchdog["running"] = False
 

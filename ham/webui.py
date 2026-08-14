@@ -416,6 +416,7 @@ def api_services():
             "stick_expire": pool.get("stick_expire") or "30m",
             "log_health_checks": bool(pool.get("log_health_checks")),
             "notify_mode": pool.get("notify_mode") or "servers",
+            "maintenance": bool(pool.get("maintenance")),
             "check_port": first.get("check_port") or "",
             "timeout_connect": pool.get("timeout_connect") or "",
             "timeout_server": pool.get("timeout_server") or "",
@@ -556,6 +557,39 @@ def _remove_service_objects(hp, rid):
                 hp["servers"] = [s for s in hp["servers"] if s.get("id") != sid]
                 removed.append({"type": "Real Server", "name": srv.get("name")})
     return removed
+
+
+@app.post("/api/services/<rid>/maintenance")
+def api_service_maintenance(rid):
+    """Pause a service -- every request answered 503 -- or resume it.
+
+    The servers and their health checks stay untouched, so pausing does not
+    read as an outage and resuming does not wait for checks to pass again.
+    """
+    body = request.get_json(force=True, silent=True) or {}
+    want = bool(body.get("on"))
+    with _lock:
+        cfg = load_config()
+        hp = cfg["haproxy"]
+        pool = None
+        if rid.startswith("fe:"):
+            fe = _by_id(hp["frontends"]).get(rid[3:])
+            pool = _by_id(hp["backends"]).get((fe or {}).get("default_backend") or "")
+        else:
+            rule = _by_id(hp["rules"]).get(rid)
+            pool = _by_id(hp["backends"]).get((rule or {}).get("backend") or "")
+        if not pool:
+            return jsonify({"error": "no such service"}), 404
+        if bool(pool.get("maintenance")) == want:
+            return jsonify({"ok": True, "maintenance": want, "changed": False})
+        pool["maintenance"] = want
+        save_config(cfg)
+        name = pool.get("name") or "?"
+    log.warning("%s %s", name, "paused for maintenance" if want else "resumed")
+    result = {"ok": True, "maintenance": want, "changed": True, "pool": name}
+    if body.get("apply", True):
+        result["applied"] = apply.do_apply()
+    return jsonify(result)
 
 
 @app.delete("/api/services/<rid>")

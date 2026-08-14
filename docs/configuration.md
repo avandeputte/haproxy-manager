@@ -612,6 +612,36 @@ over HTTPS, or keep it on a trusted network.
 Because every node watches every other, a node that vanishes is reported by each
 of its peers.
 
+## Home Assistant
+
+**Settings → Notifications → Home Assistant.** Point it at an MQTT broker and
+the entities appear in Home Assistant by MQTT discovery — no YAML on either
+side. The settings are shared, like the rest of the notification settings, so
+every node reaches the same broker.
+
+| Setting | Meaning |
+| --- | --- |
+| Broker host / port | the MQTT broker Home Assistant already uses (Mosquitto, typically port 1883) |
+| Username / password | if the broker requires them; a blank password keeps the stored one |
+| TLS | for a broker behind `mqtts://` |
+| Discovery prefix | `homeassistant` unless yours was changed |
+| Topic prefix | where states are published; `haproxy-manager` by default |
+| Allow control from Home Assistant | **off by default** — adds a maintenance switch per service; see below |
+
+Each node publishes its own device (holds the virtual IP, HAProxy answering),
+and the node holding the virtual IP publishes the cluster device: a problem
+sensor per service honouring its *Alert when* setting, a connectivity sensor
+per published URL, days-to-expiry per certificate, configuration drift, nodes
+reachable, and requests per minute per service. On failover the new active
+node continues the same topics. Availability uses an MQTT will, so entities
+grey out the moment a node dies.
+
+**Allow control** adds a switch per service that pauses it — every request
+answered with a clean 503 — and resumes it, the same operation as Pause on
+the Services page. It is opt-in because the power travels with the broker:
+anyone who can publish to the command topics can pause services, so leave it
+off unless the broker is behind credentials you trust.
+
 ## Upgrades and the browser cache
 
 The page is served with `no-cache`, and everything it loads lives under a path

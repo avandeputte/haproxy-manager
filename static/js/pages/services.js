@@ -304,6 +304,7 @@ export async function servicesCard(){
              (auth.exempt?", except from "+esc(auth.exempt.split("\n").join(", ")):"")+"</div>":"")+
           (s.allow_src?'<div class=sub>only from '+
              esc(s.allow_src.split("\n").join(", "))+"</div>":"")+
+          (s.maintenance?'<div><span class="pill warn">paused &mdash; answering 503</span></div>':"")+
           (s.enabled?"":"<div class=sub>disabled</div>")+"</td>"+
         "<td class=mono>"+(s.targets.length?s.targets.map(esc).join("<br>"):"<span class=sub>no server</span>")+
           "<div class=sub>pool "+esc(s.pool||"—")+"</div></td>"+
@@ -337,6 +338,15 @@ export async function servicesCard(){
         allow_src:s.allow_src,
         certificate_id:s.certificate_id,
       })));
+      act.appendChild(document.createTextNode(" "));
+      act.appendChild(btn(s.maintenance?"Resume":"Pause","sm"+(s.maintenance?" warn":""),async()=>{
+        if(!s.maintenance&&!confirm("Pause "+s.url+"?\n\nEvery request is answered with a clean "+
+            "503 until it is resumed. The servers and their health checks are untouched."))return;
+        try{
+          await api("services/"+s.id+"/maintenance","POST",{on:!s.maintenance});
+          await route();refreshStatus();
+        }catch(e){alert(e.message);}
+      }));
       act.appendChild(document.createTextNode(" "));
       act.appendChild(btn("Delete","sm dngr",async()=>{
         if(!confirm("Remove "+s.url+"?\n\nThe rule, its conditions, the backend pool and its servers are deleted "+

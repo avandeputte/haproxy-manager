@@ -192,6 +192,29 @@ out = haproxy.render_haproxy(cfg)
 ok("http-request deny unless { src 192.168.1.0/24 }" in out,
    "with nobody able to sign in, the exempt networks still get in and nobody else does")
 
+# -- maintenance mode -------------------------------------------------------
+cfg = fresh()
+cfg["haproxy"]["backends"][0]["maintenance"] = True
+out = haproxy.render_haproxy(cfg)
+ok('http-request return status 503 content-type "text/plain" '
+   'string "This service is down for maintenance."' in out,
+   "a paused http pool answers everything 503, cleanly")
+ok(out.index("http-request return status 503") < out.index("http-request auth"),
+   "before the sign-in -- a paused service asks nobody for a password")
+
+cfg = fresh()
+cfg["haproxy"]["backends"][0].update({"mode": "tcp", "maintenance": True,
+                                      "allow_src": "192.168.0.0/16"})
+out = haproxy.render_haproxy(cfg)
+be = out.split("backend be_shop")[1]
+ok(be.index("tcp-request content reject") < be.index("unless { src"),
+   "a paused TCP pool rejects before the allow list is consulted")
+
+cfg = fresh()
+out = haproxy.render_haproxy(cfg)
+ok("503" not in out.split("backend be_shop")[1],
+   "and an unpaused pool carries none of it")
+
 # -- what is shared ---------------------------------------------------------
 cfg = fresh()
 ok("access" in shared_view(cfg),
@@ -267,6 +290,30 @@ ok(load_config()["access"]["users"][0]["groups"] == [],
 
 code, body = call("/api/access/users/" + uid, "DELETE")
 ok(code == 200 and not load_config()["access"]["users"], "a user is deleted")
+
+# -- pausing over the API ---------------------------------------------------
+cfg = load_config()
+cfg["haproxy"]["backends"] = [{"id": "b1", "name": "shop", "mode": "http",
+                               "servers": []}]
+cfg["haproxy"]["frontends"] = [{"id": "f1", "name": "web", "bind_port": 443,
+                                "default_backend": "b1"}]
+cfg["haproxy"]["rules"] = [{"id": "r1", "frontend": "f1", "backend": "b1",
+                            "host": "shop.example.org"}]
+save_config(cfg)
+
+code, body = call("/api/services/r1/maintenance", "POST", {"on": True, "apply": False})
+ok(code == 200 and body.get("maintenance") is True and body.get("changed") is True,
+   "a service is paused through the API")
+ok(load_config()["haproxy"]["backends"][0].get("maintenance") is True,
+   "and the pool remembers it")
+code, body = call("/api/services/r1/maintenance", "POST", {"on": True, "apply": False})
+ok(code == 200 and body.get("changed") is False,
+   "pausing a paused service changes nothing, and says so")
+code, body = call("/api/services/fe:f1/maintenance", "POST", {"on": False, "apply": False})
+ok(code == 200 and load_config()["haproxy"]["backends"][0].get("maintenance") is False,
+   "resuming through the frontend's default pool reaches the same flag")
+code, body = call("/api/services/nope/maintenance", "POST", {"on": True})
+ok(code == 404, "a service that does not exist cannot be paused")
 
 print("\n" + ("%d failed" % len(fails) if fails
               else "the sign-in behaves, and the hashes are crypt(3)'s"))

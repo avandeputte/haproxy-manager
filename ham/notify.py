@@ -214,6 +214,9 @@ def api_notify_get():
             if secret in d:
                 d["has_" + secret] = bool((d.get(secret) or "").strip())
                 d.pop(secret)
+    if isinstance(n.get("mqtt"), dict):
+        n["mqtt"]["has_password"] = bool((n["mqtt"].get("password") or "").strip())
+        n["mqtt"].pop("password", None)
     with _notify_lock:
         recent = list(_notify_log)
     return jsonify({"ok": True, "settings": n, "recent": recent})
@@ -237,6 +240,23 @@ def api_notify_put():
         if isinstance(body.get("events"), dict):
             for k, v in body["events"].items():
                 n.setdefault("events", {})[k] = bool(v)
+        if isinstance(body.get("mqtt"), dict):
+            m = n.setdefault("mqtt", {})
+            incoming = body["mqtt"]
+            for k in ("enabled", "tls", "allow_control"):
+                if k in incoming:
+                    m[k] = bool(incoming[k])
+            for k in ("host", "username", "discovery_prefix", "base_topic"):
+                if k in incoming:
+                    m[k] = str(incoming[k] or "").strip()
+            if "port" in incoming:
+                try:
+                    m["port"] = max(1, min(65535, int(incoming["port"] or 1883)))
+                except (TypeError, ValueError):
+                    return jsonify({"ok": False, "error": "the MQTT port must be a number"}), 400
+            # a blank password means "keep the stored one", never "clear it"
+            if str(incoming.get("password") or "").strip():
+                m["password"] = str(incoming["password"]).strip()
         if isinstance(body.get("destinations"), list):
             existing = {d.get("id"): d for d in (n.get("destinations") or [])}
             out = []
