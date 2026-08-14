@@ -251,11 +251,15 @@ for src in (ROOT / "static" / "js", ROOT / "ham"):
                       "%s says %r, but %r is at the top of the menu"
                       % (f.name, parent + " > " + leaf, leaf))
 
-# The section called System is called Settings now.
+# The section called System is called Settings now. The docs are scanned too:
+# this guard only watched the code, and "System > Backup & Export" sat in the
+# documentation for weeks after the menu stopped having a System group.
+_sysdocs = [ROOT / "README.md"] + sorted((ROOT / "docs").glob("*.md"))
 for src in (ROOT / "static" / "js", ROOT / "ham"):
-    for f in sorted(src.rglob("*.js")) + sorted(src.rglob("*.py")):
-        for m in re.findall(r"System\s*(?:&rsaquo;|>|\u2192)\s*[A-Z]", f.read_text()):
-            check(False, "the UI still calls the Settings section System", f.name)
+    _sysdocs += sorted(src.rglob("*.js")) + sorted(src.rglob("*.py"))
+for f in _sysdocs:
+    for m in re.findall(r"System\s*(?:&rsaquo;|&gt;|>|\u2192|\u203a)\s*[A-Z]", f.read_text()):
+        check(False, "something still calls the Settings section System", f.name)
 
 # -- strings the state refactor could have damaged --------------------------
 # Moving the shared variables into state.js rewrote every occurrence of their

@@ -355,7 +355,10 @@ def _restore_webui_if_lost():
             return
         save_config(cfg)
     _webui_restored_at[0] = time.time()
-    notify.notify("webui", "The management UI stopped answering on %s" % ", ".join(put_back),
+    # "watchdog" and not a category of its own: the watchdog is what did
+    # this, and an unlisted category would have no switch on the
+    # Notifications page.
+    notify.notify("watchdog", "The management UI stopped answering on %s" % ", ".join(put_back),
                   "%s answers for that address again. It is built from ordinary HAProxy "
                   "objects, and something editing the configuration removed one of them; "
                   "the service has been rebuilt and applied."

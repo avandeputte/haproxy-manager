@@ -18,8 +18,6 @@ from .util import run
 from . import sync, vrrp
 
 # --------------------------------------------------------------------------
-
-# --------------------------------------------------------------------------
 # authentication: interactive login for people, API key for the peer/scripts
 # --------------------------------------------------------------------------
 
@@ -422,10 +420,13 @@ def api_admin_receive():
             "email": str(rec.get("email") or ""),
             "updated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         }
+        # Rotate the session secret, which is what signs the cookies: every
+        # session on this node is now invalid. That is correct -- the
+        # credential changed, and anyone signed in here was signed in with the
+        # old one. Without this a stolen cookie would outlive the password
+        # change that was meant to shut it out.
+        cfg["local"]["session_secret"] = os.urandom(32).hex()
         save_config(cfg)
-    # Sessions are signed with a secret derived from the stored hash, so every
-    # session on this node is now invalid. That is correct: the credential
-    # changed, and anyone signed in here was signed in with the old one.
     log.info("administrator record accepted from %s", request.remote_addr)
     return jsonify({"ok": True, "hostname": socket.gethostname(),
                     "username": cfg["local"]["admin"]["username"]})

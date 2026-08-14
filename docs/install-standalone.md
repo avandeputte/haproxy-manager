@@ -43,16 +43,16 @@ package mirrors.
 
 ```bash
 # Debian / Ubuntu
-curl -fsSLO https://github.com/avandeputte/haproxy-manager/releases/latest/download/haproxy-manager_1.84.1_all.deb
-sudo apt-get install -y ./haproxy-manager_1.84.1_all.deb
+curl -fsSLO https://github.com/avandeputte/haproxy-manager/releases/latest/download/haproxy-manager_1.84.2_all.deb
+sudo apt-get install -y ./haproxy-manager_1.84.2_all.deb
 
 # Fedora
-curl -fsSLO https://github.com/avandeputte/haproxy-manager/releases/latest/download/haproxy-manager-1.84.1-1.noarch.rpm
-sudo dnf install -y ./haproxy-manager-1.84.1-1.noarch.rpm
+curl -fsSLO https://github.com/avandeputte/haproxy-manager/releases/latest/download/haproxy-manager-1.84.2-1.noarch.rpm
+sudo dnf install -y ./haproxy-manager-1.84.2-1.noarch.rpm
 
 # RHEL / Rocky / Alma -- python3-flask and python3-waitress live in EPEL
 sudo dnf install -y epel-release
-sudo dnf install -y ./haproxy-manager-1.84.1-1.noarch.rpm
+sudo dnf install -y ./haproxy-manager-1.84.2-1.noarch.rpm
 ```
 
 The package installs and starts the service, prints the generated
@@ -156,7 +156,7 @@ curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/in
 1. Open `http://<node>:8080`.
 2. Sign in with the printed credentials, or create the administrator if you
    installed without one.
-3. Change the password under **System → Administrator login**.
+3. Change the password from the account dialog — the gear beside your name.
 4. Publish something under **Services**, then press **Apply**.
 
 Straight after that, do two things:

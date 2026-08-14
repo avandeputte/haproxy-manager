@@ -391,7 +391,7 @@ The login is node-local: set it on each node.
 
 <img src="img/webui.png" alt="Web UI access: this node's address, the shared address, and which names it answers for" width="900">
 
-**System → Web UI access.** Give it a name (`https://proxy.example.com`) and it
+**Settings → Web UI access.** Give it a name (`https://proxy.example.com`) and it
 publishes this UI as a normal service with a certificate, so you stop using
 plain HTTP.
 
@@ -465,13 +465,13 @@ which node holds what.
   and later reconnected would overwrite the current configuration with its own.
 - **Overwrite** is how you discard a change made on the wrong node. Editing a
   passive node moves it ahead of the active one, so an ordinary Sync from the
-  active node is refused — correctly, because it is older. **Cluster → Nodes**
+  active node is refused — correctly, because it is older. **Cluster → Other nodes**
   offers *Overwrite* beside each node and *Overwrite every node* below the
   list. It lifts this node's revision above every other node's and then pushes
   normally, so afterwards every node holds the same configuration **and** the
   same revision; nothing is left disagreeing about who is newest. What was on
   the other node is discarded.
-- **Keep the nodes in step** (Cluster → Nodes) does three things: pushes after
+- **Keep the nodes in step** (Cluster → Sync) does three things: pushes after
   every Apply, brings any node reporting an older revision up to date in the
   background, and takes the newest configuration from the cluster when this
   node starts. It is on by default for a new installation; an existing one
@@ -544,7 +544,7 @@ caching resolver.
 
 ## Watchdog
 
-**System → Watchdog.** Each node supervises its own services. The distinction
+**Settings → Watchdog.** Each node supervises its own services. The distinction
 that matters is between *stopped* and *hung*: `systemctl is-active` reports a
 wedged process as healthy, so each service must prove it is answering.
 
@@ -583,7 +583,7 @@ when the names only resolve from outside your network.
 
 <img src="img/notifications.png" alt="Notification destinations, what they are told about, and recent attempts" width="900">
 
-**System → Notifications.** Email (SMTP), Pushover and a JSON webhook. Nothing
+**Settings → Notifications.** Email (SMTP), Pushover and a JSON webhook. Nothing
 extra is installed for any of it.
 
 Alerts fire on **transitions**, not conditions: the watchdog runs every twenty
@@ -632,7 +632,7 @@ seconds.
 
 ## Logs
 
-**System → Logs** merges four sources into one timeline: the UI's own log,
+**Logs** (its own page in the menu) merges four sources into one timeline: the UI's own log,
 HAProxy, acme.sh and Keepalived. Filter by source, level and text, and download
 exactly what you are looking at.
 
@@ -654,8 +654,8 @@ how many connections it closed:
 ```
 
 Nothing is broken. A reload starts a new HAProxy and leaves the old one running
-so connections opened before it can finish; **Hard stop after** (Advanced →
-HAProxy → Settings, `60s` by default) is how long it waits. When it expires the
+so connections opened before it can finish; **Hard stop after** (Advanced · HAProxy →
+Settings, `60s` by default) is how long it waits. When it expires the
 old process closes what is left, and says so.
 
 What gets closed is anything longer-lived than that grace period — a database
@@ -700,7 +700,7 @@ slid backwards in time.
 
 ## Backup and restore
 
-**System → Backup & Export** downloads the whole configuration as JSON, and the
+**Settings → Backup & Export** downloads the whole configuration as JSON, and the
 rendered `haproxy.cfg` and `keepalived.conf` for inspection.
 
 Restoring replaces the shared objects and keeps node-local settings — the API

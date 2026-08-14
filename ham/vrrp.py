@@ -199,7 +199,7 @@ def apply_unicast_plan():
                               json={"keepalived": {"unicast_src": n["address"],
                                                    "unicast_peer": others(n["name"])}},
                               headers={"X-API-Key": (p.get("api_key") or "").strip()},
-                              timeout=15, verify=bool(p.get("verify_tls")))
+                              timeout=PEER_TIMEOUT, verify=bool(p.get("verify_tls")))
             if r.status_code == 200:
                 steps.append("%s: source %s, peers %s"
                              % (n["name"], n["address"], others(n["name"]).replace("\n", ", ")))

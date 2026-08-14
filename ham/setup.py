@@ -9,7 +9,7 @@ import socket
 import uuid
 
 from .base import CERT_DIR, PORT, _lock, _requests, app
-from .config import DEFAULT_CONFIG, _merge_defaults, load_config, save_config
+from .config import DEFAULT_CONFIG, _merge_defaults, load_config, save_config, shared_fingerprint
 from . import apply, auth, vrrp
 
 def _guess_node_url():
@@ -187,7 +187,12 @@ def api_setup_join():
             conf = data.get("config") or {}
             with _lock:
                 cfg = load_config()
-                for section in ("haproxy", "acme", "cluster"):
+                # Every shared section, not a favoured few. Leaving one out is
+                # not neutral: a service admitting a sign-in group this node
+                # has never heard of fails closed and refuses everyone, and a
+                # node without the notification settings alerts nobody -- both
+                # until the first push happens to arrive.
+                for section in ("haproxy", "acme", "access", "cluster", "notify"):
                     if isinstance(conf.get(section), dict):
                         cfg[section] = _merge_defaults(conf[section], DEFAULT_CONFIG[section])
                 mine = (cfg["local"].get("node_url") or "").rstrip("/").lower()
@@ -210,6 +215,12 @@ def api_setup_join():
                     path = CERT_DIR / name
                     path.write_bytes(base64.b64decode(b64))
                     os.chmod(path, 0o600)
+                # Take the sender's place in the revision sequence, exactly as
+                # a sync receive does. Counted as a change of this node's own,
+                # the adopted configuration would sit at revision one and read
+                # as "behind" the cluster it just joined.
+                cfg["_meta"]["shared_fp"] = shared_fingerprint(cfg)
+                cfg["_meta"]["shared_rev"] = int(data.get("rev") or 0)
                 save_config(cfg)
             pushed = True
             steps.append("received the configuration from %s: %d other node(s), %d certificate(s)"

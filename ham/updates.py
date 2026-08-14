@@ -74,7 +74,7 @@ def fetch_latest_version():
     raise last or ValueError("no version source answered")
 
 
-def check_for_update(cfg=None):
+def check_for_update():
     """Ask GitHub for the published version and remember the answer."""
     result = {"checked": datetime.now(timezone.utc).isoformat(timespec="seconds"),
               "latest": "", "available": False, "error": ""}
@@ -87,7 +87,10 @@ def check_for_update(cfg=None):
     except Exception as e:
         result["error"] = str(e)
     with _lock:
-        cur = cfg or load_config()
+        # Always re-read inside the lock. The fetch above can take tens of
+        # seconds, and saving a configuration loaded before it would quietly
+        # revert anything changed in the meantime.
+        cur = load_config()
         cur["_meta"]["update"] = result      # _meta: not hashed, not synced
         save_config(cur)
     if result["available"]:
@@ -262,9 +265,11 @@ def _update_loop():
                 except ValueError:
                     due = True
             if due:
-                check_for_update(cfg)
+                check_for_update()
         except Exception:
-            pass
+            # Survive anything, but say so: a check that dies quietly is
+            # discovered as a node that stopped noticing new versions.
+            log.exception("the daily update check failed; it tries again in an hour")
         time.sleep(3600)
 
 

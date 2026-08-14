@@ -267,7 +267,9 @@ def _renew_loop():
                     if cert.get("auto_renew", True):
                         acme_issue(cfg, cert)
         except Exception:
-            pass
+            # The loop must survive anything, but not silently: a renewal
+            # loop that dies quietly is discovered as an expired certificate.
+            log.exception("the renewal round failed; it runs again in 10 minutes")
 
 
 # --------------------------------------------------------------------------

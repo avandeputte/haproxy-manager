@@ -353,17 +353,6 @@ export async function clusterCard(fresh){
       "the object named below is the one to look at.";
     bd.appendChild(el);
   });
-  /* A reference in the shared configuration that points at nothing: the other
-     nodes receive a rule that cannot do what it says. Named here because it is
-     a fault in what is being sent, not in the node that receives it. */
-  cl.nodes.filter(n=>(n.config_dangling||[]).length).forEach(n=>{
-    const el=document.createElement("div");el.className="hint";el.style.padding="8px 16px";
-    el.innerHTML="! <b>"+esc(n.hostname||n.name)+"</b> is sharing "+n.config_dangling.length+
-      " reference"+(n.config_dangling.length===1?"":"s")+" to objects that are not shared with "+
-      "them: <span class=mono>"+n.config_dangling.slice(0,4).map(esc).join("; ")+"</span>. "+
-      "The other nodes receive rules that cannot work.";
-    bd.appendChild(el);
-  });
   if(!s.config_agreed)bd.appendChild(configDiff(cl.nodes));
   card.appendChild(bd);return card;
 }

@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.84.1_all.deb
+sudo apt-get install -y ./haproxy-manager_1.84.2_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -242,11 +242,10 @@ Two source-address controls sit beside it, in the same wizard section:
   password box. The addresses HAProxy tests are the TCP source — behind
   another proxy that is the proxy's address, not the visitor's.
 
-The **Advanced** section still exposes every object individually, for the cases
-the wizard does not cover (header rewriting, custom ACLs, per-object tuning). It
-is grouped by topic — **Advanced · HAProxy**, **Advanced · ACME** and
-**Advanced · Keepalived** — and mirrors the two OPNsense plugins this UI was
-modeled on:
+The **Advanced · HAProxy** menu group still exposes every object individually,
+for the cases the wizard does not cover (header rewriting, custom ACLs,
+per-object tuning). Its pages mirror the OPNsense plugins this UI was modeled
+on:
 
 | This UI | OPNsense `net/haproxy` |
 |---|---|
@@ -298,7 +297,7 @@ renewal happens on its own.)
   Certificates are written as combined `fullchain + key` PEMs into the HAProxy
   certificate directory (what HAProxy's `crt` expects). HAProxy is then reloaded
   and the certificate pushed to the other nodes, with nothing to configure. A
-  built-in loop renews on the interval set in ACME → Settings.
+  built-in loop renews on the interval set in Settings → ACME Settings.
 - **HTTP-01** challenges use a local `acme.sh --standalone` listener. When
   "HAProxy integration" is on, every HTTP Public Service automatically routes
   `/.well-known/acme-challenge/` to it, and HTTP→HTTPS redirects skip that path —
@@ -476,7 +475,7 @@ accident, and another browser signed in to the same node is unaffected.
 
 ## Reaching the UI over HTTPS
 
-**System → Web UI access** publishes this management UI through HAProxy itself,
+**Settings → Web UI access** publishes this management UI through HAProxy itself,
 so it answers at a name you choose:
 
 ```
@@ -872,7 +871,7 @@ it saw.
 
 ## Backup & Export
 
-**System → Backup & Export** covers two different jobs:
+**Settings → Backup & Export** covers two different jobs:
 
 - **Generated files** — download the `haproxy.cfg` and `keepalived.conf` this
   configuration renders to, exactly as Apply would write them. Downloading
@@ -895,8 +894,8 @@ over Sync, or are re-issued.
 
 - **Sign in with a username and password.** The installer creates the
   administrator and prints the generated password (also written to
-  `/var/lib/haproxy-manager/admin-credentials.txt`, mode 0600); change it under
-  System → Administrator login. Passwords are stored only as a PBKDF2-SHA256
+  `/var/lib/haproxy-manager/admin-credentials.txt`, mode 0600); change it from
+  the account dialog, behind the gear beside your name. Passwords are stored only as a PBKDF2-SHA256
   hash, the session is an HMAC-signed `HttpOnly` / `SameSite=Strict` cookie that
   expires after 12 hours, and repeated failures lock that address out briefly.
   The login is node-local — set it on each node.
