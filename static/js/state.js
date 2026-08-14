@@ -11,5 +11,5 @@ export const state = {
   dnsApis: [],   // the acme.sh DNS hook catalogue, fetched once
   kaDiag: null,   // the last Keepalived diagnosis
   setupIfaceOptions: [],   // interfaces offered by the first-run wizard
-  ticking: false,   // a status refresh is already in flight
+  ticker: null,   // the 10s status interval; stopped while the login screen shows
 };

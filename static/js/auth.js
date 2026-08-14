@@ -8,6 +8,15 @@ import { THEMES, applyTheme, currentTheme } from "./theme.js";
 /* ---- authentication ---- */
 
 export function showLogin(setup){
+  /* Every 401 lands here, including the background status tick that keeps
+     running after a session expires -- every ten seconds. Re-initialising a
+     login form that is already on screen would hide the code field and wipe
+     what is being typed mid-sign-in, so an already-visible form is left
+     exactly as the person has it. The pollers stop either way: a login
+     screen has nothing to poll, and each 401 they fetch would land here. */
+  if(state.ticker){clearInterval(state.ticker);state.ticker=null;}
+  if(state.pageTimer){clearTimeout(state.pageTimer);state.pageTimer=null;}
+  if($("#login").classList.contains("show"))return;
   const s=setup!==undefined?setup:state.who.needs_setup;
   $("#lcodewrap").hidden=true;$("#lcode").value="";
   $("#logintitle").textContent=s?"Create an administrator":"Sign in";

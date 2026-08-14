@@ -227,5 +227,8 @@ export function renderBanner(st){
 
 export function boot(){
   route();refreshStatus();
-  if(!state.ticking){state.ticking=true;setInterval(refreshStatus,10000);}
+  /* The id is kept so signing out (or a session expiring) can stop it: a
+     ticker left running against a dead session throws a 401 at the login
+     screen every ten seconds. */
+  if(!state.ticker)state.ticker=setInterval(refreshStatus,10000);
 }
