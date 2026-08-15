@@ -1,5 +1,5 @@
 import { $, api, btn, closeDlg, esc, openDlg } from "../core.js";
-import { refreshStatus } from "../shell.js";
+import { refreshStatus, route } from "../shell.js";
 import { certExpiryCell, certLastCell, certStat, certStatusCell } from "../pages/certificates.js";
 import { clusterCard } from "../pages/cluster.js";
 import { servicesCard } from "../pages/services.js";
@@ -43,7 +43,9 @@ export async function renderOverview(){
           (res[n].ok?"OK      ":"FAILED  ")+n+(res[n].ok?"":" -- "+(res[n].error||"unknown error"))).join("\n")
         :"No certificates have auto-renew enabled.")+
         "\n\nOpen a certificate's Log button for the full acme.sh output.";
-      refreshStatus();renderOverview();
+      // Renewing runs for minutes; only repaint if the Overview is still up,
+      // and through route() so it does not stomp a page navigated to since.
+      refreshStatus();if(location.hash===""||location.hash==="#/")route();
     }catch(e){pre.textContent="FAILED -- "+e.message;}
   }));
   const cb=document.createElement("div");

@@ -367,6 +367,12 @@ def do_apply(cfg=None, allow_push=True):
         os.chmod(HAPROXY_CFG, 0o644)
         rc, out = run(["systemctl", "reload-or-restart", "haproxy"])
         result["steps"].append("haproxy reload: " + ("ok" if rc == 0 else out))
+        # Did the configuration this apply rendered actually take effect? If it
+        # was rolled back, HAProxy is running the previous one, and marking the
+        # new config "applied" below would make the dirty indicator lie -- it
+        # would read clean while the proxy serves something else, and never
+        # prompt the re-apply the fix needs.
+        haproxy_took_effect = True
         if rc == 0:
             # systemctl returning zero means the command was accepted, not that
             # HAProxy is serving. A configuration that passes haproxy -c can
@@ -377,6 +383,7 @@ def do_apply(cfg=None, allow_push=True):
             if bad:
                 log.error("haproxy is not serving after the reload: %s", bad)
                 restored = _restore_previous_haproxy_cfg()
+                haproxy_took_effect = False
                 result["steps"].append("haproxy is not serving: " + bad)
                 result.setdefault("warnings", []).append(
                     "HAProxy accepted the reload but is not serving: %s. %s This node is "
@@ -390,6 +397,7 @@ def do_apply(cfg=None, allow_push=True):
             else:
                 log.info("applied: haproxy.cfg written and reloaded")
         else:
+            haproxy_took_effect = False
             log.error("applied haproxy.cfg but the reload failed: %s", out.strip()[:300])
             notify.notify("apply", "HAProxy did not reload on this node",
                    "The new configuration was written and validated, but HAProxy did not "
@@ -434,7 +442,12 @@ def do_apply(cfg=None, allow_push=True):
                         "Keepalived did not reload: %s. Without it this node cannot take the "
                         "virtual IP." % out.strip()[:300])
 
-        cfg["_meta"]["applied_hash"] = config_hash(cfg)
+        # Advance the applied marker only if HAProxy is really running this
+        # config. On a rollback or a failed reload it is not, so the marker
+        # stays where it was -- the node reads dirty and asks to re-apply once
+        # the cause (a taken port, say) is cleared.
+        if haproxy_took_effect:
+            cfg["_meta"]["applied_hash"] = config_hash(cfg)
         save_config(cfg)
         result["ok"] = True
 

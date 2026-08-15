@@ -11,8 +11,17 @@ import tempfile
 import time
 
 from .base import ACME_HOME, ACME_SH, CERT_DIR, _lock, app, log
-from .config import load_config, save_config
+from .config import load_config, merged, save_config
 from .util import _by_id, cert_path, parse_domains, run
+
+import re
+
+# A provider credential variable is a plain shell identifier. Anything that
+# could redirect a root process -- the loader variables, PATH, the shell's
+# own hooks -- is refused even if it matches that shape.
+_SAFE_ENV = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_DANGEROUS_ENV = {"PATH", "IFS", "ENV", "BASH_ENV", "SHELLOPTS", "BASHOPTS",
+                  "PS4", "PROMPT_COMMAND", "PYTHONPATH", "PERL5LIB"}
 from . import auth, notify, sync
 
 # --------------------------------------------------------------------------
@@ -136,9 +145,21 @@ def _acme_issue(cfg, cert, force=False):
     if ch.get("method") == "dns01":
         args += ["--dns", ch.get("dns_provider", "")]
         for line in (ch.get("dns_credentials") or "").splitlines():
-            if "=" in line:
-                kk, vv = line.split("=", 1)
-                env[kk.strip()] = vv.strip()
+            if "=" not in line:
+                continue
+            kk, vv = line.split("=", 1)
+            kk = kk.strip()
+            # acme.sh's DNS hooks read their credentials from named variables,
+            # so this whole line goes into the environment of a root process.
+            # Restrict the NAME: a provider variable is a plain identifier, and
+            # nothing here should be able to set PATH, IFS, or the dynamic
+            # loader's hijack variables in that process.
+            if not _SAFE_ENV.match(kk) or kk in _DANGEROUS_ENV \
+                    or kk.startswith(("LD_", "DYLD_")):
+                log.warning("ignoring a DNS credential line: %r is not a valid "
+                            "provider variable name", kk)
+                continue
+            env[kk] = vv.strip()
     else:
         args += ["--standalone", "--httpport", str(cfg["acme"]["settings"].get("challenge_port", 9080))]
     if force:
@@ -192,7 +213,9 @@ def after_certificate_deployed(cfg, cert):
 @app.post("/api/acme/issue/<cid>")
 def api_acme_issue(cid):
     cfg = load_config()
-    cert = _by_id(cfg["acme"]["certificates"]).get(cid)
+    # merged, so a node's own UI certificate -- moved into the local section --
+    # can be issued from the button the Certificates page shows for it.
+    cert = _by_id(merged(cfg)["acme"]["certificates"]).get(cid)
     if not cert:
         abort(404)
     force = bool((request.get_json(silent=True) or {}).get("force"))
@@ -215,7 +238,7 @@ def api_acme_renew():
     if not ok:
         return jsonify({"ok": False, "error": why}), 409
     results = {}
-    for cert in cfg["acme"]["certificates"]:
+    for cert in merged(cfg)["acme"]["certificates"]:
         if cert.get("auto_renew", True):
             results[cert["name"]] = acme_issue(cfg, cert)
     return jsonify({"ok": all(r.get("ok") for r in results.values()) if results else True,
@@ -263,7 +286,7 @@ def _renew_loop():
             interval = max(1, int(st.get("renew_hours") or 24)) * 3600
             if time.time() - _last_renew >= interval:
                 _last_renew = time.time()
-                for cert in cfg["acme"]["certificates"]:
+                for cert in merged(cfg)["acme"]["certificates"]:
                     if cert.get("auto_renew", True):
                         acme_issue(cfg, cert)
         except Exception:

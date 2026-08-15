@@ -86,8 +86,15 @@ export async function renderUpdates(){
   try{const l=await api("update/log");if(l.log)pre.textContent=l.log;if(l.running)watchUpdate(msg);}catch(e){}
 }
 /* Poll the log while the updater runs; the service restarts underneath us. */
+let watching=false;
 export function watchUpdate(msg){
+  if(watching)return;   // one poll loop, however many times this is called
+  watching=true;
   const tick=async()=>{
+    // Stop polling once the person leaves the Updates page: the tick used to
+    // re-arm state.pageTimer after navigation had cleared it, so the loop ran
+    // on from every other page until the update ended.
+    if(location.hash!=="#/p:updates"){watching=false;return;}
     let alive=true;
     try{
       const l=await api("update/log");
@@ -98,7 +105,7 @@ export function watchUpdate(msg){
         msg.innerHTML="Update finished &mdash; now running <b>"+esc(l.version)+"</b>. Reload the page.";
       }
     }catch(e){msg.textContent="Service is restarting...";}   // expected mid-update
-    if(alive)state.pageTimer=setTimeout(tick,3000);
+    if(alive){state.pageTimer=setTimeout(tick,3000);}else{watching=false;}
   };
   state.pageTimer=setTimeout(tick,3000);
 }

@@ -172,14 +172,12 @@ def _entities(cfg, s):
                 "availability_topic": cavail, "device": cdev,
             }, "ON" if paused else "OFF", None)
 
-    hist = traffic._state
-    if hist.get("at"):
-        for pool, row in (hist.get("series") or {}).items():
-            if pool in traffic.INTERNAL_POOLS or not row.get("req"):
-                continue
-            add("ham-traffic-" + _slug(traffic._pool_label(pool)), "sensor",
-                "%s requests" % traffic._pool_label(pool),
-                row["req"][-1], cdev, unit="req/min", availability=cavail)
+    for pool, req in traffic.latest_per_pool().items():
+        if pool in traffic.INTERNAL_POOLS:
+            continue
+        add("ham-traffic-" + _slug(traffic._pool_label(pool)), "sensor",
+            "%s requests" % traffic._pool_label(pool),
+            req, cdev, unit="req/min", availability=cavail)
     return out
 
 
@@ -194,11 +192,20 @@ def _publish_all(pub, cfg, s, discover):
         if role != "passive":
             pub.publish("%s/cluster/availability" % base, "online")
         # Entities that existed last time and are gone now -- a deleted
-        # service, a removed certificate -- are removed from Home Assistant
-        # by publishing an empty config, or they would linger forever.
-        for uid, comp in list(_state["uids"] - {(u, e[0]) for u, e in entities.items()}):
-            pub.publish("%s/%s/%s/config" % (disc, comp, uid), "")
-            pub.publish("%s/state/%s" % (base, uid), "")
+        # service, a removed certificate -- are removed from Home Assistant by
+        # publishing an empty config, or they would linger forever. A PASSIVE
+        # node removes nothing: the cluster entities it just stopped
+        # publishing did not go away, they moved to whichever node took the
+        # virtual IP, which is now keeping them current on the same shared
+        # topics. Sweeping here would delete the entities the new active node
+        # just published -- every failover would blank the dashboards for a
+        # refresh cycle. Its own node-device entities never disappear, and a
+        # genuine deletion is always seen by the active node, which still
+        # sweeps.
+        if role != "passive":
+            for uid, comp in list(_state["uids"] - {(u, e[0]) for u, e in entities.items()}):
+                pub.publish("%s/%s/%s/config" % (disc, comp, uid), "")
+                pub.publish("%s/state/%s" % (base, uid), "")
         _state["uids"] = {(u, e[0]) for u, e in entities.items()}
 
     for uid, (component, conf, state, attrs) in entities.items():

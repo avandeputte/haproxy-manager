@@ -11,7 +11,6 @@ import shutil
 import socket
 import threading
 import time
-import urllib.parse
 import urllib.request
 
 from .base import (CLUSTER_POLL_SECONDS, HAPROXY_CFG, KEEPALIVED_CFG, PORT, 
@@ -437,7 +436,10 @@ def _check_addresses(cfg):
                                  "%s is this node's alone again" % old_addr,
                                  "Nothing else on the network answers for it now.",
                                  "info", cfg)
-    _watchdog["_addr_seen"] = sorted(seen)
+    # A top-level key inserted while api_watchdog serialises the dict would
+    # crash the read mid-iteration; every write to _watchdog takes the lock.
+    with _watchdog_lock:
+        _watchdog["_addr_seen"] = sorted(seen)
 
 
 def _watchdog_loop():
@@ -475,7 +477,8 @@ def _watchdog_loop():
         if deadline:
             interval = min(interval, max(2.0, deadline / 2.0))
         enabled = bool(wd.get("enabled", True))
-        _watchdog["enabled"] = enabled
+        with _watchdog_lock:
+            _watchdog["enabled"] = enabled
 
         ok, detail, ms = probe_self()
         with _watchdog_lock:
@@ -490,7 +493,8 @@ def _watchdog_loop():
                       detail)
 
         if enabled:
-            _watchdog["running"] = True
+            with _watchdog_lock:
+                _watchdog["running"] = True
             try:
                 watchdog_round(cfg)
             except Exception:
@@ -504,7 +508,8 @@ def _watchdog_loop():
             probe.poll(cfg)
             hass.poll(cfg)
         else:
-            _watchdog["running"] = False
+            with _watchdog_lock:
+                _watchdog["running"] = False
 
         # Collect every node's health here, on a schedule, so the UI reads a
         # snapshot instead of fanning out to the cluster on every page load.

@@ -5,9 +5,10 @@ from datetime import timezone
 from flask import jsonify, request
 import json
 import os
+import threading
 import time
 
-from .base import DATA_DIR, _lock, app, log
+from .base import DATA_DIR, app, log
 from .config import merged
 from .util import _sec
 from . import auth, notify, probe, stats
@@ -28,6 +29,11 @@ COUNTERS = {"stot": "req", "hrsp_4xx": "e4", "hrsp_5xx": "e5",
 LEVELS = {"scur": "cur"}
 
 _state = {"loaded": False, "at": [], "series": {}, "last": {}, "sampled": 0.0}
+# The watchdog thread writes the history (record) while request handlers and
+# the MQTT poll read it (history, latest_per_pool). They are different threads
+# touching the same dicts, so every path that iterates or mutates _state holds
+# this -- the config _lock the API used to take guarded nothing here.
+_tlock = threading.RLock()
 
 
 def _load():
@@ -88,61 +94,65 @@ def record(data):
     short series the gap belonged to cannot be done -- a new pool is missing
     values at the start and a departed one at the end, and they look identical.
     """
-    _load()
-    at = int(time.time())
-    n = len(_state["at"])
-    seen = set()
-    # The requests this app made itself since the last sample -- the URL
-    # probes, which go through HAProxy on purpose and are counted by it like
-    # anyone else's. A service nobody visited should read as zero, not as a
-    # steady line of the app talking to itself. Floored at zero: the probe
-    # rounds and the sampling are not in step, so a count can land one minute
-    # to either side of the delta it belongs to.
+    # The probe counts are drained outside the lock (probe has its own), then
+    # everything that touches _state happens under _tlock, so a reader on
+    # another thread never sees the series mid-append.
     ours = probe.drain_generated()
-    for be in data.get("backends") or []:
-        name = be.get("proxy")
-        if not name:
-            continue
-        seen.add(name)
-        new_pool = name not in _state["series"]
-        row = _state["series"].setdefault(name, {})
-        mine = ours.get(name) or {}
+    with _tlock:
+        _load()
+        at = int(time.time())
+        n = len(_state["at"])
+        seen = set()
+        # The requests this app made itself since the last sample -- the URL
+        # probes, which go through HAProxy on purpose and are counted by it
+        # like anyone else's. A service nobody visited should read as zero,
+        # not a steady line of the app talking to itself. Floored at zero: the
+        # probe rounds and the sampling are not in step, so a count can land
+        # one minute to either side of the delta it belongs to.
+        for be in data.get("backends") or []:
+            name = be.get("proxy")
+            if not name:
+                continue
+            seen.add(name)
+            new_pool = name not in _state["series"]
+            row = _state["series"].setdefault(name, {})
+            mine = ours.get(name) or {}
 
-        def put(key, value):
-            values = row.get(key)
-            if values is None:
-                # Seen for the first time: nothing was happening here before,
-                # which is exactly zero.
-                values = row[key] = [0] * n
-            values.append(value)
+            def put(key, value):
+                values = row.get(key)
+                if values is None:
+                    # Seen for the first time: nothing was happening here
+                    # before, which is exactly zero.
+                    values = row[key] = [0] * n
+                values.append(value)
 
-        for col, key in COUNTERS.items():
-            try:
-                put(key, max(0, _delta(name, key, int(be.get(col) or 0))
-                             - int(mine.get(key) or 0)))
-            except ValueError:
-                put(key, 0)
-        for col, key in LEVELS.items():
-            try:
-                put(key, int(be.get(col) or 0))
-            except ValueError:
-                put(key, 0)
-        put("up", int(be.get("servers_up") or 0))
-        put("of", int(be.get("servers_total") or 0))
-        if new_pool:
-            log.debug("traffic history: first sample for %s", name)
+            for col, key in COUNTERS.items():
+                try:
+                    put(key, max(0, _delta(name, key, int(be.get(col) or 0))
+                                 - int(mine.get(key) or 0)))
+                except ValueError:
+                    put(key, 0)
+            for col, key in LEVELS.items():
+                try:
+                    put(key, int(be.get(col) or 0))
+                except ValueError:
+                    put(key, 0)
+            put("up", int(be.get("servers_up") or 0))
+            put("of", int(be.get("servers_total") or 0))
+            if new_pool:
+                log.debug("traffic history: first sample for %s", name)
 
-    # A pool HAProxy did not report is a pool that served nothing this minute.
-    for name, row in _state["series"].items():
-        if name in seen:
-            continue
-        for values in row.values():
-            values.append(0)
+        # A pool HAProxy did not report served nothing this minute.
+        for name, row in _state["series"].items():
+            if name in seen:
+                continue
+            for values in row.values():
+                values.append(0)
 
-    _state["at"].append(at)
-    _trim()
-    _save()
-    return True
+        _state["at"].append(at)
+        _trim()
+        _save()
+        return True
 
 
 def _trim():
@@ -278,21 +288,35 @@ def check_services(cfg, data):
 
 
 def history(pool=None, minutes=None):
-    _load()
-    at = _state["at"]
-    keep = len(at)
-    if minutes:
-        cutoff = time.time() - minutes * 60
-        keep = sum(1 for t in at if t >= cutoff)
-    series = _state["series"]
-    if pool:
-        series = {k: v for k, v in series.items() if k == pool}
-    return {"ok": True, "step": STEP_SECONDS,
-            "at": at[len(at) - keep:],
-            "series": {name: {k: v[len(v) - keep:] for k, v in row.items()}
-                       for name, row in series.items()},
-            "span": _span_text(at),
-            "generated": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+    with _tlock:
+        _load()
+        at = list(_state["at"])
+        keep = len(at)
+        if minutes:
+            cutoff = time.time() - minutes * 60
+            keep = sum(1 for t in at if t >= cutoff)
+        series = _state["series"]
+        if pool:
+            series = {k: v for k, v in series.items() if k == pool}
+        return {"ok": True, "step": STEP_SECONDS,
+                "at": at[len(at) - keep:],
+                "series": {name: {k: v[len(v) - keep:] for k, v in row.items()}
+                           for name, row in series.items()},
+                "span": _span_text(at),
+                "generated": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+
+
+def latest_per_pool():
+    """The most recent requests/min for each pool that has any, as a plain
+    snapshot taken under the lock -- so a reader (the Home Assistant poll)
+    never iterates the series while the watchdog is appending to it."""
+    with _tlock:
+        _load()
+        if not _state["at"]:
+            return {}
+        return {name: row["req"][-1]
+                for name, row in _state["series"].items()
+                if row.get("req")}
 
 
 @app.get("/api/traffic")
@@ -305,5 +329,6 @@ def api_traffic():
         minutes = int(request.args.get("minutes") or 0)
     except ValueError:
         minutes = 0
-    with _lock:
-        return jsonify(history(request.args.get("pool") or None, minutes))
+    # history() serializes on the traffic lock itself; the config _lock is the
+    # wrong lock and taking it here would block every writer for nothing.
+    return jsonify(history(request.args.get("pool") or None, minutes))

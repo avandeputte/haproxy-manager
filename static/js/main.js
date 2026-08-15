@@ -1,6 +1,6 @@
 /* Entry point. Imports every page, tells the shell about them, and starts. */
 import { refreshWho, showLogin } from "./auth.js";
-import { $, api, btn, enhanceTables, esc, showText } from "./core.js";
+import { $, enhanceTables } from "./core.js";
 import { E, renderEntity, renderSettings } from "./entities.js";
 import { renderAcmeSettings } from "./pages/acme.js";
 import { renderBackup } from "./pages/backup.js";

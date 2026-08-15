@@ -12,6 +12,19 @@ from . import access, oauth
 
 # --------------------------------------------------------------------------
 
+def _line_safe(value):
+    """Strip anything that could end the line and begin a new directive.
+
+    `_sec` is for names that must become a bare token; this is for values
+    that legitimately hold richer text -- an address, a URI, an ACL pattern --
+    where the only thing that must never survive is a control character. A
+    newline in a field meant to hold one address is how an operator could
+    smuggle a second directive that `haproxy -c` then accepts; without this
+    the field is trusted to be one line, and nothing enforces it.
+    """
+    return re.sub(r"[\x00-\x1f\x7f]", "", str(value or "")).strip()
+
+
 COND_MAP = {
     "host_matches":     lambda c: "hdr(host) -i %s" % c.get("value", ""),
     "host_starts_with": lambda c: "hdr_beg(host) -i %s" % c.get("value", ""),
@@ -40,7 +53,11 @@ def _rule_line(rule, conds, backends):
         joiner = " or " if rule.get("operator") == "or" else " "
         suffix = " %s %s" % (rule.get("test", "if"), joiner.join(names))
     t = rule.get("type")
-    p1, p2 = rule.get("param1", ""), rule.get("param2", "")
+    # param1/param2 hold values (a URL, a header name and value), so control
+    # characters are stripped but the text is kept -- except a "custom" rule,
+    # which is the deliberate raw-directive field and stays verbatim.
+    p1 = rule.get("param1", "") if t == "custom" else _line_safe(rule.get("param1", ""))
+    p2 = _line_safe(rule.get("param2", ""))
     if t == "use_backend":
         be = backends.get(rule.get("backend"))
         return ("use_backend be_%s%s" % (_sec(be["name"]), suffix)) if be else None
@@ -213,7 +230,7 @@ def render_haproxy(cfg):
         need_inspect = False
         for cid in used:
             c = conds[cid]
-            expr = COND_MAP.get(c.get("type", "custom"), COND_MAP["custom"])(c)
+            expr = _line_safe(COND_MAP.get(c.get("type", "custom"), COND_MAP["custom"])(c))
             acls.append("acl acl_%s %s" % (_sec(c["name"]), expr))
             if mode == "tcp" and c.get("type") == "ssl_sni":
                 need_inspect = True
@@ -275,14 +292,14 @@ def render_haproxy(cfg):
                 if ver or host_hdr:
                     # the form that can carry a version and headers
                     A("    option httpchk")
-                    send = "    http-check send meth %s uri %s" % (_sec(method), uri)
+                    send = "    http-check send meth %s uri %s" % (_sec(method), _line_safe(uri))
                     if ver in ("HTTP/1.0", "HTTP/1.1", "HTTP/2"):
                         send += " ver %s" % ver      # the slash must survive sanitising
                     if host_hdr:
                         send += " hdr Host %s" % _sec(host_hdr)
                     A(send)
                 else:
-                    A("    option httpchk %s %s" % (method, uri))
+                    A("    option httpchk %s %s" % (_sec(method), _line_safe(uri)))
                 if hc.get("expect_status"):
                     A("    http-check expect status %s" % hc["expect_status"])
             elif htype == "ssl":
@@ -447,7 +464,9 @@ def render_haproxy(cfg):
             sv = servers.get(sid)
             if not sv or not sv.get("enabled", True):
                 continue
-            parts = ["server %s %s:%s" % (_sec(sv["name"]), sv.get("address", ""), sv.get("port", ""))]
+            parts = ["server %s %s:%s" % (_sec(sv["name"]),
+                                          _line_safe(sv.get("address", "")),
+                                          _line_safe(sv.get("port", "")))]
             if be.get("healthcheck_enabled"):
                 parts.append("check inter %s" % inter)
                 if sv.get("check_port"):

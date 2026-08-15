@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.90.2_all.deb
+sudo apt-get install -y ./haproxy-manager_1.91.0_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -975,9 +975,12 @@ it saw.
   the one it has. Nothing is applied until you press **Apply**, so you can
   review the result first.
 
-The backup deliberately contains **no secrets**: no API key, no login, and no
-private keys from the certificate directory. Certificates move between nodes
-over Sync, or are re-issued.
+The backup deliberately contains **no secrets**: no API key, no login, no
+private keys from the certificate directory, and no DNS-provider credentials,
+EAB keys, or single sign-on client secret. Certificates move between nodes
+over Sync, or are re-issued; a restore onto the same node fills the stripped
+secrets back in from what is stored, and a restore elsewhere asks for them
+again. That makes the file safe to keep off the node.
 
 ## Security
 

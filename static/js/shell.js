@@ -5,7 +5,6 @@
  * refreshStatus(), and only main.js knows what all the pages are.
  */
 import { $, api, btn, esc, showText } from "./core.js";
-import { refreshWho, showLogin } from "./auth.js";
 import { state } from "./state.js";
 
 let pages = {};        /* "p:" pages, keyed by name */

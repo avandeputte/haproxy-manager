@@ -37,7 +37,7 @@ import threading
 from ham.base import (CONF_PATH, DATA_DIR, LISTEN, PORT, THREADS, VERSION,
     _lock, app, log)
 from ham.config import load_config, save_config
-from ham.auth import key_fingerprint, set_admin
+from ham.auth import bad_username, key_fingerprint, set_admin
 from ham.acme import _renew_loop
 from ham.updates import _update_loop
 from ham.watchdog import _watchdog_loop
@@ -64,6 +64,10 @@ def _cli(argv):
         password = sys.stdin.read().rstrip("\n") if argv[2] == "-" else argv[2]
         if len(password) < 8:
             print("the password must be at least 8 characters", file=sys.stderr)
+            return 1
+        bad = bad_username(argv[1])
+        if bad:
+            print(bad, file=sys.stderr)
             return 1
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         cfg = load_config()

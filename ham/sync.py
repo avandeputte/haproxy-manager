@@ -471,11 +471,25 @@ def _receive_locked(cfg, data, conf, source=None):
             key = (p.get("api_key") or "").strip()
             if local and not p.get("self"):
                 key = (local.get("api_key") or "").strip() or key
+            # Whether to verify TLS to a peer, whether it is enabled, and what
+            # to call it are THIS node's policy about that peer, not something
+            # the peer states about itself -- otherwise a mesh push would keep
+            # resetting `verify_tls` to the sender's own False and quietly
+            # undo the MITM protection an admin turned on here. A known peer
+            # keeps its local policy; only a genuinely new one takes the
+            # incoming values.
+            if local:
+                verify_tls = bool(local.get("verify_tls"))
+                enabled = bool(local.get("enabled", True))
+                name = local.get("name") or p.get("name") or urlsplit(p["url"]).hostname or "peer"
+            else:
+                verify_tls = bool(p.get("verify_tls"))
+                enabled = bool(p.get("enabled", True))
+                name = p.get("name") or urlsplit(p["url"]).hostname or "peer"
             kept.append({"id": (local or {}).get("id") or p.get("id") or str(uuid.uuid4()),
-                         "name": p.get("name") or urlsplit(p["url"]).hostname or "peer",
+                         "name": name,
                          "url": p["url"].rstrip("/"), "api_key": key,
-                         "verify_tls": bool(p.get("verify_tls")),
-                         "enabled": bool(p.get("enabled", True))})
+                         "verify_tls": verify_tls, "enabled": enabled})
         if kept:
             cfg["local"]["sync"]["peers"] = kept
 

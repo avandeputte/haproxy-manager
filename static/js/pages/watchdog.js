@@ -1,4 +1,4 @@
-import { $, api, btn, esc, fieldRow, localTime, readForm } from "../core.js";
+import { $, api, btn, esc, fieldRow, localTime, pageGuard, readForm } from "../core.js";
 import { state } from "../state.js";
 
 /* ---- watchdog ---- */
@@ -7,10 +7,13 @@ export const WD_STATE={ok:["up","is answering"],down:["down","is not running"],
   idle:["off","nothing to supervise yet"],disabled:["off","not run on this node"],
   unwatched:["off","not supervised"],unknown:["warn","could not be determined"]};
 export async function renderWatchdog(){
-  const c=$("#content");c.innerHTML="";
+  const c=$("#content");
+  const fresh=pageGuard();
   let wd;
   try{wd=await api("watchdog");}
-  catch(e){c.innerHTML='<div class="card"><div class="bd">'+esc(e.message)+"</div></div>";return;}
+  catch(e){if(fresh())c.innerHTML='<div class="card"><div class="bd">'+esc(e.message)+"</div></div>";return;}
+  if(!fresh())return;   // navigated away while loading
+  c.innerHTML="";
 
   /* --- what it sees right now --- */
   const card=document.createElement("div");card.className="card";
@@ -84,7 +87,7 @@ export async function renderWatchdog(){
   const foot=document.createElement("div");foot.className="bd";
   foot.style.cssText="display:flex;gap:8px;align-items:center;border-top:1px solid var(--hair)";
   const note=document.createElement("span");note.className="hint";
-  foot.appendChild(btn("Save","primary",async()=>{
+  foot.appendChild(btn("Save","pri",async()=>{
     note.textContent="saving...";
     try{await api("watchdog","PUT",readForm(FIELDS));note.textContent="Saved.";renderWatchdog();}
     catch(e){note.textContent=e.message;}
@@ -110,5 +113,16 @@ export async function renderWatchdog(){
       : '<div class=empty>It has not had to do anything.</div>');
   c.appendChild(ev);
 
-  state.pageTimer=setTimeout(()=>{if(location.hash==="#/p:watchdog")renderWatchdog();},10000);
+  // The refresh rebuilds the Settings form from the server, so a tick mid-edit
+  // would wipe what is being typed into "Check every" or "Window". Skip the
+  // re-render while a field on the page has focus, but keep the timer alive.
+  state.pageTimer=setTimeout(function tick(){
+    if(location.hash!=="#/p:watchdog")return;
+    const a=document.activeElement;
+    if(a&&a.closest("#content")&&/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)){
+      state.pageTimer=setTimeout(tick,10000);
+      return;
+    }
+    renderWatchdog();
+  },10000);
 }

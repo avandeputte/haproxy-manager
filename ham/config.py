@@ -239,12 +239,23 @@ def load_config():
     load/modify/save, which is what makes those sequences atomic.
     """
     cfg = {}
+    unreadable = False
     if CONF_PATH.exists():
         try:
             cfg = json.loads(CONF_PATH.read_text())
-        except (ValueError, OSError):
-            cfg = {}
+        except (ValueError, OSError) as e:
+            # The file is there but will not parse. Returning bare defaults
+            # here would make the node look like it has never been set up --
+            # no admin, no API key -- which opens /api/setup to whoever
+            # reaches the port and lets their first save overwrite the real
+            # (recoverable) configuration. Mark it instead: the setup path
+            # refuses, so a corrupt file fails closed rather than open.
+            log.error("config.json exists but will not parse (%s); refusing to "
+                      "treat this as first-run setup", e)
+            cfg, unreadable = {}, True
     cfg = _merge_defaults(cfg, DEFAULT_CONFIG)
+    if unreadable:
+        cfg["_meta"]["unreadable"] = True
     _move_node_objects_into_local(cfg)
     return cfg
 
@@ -510,6 +521,15 @@ def _snapshot(cfg, fp):
 
 def save_config(cfg):
     with _lock:
+        # Never overwrite a config file that could not be read. This cfg was
+        # built from bare defaults because the on-disk file would not parse;
+        # writing it back would turn a recoverable file (rename it, fix the
+        # JSON) into a permanent loss of everything it held. The flag is not a
+        # persisted field, so a normally-loaded config never carries it.
+        if (cfg.get("_meta") or {}).get("unreadable"):
+            raise RuntimeError(
+                "refusing to overwrite an unreadable config.json -- repair or "
+                "move %s aside first" % CONF_PATH)
         # The revision counts changes to the shared configuration, and is what
         # lets a node tell "the same as mine", "older than mine" and "newer
         # than mine" apart. It is bumped here rather than at each call site so
@@ -542,7 +562,6 @@ def save_config(cfg):
         os.replace(tmp, CONF_PATH)
 
 
-LOCAL_ONLY = "local_only"       # this object belongs to this node alone
 WEBUI_NAME = "haproxy-manager-ui"   # the service each node publishes its own UI as
 
 

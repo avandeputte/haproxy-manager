@@ -18,6 +18,14 @@ export async function renderSso(){
     "service in the publish wizard.</p>"+
     (s.redirect_uri?'<p class=hint style="margin-bottom:14px">Register this redirect URI at the '+
     'provider: <span class=mono>'+esc(s.redirect_uri)+"</span></p>":"");
+  if((s.unreachable_hosts||[]).length){
+    bd.innerHTML+='<p class=hint style="color:var(--down);margin-bottom:14px">'+
+      "<b>These protected services sit outside the cookie domain</b> ("+esc(s.cookie_domain||"")+
+      "), so the session cookie can never reach them and a visitor there would loop through the "+
+      "sign-in without end: <span class=mono>"+
+      (s.unreachable_hosts||[]).map(esc).join("</span>, <span class=mono>")+
+      "</span>. Move them under the cookie domain, or widen it.</p>";
+  }
   const FIELDS=[
    {k:"enabled",l:"Enable single sign-on",t:"bool"},
    {k:"issuer",l:"Issuer URL",t:"text",

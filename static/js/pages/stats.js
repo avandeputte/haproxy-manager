@@ -1,4 +1,4 @@
-import { $, api, esc } from "../core.js";
+import { $, api, pageGuard, esc } from "../core.js";
 import { trafficSpark } from "../sparkline.js";
 import { state } from "../state.js";
 
@@ -56,9 +56,11 @@ let historyAt=0, historyHtml="";
 
 export async function renderStats(){
   const c=$("#content");
+  const fresh=pageGuard();
   let st;
   try{st=await api("stats");}
-  catch(e){c.innerHTML='<div class="card"><div class="bd">'+esc(e.message)+"</div></div>";return;}
+  catch(e){if(fresh())c.innerHTML='<div class="card"><div class="bd">'+esc(e.message)+"</div></div>";return;}
+  if(!fresh())return;   // navigated away while the stats were loading
   if(!st.ok){
     c.innerHTML='<div class="card"><div class=hd><h2>Statistics</h2></div><div class="bd"><p class=hint>'+esc(st.error)+"</p></div></div>";
     return;
@@ -68,6 +70,7 @@ export async function renderStats(){
     historyAt=Date.now();
     try{
       const h=await api("traffic");
+      if(!fresh())return;   // navigated away while the history loaded
       historyHtml=(h.at||[]).length>1?historyCard(h):"";
     }catch(e){/* history is a nicety; the live figures are the page */}
   }

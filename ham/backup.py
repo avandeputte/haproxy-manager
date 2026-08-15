@@ -40,6 +40,25 @@ def api_export_keepalived():
     return _download(keepalived.render_keepalived(cfg), "keepalived.conf")
 
 
+# The secrets a backup must never carry, per acme object type. A backup is
+# meant to be safe to copy around -- attached to a ticket, committed to a
+# repo -- so a DNS API token (which can rewrite a zone and mint certificates)
+# or an EAB key has no place in it, any more than the service password hashes
+# that are already stripped. Restoring onto the same node fills them back in
+# from what is stored; restoring elsewhere leaves them to be re-entered.
+ACME_SECRETS = {"challenges": ("dns_credentials",), "accounts": ("eab_hmac",)}
+
+
+def _acme_without_secrets(acme):
+    acme = copy.deepcopy(acme)
+    for coll, fields in ACME_SECRETS.items():
+        for obj in acme.get(coll) or []:
+            for f in fields:
+                if obj.get(f):
+                    obj[f] = ""
+    return acme
+
+
 @app.get("/api/export/config")
 def api_export_config():
     """Everything the UI manages, as a restorable JSON backup.
@@ -51,7 +70,9 @@ def api_export_config():
 
     Service users and groups are included, without their passwords, so the
     services that admit them restore intact. Each restored user has to be
-    given a password again before they can sign in.
+    given a password again before they can sign in. DNS API credentials and
+    EAB keys are stripped for the same reason -- a restore onto the same node
+    keeps the stored ones, a restore elsewhere asks for them again.
     """
     cfg = load_config()
     users = [{k: v for k, v in u.items() if k != "hash"}
@@ -60,7 +81,8 @@ def api_export_config():
         "format": BACKUP_FORMAT,
         "exported": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "source": socket.gethostname(),
-        "config": {"haproxy": cfg["haproxy"], "acme": cfg["acme"],
+        "config": {"haproxy": cfg["haproxy"],
+                   "acme": _acme_without_secrets(cfg["acme"]),
                    "access": {"users": users,
                               "groups": (cfg.get("access") or {}).get("groups") or []}},
     }
@@ -96,6 +118,16 @@ def api_import_config():
     with _lock:
         cfg = load_config()
         restored = {}
+        # A backup carries no secrets. For anything already here, keyed by id,
+        # a blank field in the backup means "keep what this node has" -- so a
+        # restore onto the same node does not wipe the DNS credentials or EAB
+        # keys the export left out, and a restore elsewhere leaves them blank
+        # to be re-entered rather than clobbering nothing with nothing.
+        stored_secrets = {}
+        for coll, fields in ACME_SECRETS.items():
+            for obj in (cfg.get("acme") or {}).get(coll) or []:
+                if obj.get("id"):
+                    stored_secrets[(coll, obj["id"])] = {f: obj.get(f) for f in fields}
         for section in ("haproxy", "acme"):
             part = incoming.get(section)
             if not isinstance(part, dict):
@@ -106,6 +138,12 @@ def api_import_config():
                                     "%s/%s should be a list" % (section, coll)}), 400
             cfg[section] = _merge_defaults(copy.deepcopy(part), DEFAULT_CONFIG[section])
             restored[section] = _count_objects(cfg[section])
+        for coll, fields in ACME_SECRETS.items():
+            for obj in cfg.get("acme", {}).get(coll) or []:
+                kept = stored_secrets.get((coll, obj.get("id")))
+                for f in fields:
+                    if not obj.get(f) and kept and kept.get(f):
+                        obj[f] = kept[f]
         part = incoming.get("access")
         if isinstance(part, dict):
             # A backup carries no passwords. A user who is already here keeps
@@ -123,7 +161,14 @@ def api_import_config():
             groups = [g for g in part.get("groups") or [] if isinstance(g, dict)]
             for g in groups:
                 g.setdefault("id", str(uuid.uuid4()))
-            cfg["access"] = {"users": users, "groups": groups}
+            # Update in place: single sign-on lives under access.oauth and a
+            # backup never carries it (the client secret and signing key are
+            # not for a copyable file), so replacing the whole section would
+            # disable SSO cluster-wide on the next push. Users and groups are
+            # what the backup restores; oauth stays as this node has it.
+            cfg.setdefault("access", {})
+            cfg["access"]["users"] = users
+            cfg["access"]["groups"] = groups
             restored["access"] = _count_objects(cfg["access"])
         # Anything without an id would be invisible to the CRUD endpoints.
         for section in ("haproxy", "acme"):

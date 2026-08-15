@@ -103,24 +103,28 @@ def _summary(parts):
 def api_history():
     """Newest first, with what each snapshot changed against the one before."""
     entries = []
-    with _lock:
-        current_fp = shared_fingerprint(load_config())
-        previous = None
-        for p in _history_files():
-            try:
-                d = json.loads(p.read_text())
-            except (OSError, ValueError):
-                continue
-            view = d.get("view") or {}
-            entry = {"id": p.name, "at": d.get("at"), "rev": d.get("rev"),
-                     "fp": d.get("fp"), "counts": _counts(view),
-                     "current": d.get("fp") == current_fp}
-            # What this change touched, said in a line: enough to find the one
-            # you are looking for without opening each diff.
-            if previous is not None:
-                entry["summary"] = _summary(diff_views(previous, view))
-            previous = view
-            entries.append(entry)
+    # No lock: snapshots are written atomically (rename into place) and
+    # load_config is deliberately lock-free, so reading and diffing them needs
+    # no writer held out. Holding _lock here parsed up to 50 files and
+    # computed 49 fingerprinting diffs while every save_config -- Apply, an
+    # inbound sync, a maintenance command -- waited behind a read.
+    current_fp = shared_fingerprint(load_config())
+    previous = None
+    for p in _history_files():
+        try:
+            d = json.loads(p.read_text())
+        except (OSError, ValueError):
+            continue
+        view = d.get("view") or {}
+        entry = {"id": p.name, "at": d.get("at"), "rev": d.get("rev"),
+                 "fp": d.get("fp"), "counts": _counts(view),
+                 "current": d.get("fp") == current_fp}
+        # What this change touched, said in a line: enough to find the one
+        # you are looking for without opening each diff.
+        if previous is not None:
+            entry["summary"] = _summary(diff_views(previous, view))
+        previous = view
+        entries.append(entry)
     entries.reverse()
     return jsonify({"ok": True, "snapshots": entries})
 
@@ -130,8 +134,7 @@ def api_history_diff(name):
     snap = _read(name)
     if not snap:
         return jsonify({"error": "no such snapshot"}), 404
-    with _lock:
-        now = shared_view(load_config())
+    now = shared_view(load_config())      # lock-free read; nothing is written here
     return jsonify({"ok": True, "at": snap.get("at"), "rev": snap.get("rev"),
                     "parts": diff_views(snap.get("view") or {}, now),
                     "note": "what Restore would undo: 'added' exists now and would be "

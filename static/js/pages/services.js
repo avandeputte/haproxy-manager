@@ -25,7 +25,7 @@ export const WIZ_FIELDS=[
   h:"HTTPS only. \"auto\" reuses an existing certificate that already covers this host -- including a wildcard -- and only requests a new one when nothing does."},
  {k:"account",l:"ACME account",t:"ref",ref:"acme/accounts",h:"For a new certificate; only needed when you have more than one"},
  {k:"challenge",l:"Challenge type",t:"ref",ref:"acme/challenges"},
- {k:"health",l:"Health check",t:"select",d:"http",o:["none","tcp","http","pgsql","mysql"],
+ {k:"health",l:"Health check",t:"select",d:"http",o:["none","tcp","http","ssl","pgsql","mysql"],
   h:"How HAProxy decides a server is alive. Dead servers are taken out of rotation."},
  {k:"health_interval",l:"Check every",t:"text",d:"2s",h:"e.g. 2s, 10s"},
  {k:"health_uri",l:"Request path",t:"text",d:"/",h:"For the HTTP check, e.g. /health"},
@@ -65,7 +65,7 @@ export const WIZ_FIELDS=[
  {k:"apply",l:"Apply immediately",t:"bool",d:true,h:"Write haproxy.cfg and reload once the objects are created"},
 ];
 /* which of the health_* rows make sense for each check kind */
-export const HEALTH_SHOWS={none:[],tcp:["health_interval"],
+export const HEALTH_SHOWS={none:[],tcp:["health_interval"],ssl:["health_interval"],
   http:["health_interval","health_uri","health_status","health_method","health_version","health_host"],
   pgsql:["health_interval","health_user"],mysql:["health_interval","health_user"]};
 export const CERT_MODE_LABEL={auto:"auto -- reuse one that covers this host",

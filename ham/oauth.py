@@ -303,7 +303,7 @@ def sso_callback():
         return Response("the identity provider did not complete the sign-in\n",
                         status=502, mimetype="text/plain")
     claims = _id_claims(tokens.get("id_token") or "")
-    problem = _vet_claims(s, claims)
+    problem = _vet_claims(s, claims, state.get("n"))
     if problem:
         log.warning("sso: rejected a sign-in: %s", problem)
         return Response(problem + "\n", status=403, mimetype="text/plain")
@@ -340,9 +340,10 @@ def _id_claims(id_token):
         return {}
 
 
-def _vet_claims(s, claims):
+def _vet_claims(s, claims, nonce=None):
     """What must hold even though the signature is vouched for by the TLS
-    channel: right issuer, meant for us, current, ours -- and a real email."""
+    channel: right issuer, meant for us, current, this browser's, and a real
+    email."""
     if not claims:
         return "the token endpoint returned no readable ID token"
     if (claims.get("iss") or "").rstrip("/") != s["issuer"].rstrip("/"):
@@ -352,6 +353,14 @@ def _vet_claims(s, claims):
         return "the ID token is for a different client"
     if int(claims.get("exp") or 0) < time.time():
         return "the ID token is already expired"
+    # The nonce ties the token to the authorization request this browser
+    # started. The state's nonce is already bound to the browser by the nonce
+    # cookie, so a token minted for a different request -- a provider mix-up,
+    # a replayed authorization -- is caught here. Only enforced when the token
+    # carries one (it always should, since the request sent one).
+    if nonce and claims.get("nonce") and not hmac.compare_digest(
+            str(claims.get("nonce")), str(nonce)):
+        return "the ID token is for a different sign-in request"
     if claims.get("email_verified") is False and not s.get("allow_unverified"):
         # The allow-lists trust this string; a provider that has not checked
         # it is a provider anyone might be alice at. Overridable, with the
@@ -402,11 +411,17 @@ FIELDS = ("enabled", "issuer", "client_id", "auth_host", "cookie_domain",
 
 @app.get("/api/access/oauth")
 def api_oauth_get():
-    s = settings_of(load_config())
+    cfg = load_config()
+    s = settings_of(cfg)
     out = {k: s.get(k) for k in FIELDS}
     out["has_client_secret"] = bool((s.get("client_secret") or "").strip())
     out["configured"] = ready(s)
     out["redirect_uri"] = _redirect_uri(s) if s.get("auth_host") else ""
+    # Protected services whose host is not under the cookie domain can never
+    # receive the session cookie, so a visitor there would loop through the
+    # sign-in forever. Surfaced here rather than failing silently at request
+    # time -- the one v1 limitation of a single cookie domain, said plainly.
+    out["unreachable_hosts"] = hosts_outside_domain(cfg) if s.get("enabled") else []
     return jsonify(out)
 
 

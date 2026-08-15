@@ -231,6 +231,11 @@ DOC = {"authorization_endpoint": "https://idp.example.net/authz",
 exchanged = {}
 
 
+# A real provider echoes the nonce from the authorization request in the ID
+# token; the test sets what it should echo before driving the callback.
+NONCE_ECHO = {"value": None}
+
+
 class FakeRequests:
     def get(self, url, **kw):
         return FakeResp(DOC)
@@ -240,7 +245,7 @@ class FakeRequests:
         idt = "h." + __import__("base64").urlsafe_b64encode(json.dumps(
             {"iss": "https://idp.example.net", "aud": "ham", "exp": now + 60,
              "email": "Alice@Example.com", "email_verified": True,
-             "nonce": data.get("code_verifier") and "unused"}).encode()).decode().rstrip("=") + ".s"
+             "nonce": NONCE_ECHO["value"]}).encode()).decode().rstrip("=") + ".s"
         return FakeResp({"id_token": idt, "access_token": "at"})
 
 
@@ -273,6 +278,16 @@ ok(r.status_code == 400 and b"different browser" in r.data,
    "a callback without the browser's nonce cookie is refused -- login CSRF")
 
 client.set_cookie("ham_sso_n", nonce, domain="auth.example.com")
+# The provider echoes a DIFFERENT nonce: the token was minted for another
+# sign-in request, and the callback must refuse it.
+NONCE_ECHO["value"] = "some-other-nonce"
+r = client.get("/.ham-sso/callback?code=xyz&state=" + state,
+               headers={"Host": "auth.example.com"})
+ok(r.status_code == 403 and b"different sign-in" in r.data,
+   "an ID token minted for a different request is refused on its nonce")
+
+# The provider echoes the real nonce, as it should: the sign-in completes.
+NONCE_ECHO["value"] = nonce
 r = client.get("/.ham-sso/callback?code=xyz&state=" + state,
                headers={"Host": "auth.example.com"})
 sso = next((c for c in r.headers.getlist("Set-Cookie") if c.startswith("ham_sso=")), "")

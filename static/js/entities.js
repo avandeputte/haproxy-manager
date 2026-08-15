@@ -121,7 +121,7 @@ export const E={
    {k:"name",l:"Name",t:"text"},
    {k:"type",l:"Type",t:"select",o:["tcp","http","ssl","pgsql","mysql"],d:"tcp"},
    {k:"interval",l:"Check interval",t:"text",h:"e.g. 2s"},
-   {k:"http_method",l:"HTTP method",t:"select",o:["GET","HEAD","OPTIONS"],d:"GET"},
+   {k:"http_method",l:"HTTP method",t:"select",o:["GET","HEAD","OPTIONS","POST"],d:"GET"},
    {k:"http_uri",l:"HTTP request URI",t:"text",h:"e.g. /health"},
    {k:"expect_status",l:"Expected status",t:"text",h:"e.g. 200"},
  {k:"http_version",l:"HTTP version",t:"select",o:["","HTTP/1.1","HTTP/2"],d:"",h:"Only for the HTTP check"},
@@ -304,7 +304,8 @@ export async function renderEntity(key,into){
       if(!state.readOnly){
       act.appendChild(document.createTextNode(" "));
       act.appendChild(btn("Delete","sm dngr",async()=>{
-        if(!confirm("Delete \""+row.name+"\"?"))return;
+        /* users are named by username, everything else by name */
+        if(!confirm("Delete \""+(row.name||row.username||"this")+"\"?"))return;
         /* re-render the page, not just this table: it may be one of several */
           try{await api(key+"/"+row.id,"DELETE");await route();refreshStatus();}
         catch(e){alert(e.message);}
@@ -325,7 +326,7 @@ export function openEditor(key,item){
      of the past answers a question nobody asked. Editing raw text happens in
      the Extra directives field; parsing a hand-written haproxy.cfg back into
      objects would be lossy guesswork dressed up as a feature. */
-  const isHap=key.startsWith("haproxy/")&&key!=="haproxy/settings";
+  const isHap=key.startsWith("haproxy/");   // settings are their own page, never an entity key here
   if(item&&item.managed_by){
     /* Editing here is allowed -- sometimes it is the only way to set something
        the wizard does not expose -- but the next publish of that service will

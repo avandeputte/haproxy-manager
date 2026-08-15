@@ -1,4 +1,4 @@
-import { $, api, btn, closeDlg, esc, fieldRow, localTime, openDlg, readForm } from "../core.js";
+import { $, api, pageGuard, btn, closeDlg, esc, fieldRow, localTime, openDlg, readForm } from "../core.js";
 
 /* ---- notifications ---- */
 export const NOTIFY_TYPES={
@@ -20,10 +20,13 @@ export const NOTIFY_TYPES={
     {k:"verify_tls",l:"Verify TLS",t:"bool",d:true}]},
 };
 export async function renderNotify(){
-  const c=$("#content");c.innerHTML="";
+  const c=$("#content");
+  const fresh=pageGuard();
   let n;
   try{n=await api("notify");}
-  catch(e){c.innerHTML='<div class="card"><div class="bd">'+esc(e.message)+"</div></div>";return;}
+  catch(e){if(fresh())c.innerHTML='<div class="card"><div class="bd">'+esc(e.message)+"</div></div>";return;}
+  if(!fresh())return;
+  c.innerHTML="";
   const st=n.settings||{};
   let dests=(st.destinations||[]).map(d=>Object.assign({},d));
 
@@ -76,7 +79,7 @@ export async function renderNotify(){
     await api("notify","PUT",body);
     wnote.textContent=msg||"Saved.";
   };
-  wf.appendChild(btn("Save","primary",async()=>{
+  wf.appendChild(btn("Save","pri",async()=>{
     wnote.textContent="saving...";
     try{await save();renderNotify();}catch(e){wnote.textContent=e.message;}
   }));
@@ -119,7 +122,7 @@ export async function renderNotify(){
         catch(e){out.innerHTML='<span style="color:var(--down)">'+esc(e.message)+"</span>";}
       }));
       act.appendChild(btn("Edit","sm",()=>editDest(i)));
-      act.appendChild(btn("Remove","sm danger",async()=>{
+      act.appendChild(btn("Remove","sm dngr",async()=>{
         dests.splice(i,1);await save(null,"Removed.");renderNotify();
       }));
       tr.appendChild(act);tb.appendChild(tr);
@@ -155,7 +158,7 @@ export async function renderNotify(){
     const err=document.createElement("span");err.className="err";
     openDlg(idx===null?"Add a destination":"Edit destination",body,[err,
       btn("Cancel","",closeDlg),
-      btn("Save","primary",async()=>{
+      btn("Save","pri",async()=>{
         try{
           const vals=readForm(common.concat([{k:"type",t:"select"}])
                               .concat(NOTIFY_TYPES[typeSel.value].fields));
@@ -170,7 +173,7 @@ export async function renderNotify(){
   dc.appendChild(tbl);
   const df=document.createElement("div");df.className="bd";
   df.style.cssText="border-top:1px solid var(--hair)";
-  df.appendChild(btn("Add a destination","primary",()=>editDest(null)));
+  df.appendChild(btn("Add a destination","pri",()=>editDest(null)));
   dc.appendChild(df);
   c.appendChild(dc);
 

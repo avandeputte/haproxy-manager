@@ -278,7 +278,11 @@ export async function issueCert(row,force){
         : "FAILED -- "+(r.error||"unknown error"))+
       "\n\n--- acme.sh log ---\n"+(r.log||"(no output)");
   }catch(e){pre.textContent="FAILED -- "+e.message;}
-  if(E[location.hash.replace(/^#\//,"")])await renderEntity("acme/certificates");
+  // Only repaint if the Certificates page is still the one on screen: issuing
+  // takes tens of seconds (minutes for DNS-01), and landing this on whatever
+  // page the person moved to would replace it. route() serializes with any
+  // navigation in flight rather than painting straight over it.
+  if(location.hash==="#/acme/certificates")route();
   refreshStatus();
 }
 export async function showCertLog(row){

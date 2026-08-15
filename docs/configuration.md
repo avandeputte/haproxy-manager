@@ -730,9 +730,14 @@ rendered `haproxy.cfg` and `keepalived.conf` for inspection.
 
 Restoring replaces the shared objects and keeps node-local settings — the API
 key, this node's URL, its Keepalived identity — so a restore does not turn a
-node into a copy of another one. Nothing is applied until you press Apply.
+node into a copy of another one. Single sign-on settings (the client secret,
+the signing secret) are kept as they are on the node rather than replaced, so
+a restore never disables SSO. Nothing is applied until you press Apply.
 
-The JSON backup contains secrets. Store it accordingly.
+The backup carries no secrets: service password hashes, DNS-provider
+credentials, EAB keys and the SSO client secret are all stripped. A restore
+onto the same node fills them back from what is stored; a restore elsewhere
+leaves them to be entered again. It is safe to copy around.
 
 ## Configuration history
 

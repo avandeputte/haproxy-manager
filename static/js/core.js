@@ -1,4 +1,5 @@
 "use strict";
+import { state } from "./state.js";
 /* What to do when the server says the session is gone. auth.js registers
    showLogin here; importing it directly would make core and auth depend on
    each other, and core is the module everything else builds on. */
@@ -7,6 +8,19 @@ export function setUnauthorisedHandler(fn){ onUnauthorised = fn; }
 
 /* ---- plumbing ---- */
 export const $=s=>document.querySelector(s);
+
+/* A page renders asynchronously: it awaits the server, then paints. If the
+   person navigated away during that await, the late paint would land on the
+   new page and wipe it -- and a page that re-renders itself (Save, a refresh
+   tick) would stack a second timer on top of the one already running. Call
+   this at the top of such a render: it clears any pending page timer and
+   returns a check for "is my page still the one on screen", to call after
+   each await before touching the DOM. */
+export function pageGuard(){
+  if(state.pageTimer){clearTimeout(state.pageTimer);state.pageTimer=null;}
+  const at=location.hash;
+  return ()=>location.hash===at;
+}
 export const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 /* The session cookie is set by /api/login and travels automatically. */
 export async function api(path,method="GET",body){

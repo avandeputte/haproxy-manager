@@ -42,11 +42,37 @@ def verify_password(password, admin):
     return hmac.compare_digest(got["hash"], admin["hash"])
 
 
+def bad_username(username):
+    """A complaint if this cannot be an administrator name, else "".
+
+    The name is written into the session payload as `username|exp|unlocked`
+    and split back on "|", so a "|" in it would shift the expiry out of
+    position -- a login that succeeds but can never be read back, a permanent
+    401 loop repairable only through the API key. Control characters have no
+    business in a login name either.
+    """
+    username = (username or "").strip()
+    if not username:
+        return "a username is required"
+    if len(username) > 64:
+        return "the username is too long"
+    if "|" in username or any(ord(c) < 0x20 for c in username):
+        return "the username cannot contain '|' or control characters"
+    return ""
+
+
 def set_admin(cfg, username, password):
     rec = hash_password(password)
     rec["username"] = (username or "admin").strip() or "admin"
     rec["updated"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     cfg["local"]["admin"] = rec
+    # The password just changed, so every cookie signed with the old secret
+    # must stop verifying: rotate the signing secret here, where the password
+    # is set, so no caller can change the login and leave a stolen session
+    # alive behind it. A cookie that outlived a password change could be
+    # traded for the API key and session secret at /api/local -- permanent
+    # credentials from a transient theft.
+    cfg["local"]["session_secret"] = os.urandom(32).hex()
     return cfg
 
 
@@ -73,7 +99,15 @@ def key_matches(stored, presented):
 
 
 def needs_setup(cfg):
-    """True while no administrator exists -- the UI then offers to create one."""
+    """True while no administrator exists -- the UI then offers to create one.
+
+    A configuration that would not parse is never first-run: treating a
+    corrupt file as "no admin yet" would open setup to anyone. It reads as
+    already-set-up, so setup refuses and the broken file can be repaired
+    rather than silently replaced.
+    """
+    if (cfg.get("_meta") or {}).get("unreadable"):
+        return False
     return not (cfg["local"].get("admin") or {}).get("hash")
 
 
@@ -321,8 +355,9 @@ def api_setup():
     body = request.get_json(force=True) or {}
     username = (body.get("username") or "").strip()
     password = body.get("password") or ""
-    if not username:
-        return jsonify({"ok": False, "error": "a username is required"}), 400
+    bad = bad_username(username)
+    if bad:
+        return jsonify({"ok": False, "error": bad}), 400
     if len(password) < 8:
         return jsonify({"ok": False, "error": "the password must be at least 8 characters"}), 400
     with _lock:
@@ -372,24 +407,31 @@ def api_login():
             return jsonify({"ok": False, "totp_required": True,
                             "error": "enter the six-digit code from your "
                                      "authenticator app"}), 401
-        counter = twofactor.verify_totp(admin.get("totp_secret"), code,
-                                        last_counter=int(admin.get("totp_last") or 0))
-        if counter is not None:
-            # A one-time password is one-time: remember the counter so the
-            # same code cannot be replayed by someone who watched it typed.
-            with _lock:
-                cur = load_config()
-                cur["local"].setdefault("admin", {})["totp_last"] = counter
+        # Verify the code and consume it in one held lock, against the counter
+        # and recovery list read inside that lock. Checking a lock-free copy
+        # and storing the result later left a window where two logins racing
+        # with the same shoulder-surfed code both read the old counter, both
+        # passed the replay check, and both got in -- and two concurrent
+        # recovery-code uses could burn the same code twice.
+        accepted = False
+        recovery_left = None
+        with _lock:
+            cur = load_config()
+            cur_admin = cur["local"].setdefault("admin", {})
+            counter = twofactor.verify_totp(cur_admin.get("totp_secret"), code,
+                                            last_counter=int(cur_admin.get("totp_last") or 0))
+            if counter is not None:
+                cur_admin["totp_last"] = counter
                 save_config(cur)
-        elif twofactor.use_recovery(admin, code):
-            with _lock:
-                cur = load_config()
-                cur["local"]["admin"]["totp_recovery"] = admin.get("totp_recovery") or []
+                accepted = True
+            elif twofactor.use_recovery(cur_admin, code):
                 save_config(cur)
-            left = len(admin.get("totp_recovery") or [])
+                accepted = True
+                recovery_left = len(cur_admin.get("totp_recovery") or [])
+        if recovery_left is not None:
             log.warning("a recovery code was used to sign in as %s; %d remain%s",
-                        username, left, "" if left != 1 else "s")
-        else:
+                        username, recovery_left, "" if recovery_left != 1 else "s")
+        if not accepted:
             return failed("that code is not right, or was already used")
 
     _login_fails.pop(ip, None)
@@ -511,6 +553,9 @@ def api_password():
     if new and len(new) < 8:
         return jsonify({"ok": False, "error": "the new password must be at least 8 characters"}), 400
     username = (body.get("username") or admin.get("username") or "admin").strip()
+    bad = bad_username(username)
+    if bad:
+        return jsonify({"ok": False, "error": bad}), 400
     with _lock:
         cfg = load_config()
         if new:
