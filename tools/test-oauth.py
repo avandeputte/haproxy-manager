@@ -37,14 +37,20 @@ def ok(cond, msg):
 SECRET = "a" * 64
 
 # -- the cookie --------------------------------------------------------------
+import base64 as _b64   # noqa: E402
 c = oauth.issue_cookie(SECRET, "Alice@Example.COM", 12)
-exp, who, sig = c.split(".")
+exp, who, b64, sig = c.split(".")
 ok(who == b"alice@example.com".hex(), "the address travels lowercased and hex-encoded")
+ok(_b64.b64decode(b64) == b"alice@example.com",
+   "and a second time in base64 -- the encoding HAProxy can turn back into a header")
 ok(oauth.read_cookie(SECRET, c) == "alice@example.com", "and reads back")
 ok(oauth.read_cookie("b" * 64, c) is None, "a different secret verifies nothing")
-ok(oauth.read_cookie(SECRET, "%s.%s.%s" % (int(time.time()) - 10, who, sig)) is None,
+ok(oauth.read_cookie(SECRET, "%s.%s.%s.%s" % (int(time.time()) - 10, who, b64, sig)) is None,
    "tampering with the expiry breaks the signature")
-old = "%d.%s" % (int(time.time()) - 10, who)
+ok(oauth.read_cookie(SECRET, "%s.%s.%s" % (exp, who,
+   _b64.b64encode(b"other@x.co").decode() + "." + sig)) is None,
+   "and so does swapping the header copy of the address")
+old = "%d.%s.%s" % (int(time.time()) - 10, who, b64)
 import hmac as _hmac, hashlib as _hashlib   # noqa: E401,E402
 oldsig = _hmac.new(SECRET.encode(), old.encode(), _hashlib.sha256).hexdigest()
 ok(oauth.read_cookie(SECRET, "%s.%s" % (old, oldsig)) is None,
@@ -114,6 +120,21 @@ ok("deny_status 403 if !sso_who_ok" in be,
 strip = be.index("replace-header Cookie")
 ok(strip > be.index("http-request redirect"),
    "the cookie is stripped after the checks, before the servers")
+ok("del-header X-Auth-Request-Email" in be and "del-header Remote-User" in be,
+   "client-sent identity headers die on the way in")
+ok("set-header X-Auth-Request-Email" not in be,
+   "and nothing is set in their place unless the service asks")
+
+cfg = fresh()
+cfg["haproxy"]["backends"][0]["oauth_forward"] = True
+be = haproxy.render_haproxy(cfg).split("backend be_shop")[1]
+ok("set-header X-Auth-Request-Email %[var(txn.sso_b64),b64dec] if sso_valid sso_fresh" in be
+   and "set-header Remote-User" in be,
+   "a forwarding pool sets both headers from the verified session")
+ok(be.index("del-header X-Auth-Request-Email") < be.index("set-header X-Auth-Request-Email"),
+   "spoof-strip first, trusted value second")
+ok(be.index("set-header X-Auth-Request-Email") > be.index("deny_status 403"),
+   "set only on requests the redirect and the deny let through")
 ok("acl ham_sso_host" in out and "use_backend bk_ham_sso" in out,
    "the sign-in host is routed to the app")
 ok("path_sub .." in out, "with dot-segments refused at the edge")
@@ -143,6 +164,8 @@ cfg["haproxy"]["backends"].append({"id": "b2", "name": "open", "mode": "http",
 be2 = haproxy.render_haproxy(cfg).split("backend be_open")[1]
 ok("replace-header Cookie" in be2,
    "even an unprotected pool has the domain cookie stripped before its servers")
+ok("del-header X-Auth-Request-Email" in be2,
+   "and client-sent identity headers stripped too -- a forgery must meet an empty header")
 
 # -- the shared validation gate ----------------------------------------------
 def refuses(opts, cur=None):

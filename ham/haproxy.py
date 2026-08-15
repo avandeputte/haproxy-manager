@@ -323,6 +323,13 @@ def render_haproxy(cfg):
             else:
                 A("    # every allowed network is malformed, so nobody is")
                 A("    " + deny)
+        if sso_ready and mode == "http":
+            # Identity headers are the proxy's word alone: whatever a client
+            # sent under these names dies here, on every pool, whether or not
+            # this one forwards them -- an app trusting the header behind an
+            # unprotected pool must meet an empty one, not a forgery.
+            A("    http-request del-header X-Auth-Request-Email")
+            A("    http-request del-header Remote-User")
         # A sign-in through the identity provider. HAProxy verifies the SSO
         # cookie's signature and expiry right here, in configuration, and
         # matches the signed-in address against this pool's allow-list -- the
@@ -344,9 +351,10 @@ def render_haproxy(cfg):
                 key = base64.b64encode(sso["secret"].encode()).decode()
                 A("    http-request set-var(txn.sso) req.cook(%s)" % oauth.COOKIE)
                 A("    http-request set-var(txn.sso_msg) var(txn.sso),regsub(\\.[a-f0-9]+$,)")
-                A("    http-request set-var(txn.sso_sig) var(txn.sso),word(3,.)")
+                A("    http-request set-var(txn.sso_sig) var(txn.sso),word(4,.)")
                 A("    http-request set-var(txn.sso_exp) var(txn.sso),word(1,.)")
                 A("    http-request set-var(txn.sso_who) var(txn.sso),word(2,.)")
+                A("    http-request set-var(txn.sso_b64) var(txn.sso),word(3,.)")
                 A("    http-request set-var(txn.now) date()")
                 A('    acl sso_valid var(txn.sso_msg),hmac(sha256,"%s"),hex,'
                   "lower,secure_memcmp(txn.sso_sig)" % key)
@@ -369,6 +377,15 @@ def render_haproxy(cfg):
                   " unless sso_valid sso_fresh" % sso["auth_host"])
                 if not anyone:
                     A("    http-request deny deny_status 403 if !sso_who_ok")
+                if be.get("oauth_forward"):
+                    # Only requests the redirect and the deny let through get
+                    # here, so what lands in these headers is a signed,
+                    # allow-listed identity -- and the client's own copies
+                    # were deleted below before anything trusted them.
+                    A("    http-request set-header X-Auth-Request-Email "
+                      "%[var(txn.sso_b64),b64dec] if sso_valid sso_fresh")
+                    A("    http-request set-header Remote-User "
+                      "%[var(txn.sso_b64),b64dec] if sso_valid sso_fresh")
         # A sign-in in front of this pool. HAProxy checks it against the
         # userlist itself, so a request without credentials is answered with a
         # 401 here and never reaches a server. Only in HTTP mode: there is no

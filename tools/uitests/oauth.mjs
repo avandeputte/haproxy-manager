@@ -34,7 +34,7 @@ const SERVICES = [{
   id: "r1", url: "https://shop.example.com", urls: ["https://shop.example.com"],
   scheme: "https", targets: ["http://10.0.0.5:80"], pool: "shop", enabled: true,
   health: { type: "http" },
-  oauth: { enabled: true, allow: ["alice@example.com", "@corp.example.com"] },
+  oauth: { enabled: true, allow: ["alice@example.com", "@corp.example.com"], forward: true },
 }];
 
 let sent = null;
@@ -81,6 +81,7 @@ ok(card.textContent.includes("alice@example.com") &&
 await openWizard({
   service_id: "r1", url: "https://shop.example.com", target: "http://10.0.0.5:80",
   oauth_enabled: true, oauth_allow: "alice@example.com\n@corp.example.com",
+  oauth_forward: true,
 });
 const allowField = document.querySelector("#f_oauth_allow");
 ok(allowField && allowField.value.includes("alice@example.com"),
@@ -93,6 +94,8 @@ ok(sent && sent.oauth && sent.oauth.enabled === true &&
    "and what is sent nests the flat fields into one oauth object");
 ok(!("oauth_enabled" in sent) && !("oauth_allow" in sent),
    "with the flat spellings gone from the wire");
+ok(sent.oauth.forward === true,
+   "passing the identity to the servers rides in the same object");
 
 // -- the settings page -------------------------------------------------------
 location.hash = "#/p:sso";

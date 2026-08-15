@@ -471,6 +471,7 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
         pool_opts["oauth_enabled"] = want
         pool_opts["oauth_allow"] = "\n".join(
             oauth.parse_allow(oauth_opts.get("allow"))[0]) if want else ""
+        pool_opts["oauth_forward"] = bool(oauth_opts.get("forward")) and want
         if want and not oauth.ready(oauth.settings_of(cfg)):
             raise ValueError("single sign-on is not configured yet -- fill in the "
                              "provider under Sign-in > Single sign-on first")

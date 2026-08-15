@@ -112,8 +112,14 @@ def validate_pool_oauth(cfg, pool_opts, current=None):
 # -- the cookie --------------------------------------------------------------
 
 def issue_cookie(secret, email, hours):
+    """exp . hex(email) . base64(email) . signature -- the address twice,
+    because HAProxy needs it twice: hex is what makes the @domain suffix
+    match byte-exact, and base64 is the one encoding it can turn back into
+    text for the identity header. Both halves are under the signature."""
     exp = int(time.time()) + max(1, int(hours or 12)) * 3600
-    msg = "%d.%s" % (exp, email.strip().lower().encode().hex())
+    email = email.strip().lower()
+    msg = "%d.%s.%s" % (exp, email.encode().hex(),
+                        base64.b64encode(email.encode()).decode())
     sig = hmac.new(secret.encode(), msg.encode(), hashlib.sha256).hexdigest()
     return "%s.%s" % (msg, sig)
 
@@ -122,8 +128,8 @@ def read_cookie(secret, value):
     """The email carried by a valid, unexpired cookie, else None. HAProxy is
     the real verifier; this exists for the tests and the sign-in page."""
     try:
-        exp, who, sig = value.split(".")
-        msg = "%s.%s" % (exp, who)
+        exp, who, b64, sig = value.split(".")
+        msg = "%s.%s.%s" % (exp, who, b64)
         want = hmac.new(secret.encode(), msg.encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(want, sig) or int(exp) < time.time():
             return None
@@ -308,6 +314,12 @@ def sso_callback():
         return Response("the provider did not say who you are: no email claim, "
                         "and none at the userinfo endpoint -- is the 'email' "
                         "scope granted?\n", status=502, mimetype="text/plain")
+    if not _EMAIL.match(email):
+        # The address goes into a cookie and, forwarded, into a header; a
+        # "claim" with spaces or control characters is not getting into either.
+        log.warning("sso: refused a sign-in whose email claim is not an email: %r", email)
+        return Response("the provider's email claim is not an email address\n",
+                        status=502, mimetype="text/plain")
     resp = redirect(state["rd"], code=302)
     resp.set_cookie(COOKIE, issue_cookie(s["secret"], email, s.get("session_hours")),
                     domain=s["cookie_domain"], max_age=int(s.get("session_hours") or 12) * 3600,
@@ -480,7 +492,8 @@ def pool_summary(pool):
     """What the services list shows, mirroring the basic-auth 'auth' object."""
     entries, _bad = parse_allow(pool.get("oauth_allow"))
     return {"enabled": bool(pool.get("oauth_enabled")),
-            "allow": entries}
+            "allow": entries,
+            "forward": bool(pool.get("oauth_forward"))}
 
 
 def hosts_outside_domain(cfg):

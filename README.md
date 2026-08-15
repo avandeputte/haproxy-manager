@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.89.0_all.deb
+sudo apt-get install -y ./haproxy-manager_1.90.0_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -278,6 +278,16 @@ stripped before requests reach the real servers — no upstream app ever holds
 a token that opens the others — and sessions cannot be revoked singly
 (nothing is stored anywhere), so the kill switch is **Rotate secret**, which
 signs everyone out at once.
+
+The upstream app itself sees none of the login: the password only ever
+exists at the provider, the session cookie is stripped before requests are
+forwarded, and by default the request arrives looking anonymous. Apps that
+*want* the identity — Grafana's auth-proxy mode and its relatives — get it
+by ticking **Pass the signed-in email to the servers** on the service, which
+sets `X-Auth-Request-Email` and `Remote-User` from the verified session.
+Client-sent copies of those headers are deleted on every service whether or
+not it forwards, so the header is always the proxy's word and a forgery
+meets an empty header, never a passed-through one.
 
 A provider with a certificate from a private CA works by pointing
 `REQUESTS_CA_BUNDLE` at the CA file in the service's environment. Basic auth

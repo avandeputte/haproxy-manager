@@ -56,6 +56,11 @@ export const WIZ_FIELDS=[
   h:"Send visitors to the identity provider before letting them through. HAProxy verifies the session and this service's allow-list on every request. Configure the provider under Sign-in > Single sign-on."},
  {k:"oauth_allow",l:"Allowed identities",t:"textarea",
   h:"One per line: an email, a whole domain as @example.com, or * for anyone the provider signs in."},
+ {k:"oauth_forward",l:"Pass the signed-in email to the servers",t:"bool",
+  h:"Sets X-Auth-Request-Email and Remote-User on forwarded requests, so apps that trust a "+
+    "proxy identity (Grafana auth-proxy and friends) sign the visitor in themselves. Any copy "+
+    "of these headers a client sends is stripped on every service, so the value is always this "+
+    "proxy's word. Only safe while the app is reachable through the proxy alone."},
  {k:"http_redirect",l:"Redirect HTTP to HTTPS",t:"bool",d:true,h:"Also listens on port 80 and sends visitors to HTTPS"},
  {k:"apply",l:"Apply immediately",t:"bool",d:true,h:"Write haproxy.cfg and reload once the objects are created"},
 ];
@@ -180,6 +185,7 @@ export function openWizard(prefill){
     const oauthOn=!isTcp&&!!(fieldEl("oauth_enabled")||{}).checked;
     setRow("oauth_enabled",!isTcp);
     setRow("oauth_allow",oauthOn);
+    setRow("oauth_forward",oauthOn);
     ["stick_type","stick_size","stick_expire"].forEach(k=>setRow(k,val("persistence")==="source"));
     /* A raw TCP port cannot answer an HTTP check -- unless the check is aimed at
        a different port, which is exactly how Patroni is fronted: traffic to
@@ -203,11 +209,11 @@ export function openWizard(prefill){
               version:d.health_version,host:d.health_host};
     d.auth={enabled:d.auth_enabled,groups:d.auth_groups,realm:d.auth_realm,
             exempt:d.auth_exempt};
-    d.oauth={enabled:d.oauth_enabled,allow:d.oauth_allow};
+    d.oauth={enabled:d.oauth_enabled,allow:d.oauth_allow,forward:d.oauth_forward};
     ["cert_mode","health_interval","health_uri","health_status","health_user",
      "health_method","health_version","health_host",
      "auth_enabled","auth_groups","auth_realm","auth_exempt",
-     "oauth_enabled","oauth_allow"].forEach(k=>delete d[k]);
+     "oauth_enabled","oauth_allow","oauth_forward"].forEach(k=>delete d[k]);
     return d;   // balance / persistence / stick_* / check_port / log_health_checks pass straight through
   };
   const show=(r,saved)=>{
@@ -348,6 +354,7 @@ export async function servicesCard(){
         auth_realm:(s.auth||{}).realm,auth_exempt:(s.auth||{}).exempt,
         oauth_enabled:(s.oauth||{}).enabled,
         oauth_allow:((s.oauth||{}).allow||[]).join("\n"),
+        oauth_forward:(s.oauth||{}).forward,
         allow_src:s.allow_src,
         certificate_id:s.certificate_id,
       })));

@@ -58,6 +58,8 @@ export const E={
     h:"Send visitors to the identity provider first. One sign-in per service: not together with basic auth. Configure the provider under Sign-in > Single sign-on."},
    {k:"oauth_allow",l:"SSO allowed identities",t:"textarea",
     h:"One per line: an email, @example.com for a domain, or * for anyone the provider signs in."},
+   {k:"oauth_forward",l:"Pass the signed-in email to the servers",t:"bool",
+    h:"X-Auth-Request-Email and Remote-User, set from the verified session; client-sent copies are stripped everywhere."},
    {k:"custom",l:"Extra directives",t:"textarea",h:"Advanced. Raw lines added inside this backend, for anything the fields above do not cover -- for example \"http-reuse safe\". One per line. See the HAProxy configuration manual: https://docs.haproxy.org/2.6/configuration.html"}]},
 
  "haproxy/frontends":{title:"Public Services",add:"Add service",

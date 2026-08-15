@@ -368,7 +368,13 @@ On the service: **Require single sign-on** plus **Allowed identities**, one
 per line — an email, a domain as `@example.com`, or `*` for anyone the
 provider signs in. An empty list refuses everyone; `*` must be said out loud.
 One sign-in per service: OIDC and basic auth do not combine, and `tcp://`
-services cannot carry a redirect.
+services cannot carry a redirect. **Pass the signed-in email to the servers**
+additionally sets `X-Auth-Request-Email` and `Remote-User` on forwarded
+requests, from the verified session — for apps that sign a proxy-identified
+visitor in themselves (Grafana auth-proxy and friends). Client-sent copies of
+those headers are stripped on every service, forwarding or not, so the value
+is always the proxy's own word; only safe while the app is reachable through
+the proxy alone.
 
 How it enforces: the sign-in issues a domain-wide, HMAC-signed cookie, and
 **HAProxy verifies it on every request in generated configuration** —
