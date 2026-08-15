@@ -46,6 +46,7 @@ globalThis.fetch = async (u, o) => {
     "access/groups": [], "acme/accounts": [], "acme/challenges": [],
     recipes: { ok: true, recipes: [] },
     "access/oauth": { enabled: true, issuer: "https://idp.example.net",
+                      client_id: "JY6DWPgQ-generated-not-a-name",
                       has_client_secret: true, auth_host: "auth.example.com",
                       cookie_domain: "example.com", scopes: "openid email profile",
                       session_hours: 12,
@@ -127,8 +128,13 @@ ok(page.textContent.includes("https://authentik.example.com/application/o/haprox
    "the authentik issuer is built from the saved cookie domain");
 ok(page.textContent.includes("- " + "https://auth.example.com/.ham-sso/callback"),
    "the Authelia client block is paste-ready, redirect URI included");
-ok(page.textContent.includes("client_id: haproxy-manager"),
-   "with a concrete client id");
+ok(page.textContent.includes("client_id: JY6DWPgQ-generated-not-a-name"),
+   "with the real client id where an admin chooses one -- Authelia's entry");
+ok(!page.textContent.includes("named JY6DWPgQ-generated-not-a-name") &&
+   page.textContent.includes("named haproxy-manager"),
+   "but never as a suggested name or slug -- a generated credential is not a name");
+ok(page.textContent.includes("/application/o/haproxy-manager/"),
+   "and the authentik issuer's slug is the suggested name, not the client id");
 
 console.log(fail ? `\n${fail} failed` : "\nthe browser's half of SSO holds together");
 process.exit(fail ? 1 : 0);

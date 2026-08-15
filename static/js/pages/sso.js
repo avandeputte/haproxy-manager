@@ -89,9 +89,14 @@ export async function renderSso(){
   const dom=s.cookie_domain||(s.auth_host?s.auth_host.split(".").slice(1).join("."):"")||"example.com";
   const ah=s.auth_host||"auth."+dom;
   const ru=s.redirect_uri||"https://"+ah+"/.ham-sso/callback";
-  const cid=s.client_id||"haproxy-manager";
+  /* Names and slugs are suggestions we make up, so a friendly constant.
+     The client id is a credential -- authentik and Google generate theirs,
+     so the saved one only ever stands where an admin actually chooses it:
+     Authelia's client entry. */
+  const nm="haproxy-manager";
+  const cid=s.client_id||nm;
   const akIssuer=(s.issuer&&s.issuer.includes("/application/o/"))?s.issuer
-    :"https://authentik."+dom+"/application/o/"+cid+"/";
+    :"https://authentik."+dom+"/application/o/"+nm+"/";
   const aeIssuer=(s.issuer&&!s.issuer.includes("/application/o/")
                   &&s.issuer!=="https://accounts.google.com")?s.issuer
     :"https://authelia."+dom;
@@ -111,12 +116,12 @@ export async function renderSso(){
     "<details style='margin-bottom:10px'><summary style='cursor:pointer;font-weight:600'>authentik</summary>"+
     '<ol class=hint style="margin:8px 0 0 18px;line-height:1.7">'+
     "<li><b>Applications &rsaquo; Providers &rsaquo; Create</b>: an <b>OAuth2/OpenID Provider</b> "+
-    "named "+mono(cid)+". Client type <b>Confidential</b>; under <b>Redirect URIs</b> add a "+
+    "named "+mono(nm)+". Client type <b>Confidential</b>; under <b>Redirect URIs</b> add a "+
     "<b>Strict</b> entry:"+pre(ru)+
     "Pick an authorization flow (implicit consent is the usual choice) and a signing key, and "+
     "copy the client ID and secret it generates into the form above.</li>"+
     "<li><b>Applications &rsaquo; Applications &rsaquo; Create</b>: an application named "+
-    mono(cid)+" with slug "+mono(cid)+", bound to that provider.</li>"+
+    mono(nm)+" with slug "+mono(nm)+", bound to that provider.</li>"+
     "<li>Issuer URL"+((s.issuer&&s.issuer===akIssuer)?" (your saved issuer):"
       :", assuming authentik answers at "+mono("authentik."+dom)+" and the slug above:")+
     pre(akIssuer)+
@@ -147,7 +152,7 @@ export async function renderSso(){
     "<li>In <b>console.cloud.google.com</b>: <b>APIs &amp; Services &rsaquo; OAuth consent "+
     "screen</b> first (External is fine; publish it, or list your accounts as test users), "+
     "then <b>Credentials &rsaquo; Create credentials &rsaquo; OAuth client ID</b>, type "+
-    "<b>Web application</b>, name "+mono(cid)+".</li>"+
+    "<b>Web application</b>, name "+mono(nm)+".</li>"+
     "<li>Under <b>Authorized redirect URIs</b> add:"+pre(ru)+"</li>"+
     "<li>Issuer URL, always the same for Google:"+pre("https://accounts.google.com")+"</li>"+
     "<li>Never use "+mono("*")+" on a service's allow-list with Google -- that is every Google "+
