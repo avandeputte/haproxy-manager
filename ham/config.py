@@ -69,6 +69,9 @@ DEFAULT_CONFIG = {
             "cookie_domain": "",      # the cookie's scope; auth_host must sit under it
             "scopes": "openid email profile",
             "session_hours": 12,
+            # Accept an ID token whose email_verified is false. Off, because
+            # the allow-lists are only as true as the addresses they match.
+            "allow_unverified": False,
             "secret": "",
         },
     },

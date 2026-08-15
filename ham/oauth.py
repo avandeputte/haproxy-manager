@@ -303,7 +303,7 @@ def sso_callback():
         return Response(problem + "\n", status=403, mimetype="text/plain")
     email = (claims.get("email") or "").strip().lower()
     if not email:
-        email = _userinfo_email(doc, tokens)
+        email = _userinfo_email(s, doc, tokens)
     if not email:
         return Response("the provider did not say who you are: no email claim, "
                         "and none at the userinfo endpoint -- is the 'email' "
@@ -340,12 +340,17 @@ def _vet_claims(s, claims):
         return "the ID token is for a different client"
     if int(claims.get("exp") or 0) < time.time():
         return "the ID token is already expired"
-    if claims.get("email_verified") is False:
-        return "the provider says that email address is unverified"
+    if claims.get("email_verified") is False and not s.get("allow_unverified"):
+        # The allow-lists trust this string; a provider that has not checked
+        # it is a provider anyone might be alice at. Overridable, with the
+        # warning where the switch is, for providers that cannot say so.
+        return ("the provider says that email address is unverified -- mark it "
+                "verified at the provider, or allow unverified claims under "
+                "Sign-in > Single sign-on")
     return ""
 
 
-def _userinfo_email(doc, tokens):
+def _userinfo_email(s, doc, tokens):
     """Some providers keep email at the userinfo endpoint, not in the token."""
     try:
         if not (doc.get("userinfo_endpoint") and tokens.get("access_token")):
@@ -355,7 +360,7 @@ def _userinfo_email(doc, tokens):
             timeout=(PEER_CONNECT_TIMEOUT, 15))
         r.raise_for_status()
         info = r.json()
-        if info.get("email_verified") is False:
+        if info.get("email_verified") is False and not s.get("allow_unverified"):
             return ""
         return (info.get("email") or "").strip().lower()
     except Exception as e:
@@ -380,7 +385,7 @@ def sso_logout():
 # -- settings ----------------------------------------------------------------
 
 FIELDS = ("enabled", "issuer", "client_id", "auth_host", "cookie_domain",
-          "scopes", "session_hours")
+          "scopes", "session_hours", "allow_unverified")
 
 
 @app.get("/api/access/oauth")
@@ -411,6 +416,8 @@ def api_oauth_put():
             s["client_secret"] = str(body["client_secret"]).strip()
         if "enabled" in body:
             s["enabled"] = bool(body["enabled"])
+        if "allow_unverified" in body:
+            s["allow_unverified"] = bool(body["allow_unverified"])
         if s.get("enabled"):
             for k, label in (("issuer", "an issuer URL"), ("client_id", "a client id"),
                              ("client_secret", "a client secret"),

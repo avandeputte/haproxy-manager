@@ -162,6 +162,20 @@ ok(refuses({"oauth_enabled": True, "oauth_allow": ""}),
 ok(not refuses({"oauth_enabled": True, "mode": "http", "oauth_allow": "*"}),
    "a well-formed request passes the same gate")
 
+# -- unverified email claims --------------------------------------------------
+CLAIMS = {"iss": "https://idp.example.net", "aud": "ham",
+          "exp": int(time.time()) + 60, "email": "a@b.co", "email_verified": False}
+strict = {"issuer": "https://idp.example.net", "client_id": "ham"}
+ok("unverified" in oauth._vet_claims(strict, dict(CLAIMS)),
+   "an unverified email is refused by default")
+ok(oauth._vet_claims(dict(strict, allow_unverified=True), dict(CLAIMS)) == "",
+   "and accepted when the toggle says so out loud")
+ok(oauth._vet_claims(strict, dict(CLAIMS, email_verified=True)) == "",
+   "a verified one always passes")
+del CLAIMS["email_verified"]
+ok(oauth._vet_claims(strict, CLAIMS) == "",
+   "and an absent claim is trusted -- some providers simply never send it")
+
 # -- the routes --------------------------------------------------------------
 ham.app.config["TESTING"] = True
 client = ham.app.test_client()

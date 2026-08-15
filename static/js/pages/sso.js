@@ -38,6 +38,12 @@ export async function renderSso(){
    {k:"session_hours",l:"Session length (hours)",t:"number",d:12,
     h:"How long a sign-in lasts. There is no revocation for a single session -- "+
       "rotating the secret below is the kill switch, and it signs everyone out."},
+   {k:"allow_unverified",l:"Accept unverified email claims",t:"bool",
+    h:"Accept sign-ins whose provider marks the email address unverified (email_verified: "+
+      "false -- Keycloak does this for admin-created users until Email verified is switched "+
+      "on). Off, deliberately: the allow-lists trust the address, and on a provider where "+
+      "people can edit their own email, an unverified one is just a text field anyone can "+
+      "set to anyone. Prefer marking the address verified at the provider."},
   ];
   const frm=document.createElement("div");frm.className="frm";
   FIELDS.forEach(f=>fieldRow(f,s[f.k]).forEach(el=>frm.appendChild(el)));

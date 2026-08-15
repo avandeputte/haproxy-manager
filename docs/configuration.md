@@ -357,6 +357,7 @@ Keycloak, Authelia, Pocket ID, Google, Entra — and services opt in one by one.
 | Sign-in host | e.g. `auth.example.com` — point its DNS at the virtual IP; HAProxy routes exactly `/.ham-sso/` on it to this app and answers 404 for anything else. It needs certificate coverage on the HTTPS listener (a wildcard is enough). |
 | Cookie domain | the domain the session spans, e.g. `example.com`. The sign-in host and every protected service must sit under it. Never a bare public suffix (`com`, `co.uk`) — browsers refuse such cookies. |
 | Session length | default 12 hours. Single sessions cannot be revoked (nothing is stored); **Rotate secret** is the kill switch and signs everyone out everywhere. |
+| Accept unverified email claims | off by default. A provider sending `email_verified: false` is refused, because the allow-lists trust the address and an unverified one is just a text field. Keycloak marks admin-created users unverified until *Email verified* is switched on — prefer fixing it there; this toggle is for providers that cannot say so. |
 
 Register the redirect URI the page shows —
 `https://<sign-in host>/.ham-sso/callback` — at the provider. The page

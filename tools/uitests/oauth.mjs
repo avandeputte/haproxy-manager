@@ -106,6 +106,9 @@ ok(!!document.querySelector("#f_client_secret") &&
    "the client secret is never echoed back into the form");
 ok([...page.querySelectorAll("button")].some(b => b.textContent === "Rotate secret"),
    "the kill switch is a button");
+ok(!!document.querySelector("#f_allow_unverified") &&
+   !document.querySelector("#f_allow_unverified").checked,
+   "accepting unverified email claims is offered, and off");
 for (const prov of ["authentik", "Authelia", "Google"]) {
   const d = [...page.querySelectorAll("details summary")].find(x => x.textContent === prov);
   ok(!!d, "there are setup steps for " + prov);
