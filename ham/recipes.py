@@ -145,6 +145,7 @@ def api_wizard_publish():
                 timeout_connect=body.get("timeout_connect") or None,
                 timeout_server=body.get("timeout_server") or None,
                 auth=body.get("auth") if isinstance(body.get("auth"), dict) else None,
+                oauth_opts=body.get("oauth") if isinstance(body.get("oauth"), dict) else None,
                 allow_src=body.get("allow_src") if isinstance(body.get("allow_src"), str) else None,
                 notify_mode=body.get("notify_mode") or None,
             )

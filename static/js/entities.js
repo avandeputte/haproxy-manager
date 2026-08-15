@@ -54,6 +54,10 @@ export const E={
    {k:"auth_groups",l:"Allowed groups",t:"refmulti",ref:"access/groups",h:"Leave nothing ticked to admit any user"},
    {k:"auth_realm",l:"Sign-in prompt",t:"text",h:"What the browser shows above its password box. Defaults to the pool name."},
    {k:"auth_exempt_src",l:"Skip the sign-in from",t:"textarea",h:"Networks trusted without a password, one per line -- typically the LAN"},
+   {k:"oauth_enabled",l:"Require single sign-on (OIDC)",t:"bool",
+    h:"Send visitors to the identity provider first. One sign-in per service: not together with basic auth. Configure the provider under Sign-in > Single sign-on."},
+   {k:"oauth_allow",l:"SSO allowed identities",t:"textarea",
+    h:"One per line: an email, @example.com for a domain, or * for anyone the provider signs in."},
    {k:"custom",l:"Extra directives",t:"textarea",h:"Advanced. Raw lines added inside this backend, for anything the fields above do not cover -- for example \"http-reuse safe\". One per line. See the HAProxy configuration manual: https://docs.haproxy.org/2.6/configuration.html"}]},
 
  "haproxy/frontends":{title:"Public Services",add:"Add service",

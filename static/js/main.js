@@ -11,6 +11,7 @@ import { renderNotify } from "./pages/notify.js";
 import { renderOverview } from "./pages/overview.js";
 import { renderServices } from "./pages/services.js";
 import { maybeSetupWizard } from "./pages/setup.js";
+import { renderSso } from "./pages/sso.js";
 import { renderStats } from "./pages/stats.js";
 import { renderUpdates } from "./pages/updates.js";
 import { renderWatchdog } from "./pages/watchdog.js";
@@ -20,7 +21,7 @@ import { boot, buildNav, doApply, route, setPages, setRenderers, wireNav } from 
 
 const P={acme:renderAcmeSettings,services:renderServices,stats:renderStats,backup:renderBackup,
          updates:renderUpdates,webui:renderWebui,cluster:renderCluster,logs:renderLogs,history:renderHistory,
-         watchdog:renderWatchdog,notify:renderNotify};
+         watchdog:renderWatchdog,notify:renderNotify,sso:renderSso};
 
 /* Collapsed groups are remembered, so the nav stays how you left it. */
 

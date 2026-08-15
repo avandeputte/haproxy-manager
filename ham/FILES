@@ -11,6 +11,7 @@ crud.py
 dnsapi.py
 haproxy.py
 hass.py
+oauth.py
 history.py
 keepalived.py
 logs.py

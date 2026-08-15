@@ -41,6 +41,7 @@ from . import (
     traffic,
     mqtt,
     hass,
+    oauth,
     logs,
     updates,
     wizard,
@@ -59,6 +60,6 @@ __all__ = [
     "crud", "haproxy", "history", "keepalived", "metrics", "apply", "acme", "notify",
     "watchdog",
     "sync", "setup", "peering", "probe", "vrrp", "cluster", "stats", "traffic",
-    "mqtt", "hass", "logs",
+    "mqtt", "hass", "oauth", "logs",
     "updates", "wizard", "dnsapi", "webui", "recipes", "backup", "static"
 ]

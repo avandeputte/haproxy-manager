@@ -2,12 +2,13 @@
 
 from datetime import datetime
 from datetime import timezone
+import base64
 import re
 
-from .base import CERT_DIR
+from .base import CERT_DIR, PORT
 from .config import merged
 from .util import _by_id, _sec, cert_path
-from . import access
+from . import access, oauth
 
 # --------------------------------------------------------------------------
 
@@ -87,6 +88,10 @@ def render_haproxy(cfg):
     rules = _by_id(hp["rules"])
     certs = _by_id(cfg["acme"]["certificates"])
     acme_on = bool(ac.get("enabled") and ac.get("haproxy_integration"))
+    sso = oauth.settings_of(cfg)
+    sso_ready = oauth.ready(sso)
+    sso_on = sso_ready and any(b.get("oauth_enabled") and b.get("enabled", True)
+                               for b in hp["backends"])
 
     L = []
     A = L.append
@@ -184,6 +189,19 @@ def render_haproxy(cfg):
         if mode == "http" and fe.get("http_to_https") and not fe.get("ssl_enabled"):
             excl = " if !acme_challenge !{ ssl_fc }" if acme_on else " unless { ssl_fc }"
             requests.append("http-request redirect scheme https code 301" + excl)
+        if sso_on and mode == "http" and fe.get("ssl_enabled"):
+            # The sign-in host: nothing but /.ham-sso/ lives on it, and this
+            # app answers that. Dot-segments are refused outright -- HAProxy
+            # forwards them literally at this version, and the app's other
+            # routes are not for the world.
+            acls.append("acl ham_sso_host hdr(host),field(1,:) -i %s" % sso["auth_host"])
+            acls.append("acl ham_sso_path path_beg /.ham-sso/")
+            requests.append("http-request deny if ham_sso_host { path_sub .. }")
+            requests.append('http-request return status 404 content-type "text/plain" '
+                            'string "only the sign-in lives on this host" '
+                            "if ham_sso_host !ham_sso_path"
+                            + (" !acme_challenge" if acme_on else ""))
+            routes.append("use_backend bk_ham_sso if ham_sso_host ham_sso_path")
 
         # named ACLs for every condition referenced by this frontend's rules
         used = []
@@ -229,6 +247,12 @@ def render_haproxy(cfg):
         A("backend bk_acme_challenge")
         A("    mode http")
         A("    server acme_sh 127.0.0.1:%s" % ac.get("challenge_port", 9080))
+        A("")
+
+    if sso_on:
+        A("backend bk_ham_sso")
+        A("    mode http")
+        A("    server app 127.0.0.1:%s" % PORT)
         A("")
 
     for be in hp["backends"]:
@@ -299,6 +323,52 @@ def render_haproxy(cfg):
             else:
                 A("    # every allowed network is malformed, so nobody is")
                 A("    " + deny)
+        # A sign-in through the identity provider. HAProxy verifies the SSO
+        # cookie's signature and expiry right here, in configuration, and
+        # matches the signed-in address against this pool's allow-list -- the
+        # app that issued the cookie is not in the traffic path, and a
+        # failover changes nothing because every node holds the signing
+        # secret. The address travels hex-encoded, which is what makes the
+        # @domain suffix match byte-exact: two characters per byte, so a hex
+        # suffix can only ever align on a character boundary.
+        if be.get("oauth_enabled") and mode == "http":
+            entries, _bad = oauth.parse_allow(be.get("oauth_allow"))
+            if not sso_ready or not entries:
+                # Half-configured is not a little protected: refusing every
+                # request is the only safe reading, exactly as basic auth
+                # does below when nobody could sign in.
+                A("    # an OIDC sign-in is required here, but single sign-on "
+                  "is not configured or nobody is allowed")
+                A("    http-request deny")
+            else:
+                key = base64.b64encode(sso["secret"].encode()).decode()
+                A("    http-request set-var(txn.sso) req.cook(%s)" % oauth.COOKIE)
+                A("    http-request set-var(txn.sso_msg) var(txn.sso),regsub(\\.[a-f0-9]+$,)")
+                A("    http-request set-var(txn.sso_sig) var(txn.sso),word(3,.)")
+                A("    http-request set-var(txn.sso_exp) var(txn.sso),word(1,.)")
+                A("    http-request set-var(txn.sso_who) var(txn.sso),word(2,.)")
+                A("    http-request set-var(txn.now) date()")
+                A('    acl sso_valid var(txn.sso_msg),hmac(sha256,"%s"),hex,'
+                  "lower,secure_memcmp(txn.sso_sig)" % key)
+                A("    acl sso_fresh var(txn.sso_exp),sub(txn.now) gt 0")
+                anyone = "*" in entries
+                emails = [e for e in entries if e != "*" and not e.startswith("@")]
+                domains = [e for e in entries if e.startswith("@")]
+                if not anyone:
+                    if emails:
+                        A("    acl sso_who_ok var(txn.sso_who) -m str %s" %
+                          " ".join(e.encode().hex() for e in emails))
+                    if domains:
+                        A("    acl sso_who_ok var(txn.sso_who) -m end %s" %
+                          " ".join(d.encode().hex() for d in domains))
+                # The two halves of the return address go hex-encoded and
+                # separate: a hostname can be entirely hex digits, so a
+                # concatenation could never be split apart again.
+                A("    http-request redirect location https://%s/.ham-sso/login"
+                  "?rd_h=%%[req.hdr(host),hex]&rd_p=%%[pathq,hex]"
+                  " unless sso_valid sso_fresh" % sso["auth_host"])
+                if not anyone:
+                    A("    http-request deny deny_status 403 if !sso_who_ok")
         # A sign-in in front of this pool. HAProxy checks it against the
         # userlist itself, so a request without credentials is answered with a
         # 401 here and never reaches a server. Only in HTTP mode: there is no
@@ -331,6 +401,15 @@ def render_haproxy(cfg):
                 # into something nobody would recognise.
                 realm = re.sub(r'["\\\n]', "", be.get("auth_realm") or be.get("name") or "Restricted")
                 A('    http-request auth realm "%s" unless %s{ %s }' % (realm, skip, test))
+        if sso_ready and mode == "http":
+            # The browser offers the domain-wide SSO cookie to every service
+            # on the domain; no server behind any pool has business holding a
+            # token that opens the others. Two passes: the cookie first in the
+            # header, and the cookie anywhere after another.
+            A("    http-request replace-header Cookie ^%s=[^;]*(?:;\\s*)?(.*)$ \\1"
+              % oauth.COOKIE)
+            A("    http-request replace-header Cookie ^(.*);\\s*%s=[^;]*(.*)$ \\1\\2"
+              % oauth.COOKIE)
         for key, directive in (("timeout_connect", "timeout connect"),
                                ("timeout_server", "timeout server"),
                                ("timeout_check", "timeout check")):

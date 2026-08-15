@@ -13,7 +13,7 @@ import uuid
 from .base import ACME_HOME, ACME_SH, _lock, app
 from .config import load_config, save_config
 from .util import _by_id, _sec, cert_details, cert_path, parse_domains, run
-from . import access, acme, wizard
+from . import access, acme, wizard, oauth
 
 # --------------------------------------------------------------------------
 
@@ -331,7 +331,7 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
                    balance=None, persistence=None, stick_size=None, stick_expire=None,
                    stick_type=None, log_health_checks=False, check_port=None,
                    timeout_connect=None, timeout_server=None, service_id=None,
-                   auth=None, allow_src=None, notify_mode=None):
+                   auth=None, oauth_opts=None, allow_src=None, notify_mode=None):
     """Create (or update) everything needed to serve `pub` from `tgts`.
 
     Re-running for the same public host updates that mapping instead of adding
@@ -446,7 +446,7 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
         want = bool(auth.get("enabled")) and not is_tcp
         if want and not access.users_with_passwords(cfg):
             raise ValueError("there is nobody to sign in yet -- add a user under "
-                             "Basic auth > Users first")
+                             "Sign-in > Users first")
         known = {g["id"] for g in access.section(cfg)["groups"] if g.get("id")}
         missing = [g for g in (auth.get("groups") or []) if g not in known]
         if missing:
@@ -463,6 +463,21 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
             warns.append("A tcp:// service forwards a raw port, which carries no place to "
                          "put a sign-in, so it was not applied. Publish the service over "
                          "HTTPS to require one.")
+    # A sign-in through the identity provider. Same contract again: silence
+    # leaves the pool alone, enabled:false clears it. The shared gate does
+    # the refusing, so the editor and this path cannot drift apart.
+    if oauth_opts is not None:
+        want = bool(oauth_opts.get("enabled")) and not is_tcp
+        pool_opts["oauth_enabled"] = want
+        pool_opts["oauth_allow"] = "\n".join(
+            oauth.parse_allow(oauth_opts.get("allow"))[0]) if want else ""
+        if want and not oauth.ready(oauth.settings_of(cfg)):
+            raise ValueError("single sign-on is not configured yet -- fill in the "
+                             "provider under Sign-in > Single sign-on first")
+        if bool(oauth_opts.get("enabled")) and is_tcp:
+            warns.append("A tcp:// service forwards a raw port, which carries no place "
+                         "for a sign-in redirect, so OIDC was not applied.")
+    oauth.validate_pool_oauth(cfg, pool_opts, existing_pool)
 
     # -- Health Monitor ---------------------------------------------------
     monitor = None

@@ -15,6 +15,7 @@ js/pages/cluster.js
 js/pages/history.js
 js/pages/logs.js
 js/pages/notify.js
+js/pages/sso.js
 js/pages/overview.js
 js/pages/services.js
 js/pages/setup.js

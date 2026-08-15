@@ -45,13 +45,17 @@ export const WIZ_FIELDS=[
  {k:"allow_src",l:"Allowed networks",t:"textarea",
   h:"Optional. One address or CIDR per line, e.g. 192.168.0.0/16 -- requests from anywhere else are refused. Works for tcp:// services too. Empty allows all."},
  {k:"auth_enabled",l:"Require a sign-in",t:"bool",
-  h:"Ask visitors for a user name and password before letting them through. HAProxy checks it, so an unauthenticated request never reaches the servers. Manage the accounts under Basic auth."},
+  h:"Ask visitors for a user name and password before letting them through. HAProxy checks it, so an unauthenticated request never reaches the servers. Manage the accounts under Sign-in."},
  {k:"auth_groups",l:"Allowed groups",t:"refmulti",ref:"access/groups",
   h:"Leave nothing ticked to admit any user"},
  {k:"auth_realm",l:"Sign-in prompt",t:"text",
   h:"What the browser shows above its password box. Defaults to the service name."},
  {k:"auth_exempt",l:"Skip the sign-in from",t:"textarea",
   h:"Optional. Networks trusted without a password -- typically the LAN, e.g. 192.168.1.0/24. Everyone else is asked to sign in."},
+ {k:"oauth_enabled",l:"Require single sign-on (OIDC)",t:"bool",
+  h:"Send visitors to the identity provider before letting them through. HAProxy verifies the session and this service's allow-list on every request. Configure the provider under Sign-in > Single sign-on."},
+ {k:"oauth_allow",l:"Allowed identities",t:"textarea",
+  h:"One per line: an email, a whole domain as @example.com, or * for anyone the provider signs in."},
  {k:"http_redirect",l:"Redirect HTTP to HTTPS",t:"bool",d:true,h:"Also listens on port 80 and sends visitors to HTTPS"},
  {k:"apply",l:"Apply immediately",t:"bool",d:true,h:"Write haproxy.cfg and reload once the objects are created"},
 ];
@@ -173,6 +177,9 @@ export function openWizard(prefill){
     const authOn=!isTcp&&!!(fieldEl("auth_enabled")||{}).checked;
     setRow("auth_enabled",!isTcp);
     ["auth_groups","auth_realm","auth_exempt"].forEach(k=>setRow(k,authOn));
+    const oauthOn=!isTcp&&!!(fieldEl("oauth_enabled")||{}).checked;
+    setRow("oauth_enabled",!isTcp);
+    setRow("oauth_allow",oauthOn);
     ["stick_type","stick_size","stick_expire"].forEach(k=>setRow(k,val("persistence")==="source"));
     /* A raw TCP port cannot answer an HTTP check -- unless the check is aimed at
        a different port, which is exactly how Patroni is fronted: traffic to
@@ -196,9 +203,11 @@ export function openWizard(prefill){
               version:d.health_version,host:d.health_host};
     d.auth={enabled:d.auth_enabled,groups:d.auth_groups,realm:d.auth_realm,
             exempt:d.auth_exempt};
+    d.oauth={enabled:d.oauth_enabled,allow:d.oauth_allow};
     ["cert_mode","health_interval","health_uri","health_status","health_user",
      "health_method","health_version","health_host",
-     "auth_enabled","auth_groups","auth_realm","auth_exempt"].forEach(k=>delete d[k]);
+     "auth_enabled","auth_groups","auth_realm","auth_exempt",
+     "oauth_enabled","oauth_allow"].forEach(k=>delete d[k]);
     return d;   // balance / persistence / stick_* / check_port / log_health_checks pass straight through
   };
   const show=(r,saved)=>{
@@ -302,6 +311,8 @@ export async function servicesCard(){
           (auth.enabled?'<div class=sub>sign-in required &mdash; '+
              ((auth.group_names||[]).length?esc(auth.group_names.join(", ")):"any user")+
              (auth.exempt?", except from "+esc(auth.exempt.split("\n").join(", ")):"")+"</div>":"")+
+          ((s.oauth||{}).enabled?'<div class=sub>sign-in via SSO &mdash; '+
+             esc(((s.oauth||{}).allow||[]).map(a=>a==="*"?"anyone the provider signs in":a).join(", "))+"</div>":"")+
           (s.allow_src?'<div class=sub>only from '+
              esc(s.allow_src.split("\n").join(", "))+"</div>":"")+
           (s.maintenance?'<div><span class="pill warn">paused &mdash; answering 503</span></div>':"")+
@@ -335,6 +346,8 @@ export async function servicesCard(){
         timeout_connect:s.timeout_connect,timeout_server:s.timeout_server,
         auth_enabled:(s.auth||{}).enabled,auth_groups:(s.auth||{}).groups,
         auth_realm:(s.auth||{}).realm,auth_exempt:(s.auth||{}).exempt,
+        oauth_enabled:(s.oauth||{}).enabled,
+        oauth_allow:((s.oauth||{}).allow||[]).join("\n"),
         allow_src:s.allow_src,
         certificate_id:s.certificate_id,
       })));

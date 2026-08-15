@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.87.0_all.deb
+sudo apt-get install -y ./haproxy-manager_1.88.0_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -204,7 +204,7 @@ through — HTTP basic authentication, checked by HAProxy itself, so a request
 without valid credentials never reaches the servers behind it.
 
 Tick **Require a sign-in** in the publish wizard (or on a Backend Pool under
-Advanced), and manage who may answer it under **Basic auth**:
+Advanced), and manage who may answer it under **Sign-in**:
 
 - **Users** — a name and a password. The password is stored only as a SHA-512
   crypt hash, the format HAProxy reads, and cannot be read back: editing a user
@@ -248,6 +248,41 @@ Two source-address controls sit beside it, in the same wizard section:
   the LAN: `192.168.1.0/24` browses freely while everyone else meets the
   password box. The addresses HAProxy tests are the TCP source — behind
   another proxy that is the proxy's address, not the visitor's.
+
+### Single sign-on (OIDC)
+
+Instead of a password box, a service can send its visitors through an OpenID
+Connect provider — Authentik, Keycloak, Authelia, Pocket ID, Google, Entra:
+anything that answers OIDC discovery. Configure the provider once under
+**Sign-in → Single sign-on** (issuer URL, client id and secret, and two names:
+a **sign-in host** such as `auth.example.com` that HAProxy routes to this app,
+and the **cookie domain** every protected service must sit under). The page
+shows the redirect URI to register at the provider. Then tick **Require
+single sign-on** on a service and say who is allowed: exact emails, whole
+domains as `@example.com`, or a literal `*` for anyone the provider signs in
+— "anyone" is never the silent default, because with a public provider that
+would mean every account it has.
+
+What makes this fit a proxy is where the enforcement lives: **HAProxy itself
+verifies the session on every request**, in generated configuration — an
+HMAC-signed cookie checked with `hmac` and `secure_memcmp`, the signed-in
+address matched against the service's allow-list, all without this app in the
+traffic path. The app only plays the sign-in dance on the auth host: redirect
+to the provider with PKCE, exchange the code, set the cookie, return the
+visitor to the page they first asked for. One sign-in covers every protected
+service (the cookie spans the domain), while authorization stays per service
+— a signed-in visitor who is not on a service's list gets a 403, not another
+trip to the provider. The signing secret is shared configuration, so every
+node validates every session and a failover signs nobody out. The cookie is
+stripped before requests reach the real servers — no upstream app ever holds
+a token that opens the others — and sessions cannot be revoked singly
+(nothing is stored anywhere), so the kill switch is **Rotate secret**, which
+signs everyone out at once.
+
+A provider with a certificate from a private CA works by pointing
+`REQUESTS_CA_BUNDLE` at the CA file in the service's environment. Basic auth
+and OIDC do not combine on one service — one sign-in per service. Raw
+`tcp://` services cannot carry a redirect, so the option is HTTP-only.
 
 The **Advanced · HAProxy** menu group still exposes every object individually,
 for the cases the wizard does not cover (header rewriting, custom ACLs,
@@ -1026,7 +1061,7 @@ over Sync, or are re-issued.
   Until then only the calls that create it answer — everything else returns 401 —
   so a node waiting to be set up does not hand its configuration to whoever
   reaches it first.
-- **Every API endpoint requires a session or the API key.** Of 80 routes exactly
+- **Every API endpoint requires a session or the API key.** Of 87 routes exactly
   three answer without either: `/api/login`, `/api/whoami` (which
   unauthenticated returns nothing but whether an administrator exists), and
   `/api/setup`, which refuses once an administrator exists. This is verified by
@@ -1036,7 +1071,10 @@ over Sync, or are re-issued.
   administrator exists.
   The sign-in page and its icons are served without a session too, because the
   page has to render before anyone can sign in; they come from a fixed list of
-  filenames, not from the directory.
+  filenames, not from the directory. The `/.ham-sso/` routes for single
+  sign-on are public by design — they exist to authenticate strangers — but
+  they answer only on the configured sign-in host, act only on
+  HMAC-signed parameters, and HAProxy routes nothing else to them.
 - **The administrator login is node-local, but it can be copied.** Each node
   stores its own; changing the password on one leaves the others as they were,
   which is a problem you tend to discover during a failover. The account dialog

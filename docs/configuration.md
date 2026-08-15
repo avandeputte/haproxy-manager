@@ -313,7 +313,7 @@ A service can be put behind HTTP basic authentication. HAProxy checks the
 credentials from a `userlist` in the generated configuration, so a request
 without valid ones is answered with a 401 and never reaches a server.
 
-**Basic auth → Users** and **Basic auth → Groups** hold who may sign in. These
+**Sign-in → Users** and **Sign-in → Groups** hold who may sign in. These
 accounts are only for published services; they give no access to this
 management UI.
 
@@ -344,6 +344,41 @@ Users and groups are shared across the cluster, because the services that check
 them are. The backup carries them **without** the password hashes, like every
 other secret, so users restored from a backup need a password set again before
 they can sign in — the users already on the node keep theirs.
+
+### Single sign-on (OIDC)
+
+**Sign-in → Single sign-on** connects any OpenID Connect provider — Authentik,
+Keycloak, Authelia, Pocket ID, Google, Entra — and services opt in one by one.
+
+| Setting | Notes |
+| --- | --- |
+| Issuer URL | must be `https://`; its `/.well-known/openid-configuration` is read from here. **Test** proves it before saving. |
+| Client ID / secret | from the provider's client registration; a blank secret keeps the stored one |
+| Sign-in host | e.g. `auth.example.com` — point its DNS at the virtual IP; HAProxy routes exactly `/.ham-sso/` on it to this app and answers 404 for anything else. It needs certificate coverage on the HTTPS listener (a wildcard is enough). |
+| Cookie domain | the domain the session spans, e.g. `example.com`. The sign-in host and every protected service must sit under it. Never a bare public suffix (`com`, `co.uk`) — browsers refuse such cookies. |
+| Session length | default 12 hours. Single sessions cannot be revoked (nothing is stored); **Rotate secret** is the kill switch and signs everyone out everywhere. |
+
+Register the redirect URI the page shows —
+`https://<sign-in host>/.ham-sso/callback` — at the provider.
+
+On the service: **Require single sign-on** plus **Allowed identities**, one
+per line — an email, a domain as `@example.com`, or `*` for anyone the
+provider signs in. An empty list refuses everyone; `*` must be said out loud.
+One sign-in per service: OIDC and basic auth do not combine, and `tcp://`
+services cannot carry a redirect.
+
+How it enforces: the sign-in issues a domain-wide, HMAC-signed cookie, and
+**HAProxy verifies it on every request in generated configuration** —
+signature, expiry, and the service's allow-list (matched against the
+hex-encoded address) — with the app out of the traffic path. The signing
+secret is shared configuration, so a failover signs nobody out. The cookie is
+stripped from requests before they reach the real servers. A signed-in
+visitor not on a service's list gets a 403 rather than a redirect loop; an
+identity the provider marks unverified (`email_verified: false`) is refused
+at the callback. Providers behind a private CA work by setting
+`REQUESTS_CA_BUNDLE` to the CA file in the service's environment
+(`Environment=REQUESTS_CA_BUNDLE=/etc/ssl/private-ca.pem` in a systemd
+drop-in, or `-e` for Docker).
 
 ## Certificates
 

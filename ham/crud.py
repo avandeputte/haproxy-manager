@@ -11,7 +11,7 @@ from .base import _lock, app
 from .config import VALID_COLLECTIONS, load_config, merged, save_config
 from .util import _by_id, _sec
 from .validate import check_setting_types
-from . import apply, haproxy
+from . import apply, haproxy, oauth
 
 # --------------------------------------------------------------------------
 
@@ -108,6 +108,11 @@ def collection(sec, col):
             return jsonify({"error": "name is required"}), 400
         with _lock:
             cfg = load_config()
+            if sec == "haproxy" and col == "backends":
+                try:
+                    oauth.validate_pool_oauth(cfg, item)
+                except ValueError as e:
+                    return jsonify({"error": str(e)}), 400
             item["id"] = str(uuid.uuid4())
             cfg[sec][col].append(item)
             save_config(cfg)
@@ -134,6 +139,11 @@ def collection_item(sec, col, iid):
                 continue
             if request.method == "PUT":
                 data = request.get_json(force=True) or {}
+                if sec == "haproxy" and col == "backends":
+                    try:
+                        oauth.validate_pool_oauth(cfg, data)
+                    except ValueError as e:
+                        return jsonify({"error": str(e)}), 400
                 data["id"] = iid
                 items[i] = data
                 save_config(cfg)

@@ -56,6 +56,21 @@ DEFAULT_CONFIG = {
     "access": {
         "users": [],     # {id, username, hash, groups, enabled, description}
         "groups": [],    # {id, name, description}
+        # Single sign-on through an OpenID Connect provider. Shared, so every
+        # node can validate the cookie and any node can hold the sign-in flow
+        # after a failover. The secret signs the session cookie; it is
+        # generated here, never typed, and rotating it signs everyone out.
+        "oauth": {
+            "enabled": False,
+            "issuer": "",             # e.g. https://auth.example.com/application/o/ham/
+            "client_id": "",
+            "client_secret": "",
+            "auth_host": "",          # the name HAProxy routes to this app's sign-in
+            "cookie_domain": "",      # the cookie's scope; auth_host must sit under it
+            "scopes": "openid email profile",
+            "session_hours": 12,
+            "secret": "",
+        },
     },
     # Cluster-wide VRRP settings: identical on every node, so they sync.
     "cluster": {

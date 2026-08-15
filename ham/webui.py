@@ -9,7 +9,7 @@ import copy
 from .base import LISTEN, PORT, _lock, app, log
 from .config import WEBUI_NAME, is_webui_cert, load_config, merged, move_to_local, promote_local, save_config, webui_object_ids
 from .util import _by_id, cert_details, cert_path
-from . import access, apply, dnsapi, vrrp, wizard
+from . import access, apply, dnsapi, vrrp, wizard, oauth
 
 # --------------------------------------------------------------------------
 
@@ -426,6 +426,7 @@ def api_services():
                      "group_names": access.group_names(cfg, pool.get("auth_groups")),
                      "realm": pool.get("auth_realm") or "",
                      "exempt": pool.get("auth_exempt_src") or ""},
+            "oauth": oauth.pool_summary(pool),
             "allow_src": pool.get("allow_src") or "",
             "health": {"type": m.get("type") if m else "none",
                        "interval": (m or {}).get("interval") or "2s",
