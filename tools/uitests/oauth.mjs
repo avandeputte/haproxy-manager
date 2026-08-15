@@ -114,6 +114,15 @@ ok(page.textContent.split("https://auth.example.com/.ham-sso/callback").length >
    "each guide carries the real redirect URI, not a placeholder");
 ok(page.textContent.includes("accounts.google.com"),
    "and Google's fixed issuer is spelled out");
+ok(!page.textContent.includes("<sign-in host>") && !page.textContent.includes("<authentik host>")
+   && !page.textContent.includes("<application slug>"),
+   "no angle-bracket placeholders anywhere -- every URL is a real one");
+ok(page.textContent.includes("https://authentik.example.com/application/o/haproxy-manager/"),
+   "the authentik issuer is built from the saved cookie domain");
+ok(page.textContent.includes("- " + "https://auth.example.com/.ham-sso/callback"),
+   "the Authelia client block is paste-ready, redirect URI included");
+ok(page.textContent.includes("client_id: haproxy-manager"),
+   "with a concrete client id");
 
 console.log(fail ? `\n${fail} failed` : "\nthe browser's half of SSO holds together");
 process.exit(fail ? 1 : 0);

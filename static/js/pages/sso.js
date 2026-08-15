@@ -77,53 +77,75 @@ export async function renderSso(){
   c.appendChild(card);
 
   /* --- how to set up the common providers --- */
-  const ru=s.redirect_uri||"https://<sign-in host>/.ham-sso/callback";
+  /* Every URL below is a real one, built from what is saved above: the
+     reader should be able to paste, not translate placeholders. Until the
+     hosts are saved, sensible guesses on the same domain stand in. */
+  const dom=s.cookie_domain||(s.auth_host?s.auth_host.split(".").slice(1).join("."):"")||"example.com";
+  const ah=s.auth_host||"auth."+dom;
+  const ru=s.redirect_uri||"https://"+ah+"/.ham-sso/callback";
+  const cid=s.client_id||"haproxy-manager";
+  const akIssuer=(s.issuer&&s.issuer.includes("/application/o/"))?s.issuer
+    :"https://authentik."+dom+"/application/o/"+cid+"/";
+  const aeIssuer=(s.issuer&&!s.issuer.includes("/application/o/")
+                  &&s.issuer!=="https://accounts.google.com")?s.issuer
+    :"https://authelia."+dom;
   const mono=t=>'<span class=mono>'+esc(t)+"</span>";
+  const pre=t=>'<pre class=mono style="margin:8px 0;padding:10px;border:1px solid '+
+    'var(--line,#8884);border-radius:6px;overflow-x:auto;line-height:1.5">'+esc(t)+"</pre>";
   const guide=document.createElement("div");guide.className="card";
   guide.innerHTML='<div class=hd><h2>Provider setup</h2></div>';
   const gb=document.createElement("div");gb.className="bd";
   gb.innerHTML=
     '<p class=hint style="margin-bottom:12px">Every provider needs the same three things: a '+
     "confidential OAuth2/OIDC client, the redirect URI "+mono(ru)+", and the "+
-    mono("openid email profile")+" scopes. Where to click differs:</p>"+
+    mono("openid email profile")+" scopes. The URLs below are built from the settings above"+
+    (s.auth_host&&s.cookie_domain?"":" -- save the sign-in host and cookie domain first and "+
+    "they become exact")+". Where to click differs:</p>"+
 
     "<details style='margin-bottom:10px'><summary style='cursor:pointer;font-weight:600'>authentik</summary>"+
     '<ol class=hint style="margin:8px 0 0 18px;line-height:1.7">'+
-    "<li><b>Applications &rsaquo; Providers &rsaquo; Create</b>: an <b>OAuth2/OpenID Provider</b>. "+
-    "Client type <b>Confidential</b>; add "+mono(ru)+" under <b>Redirect URIs</b> (Strict); pick "+
-    "an authorization flow (implicit consent is the usual choice) and a signing key. Note the "+
-    "client ID and secret it generates.</li>"+
-    "<li><b>Applications &rsaquo; Applications &rsaquo; Create</b>: bind an application to that "+
-    "provider. Its <b>slug</b> becomes part of the issuer.</li>"+
-    "<li>Issuer URL: "+mono("https://<authentik host>/application/o/<application slug>/")+
-    " -- authentik gives every application its own issuer, and the trailing slash matters.</li>"+
+    "<li><b>Applications &rsaquo; Providers &rsaquo; Create</b>: an <b>OAuth2/OpenID Provider</b> "+
+    "named "+mono(cid)+". Client type <b>Confidential</b>; under <b>Redirect URIs</b> add a "+
+    "<b>Strict</b> entry:"+pre(ru)+
+    "Pick an authorization flow (implicit consent is the usual choice) and a signing key, and "+
+    "copy the client ID and secret it generates into the form above.</li>"+
+    "<li><b>Applications &rsaquo; Applications &rsaquo; Create</b>: an application named "+
+    mono(cid)+" with slug "+mono(cid)+", bound to that provider.</li>"+
+    "<li>Issuer URL"+((s.issuer&&s.issuer===akIssuer)?" (your saved issuer):"
+      :", assuming authentik answers at "+mono("authentik."+dom)+" and the slug above:")+
+    pre(akIssuer)+
+    "authentik gives every application its own issuer -- your authentik's hostname, the "+
+    "application's slug, and the trailing slash all matter.</li>"+
     "<li>Who may sign in at all is authentik's side (application bindings); who may reach each "+
     "service is the allow-list here. Both apply.</li></ol></details>"+
 
     "<details style='margin-bottom:10px'><summary style='cursor:pointer;font-weight:600'>Authelia</summary>"+
     '<ol class=hint style="margin:8px 0 0 18px;line-height:1.7">'+
     "<li>Authelia 4.38 or later, with its OIDC provider enabled: "+
-    mono("identity_providers.oidc")+" in its configuration needs signing keys "+
-    "("+mono("jwks")+") -- Authelia's own documentation covers generating them.</li>"+
-    "<li>Add a client under "+mono("identity_providers.oidc.clients")+": "+
-    mono("client_id")+", a hashed "+mono("client_secret")+" (generate the pair with "+
-    mono("authelia crypto hash generate pbkdf2 --random")+" -- the plain half goes in the "+
-    "form above, the digest in Authelia's config), "+mono("redirect_uris")+" containing "+
-    mono(ru)+", "+mono("scopes: [openid, email, profile]")+", and "+
-    mono("token_endpoint_auth_method: client_secret_post")+".</li>"+
-    "<li>Issuer URL: the root Authelia answers on, e.g. "+mono("https://auth-portal.example.com")+
-    " -- no path.</li></ol></details>"+
+    mono("identity_providers.oidc")+" needs signing keys ("+mono("jwks")+") -- Authelia's own "+
+    "documentation covers generating them.</li>"+
+    "<li>Generate the client secret pair: "+mono("authelia crypto hash generate pbkdf2 --random")+
+    ". The <b>plain</b> half goes in the form above; the <b>digest</b> goes in Authelia's "+
+    "configuration, in this client entry:"+
+    pre("identity_providers:\n  oidc:\n    clients:\n      - client_id: "+cid+
+        "\n        client_secret: '$pbkdf2-sha512$...'   # the digest half"+
+        "\n        redirect_uris:\n          - "+ru+
+        "\n        scopes: [openid, email, profile]"+
+        "\n        token_endpoint_auth_method: client_secret_post")+"</li>"+
+    "<li>Issuer URL"+((s.issuer&&s.issuer===aeIssuer)?" (your saved issuer):"
+      :", assuming Authelia answers at "+mono("authelia."+dom)+":")+pre(aeIssuer)+
+    "the root it is served on -- no path.</li></ol></details>"+
 
     "<details><summary style='cursor:pointer;font-weight:600'>Google</summary>"+
     '<ol class=hint style="margin:8px 0 0 18px;line-height:1.7">'+
     "<li>In <b>console.cloud.google.com</b>: <b>APIs &amp; Services &rsaquo; OAuth consent "+
     "screen</b> first (External is fine; publish it, or list your accounts as test users), "+
     "then <b>Credentials &rsaquo; Create credentials &rsaquo; OAuth client ID</b>, type "+
-    "<b>Web application</b>.</li>"+
-    "<li>Add "+mono(ru)+" under <b>Authorized redirect URIs</b>.</li>"+
-    "<li>Issuer URL: "+mono("https://accounts.google.com")+".</li>"+
+    "<b>Web application</b>, name "+mono(cid)+".</li>"+
+    "<li>Under <b>Authorized redirect URIs</b> add:"+pre(ru)+"</li>"+
+    "<li>Issuer URL, always the same for Google:"+pre("https://accounts.google.com")+"</li>"+
     "<li>Never use "+mono("*")+" on a service's allow-list with Google -- that is every Google "+
-    "account there is. List emails, or your workspace domain as "+mono("@example.com")+".</li>"+
+    "account there is. List emails, or your workspace domain as "+mono("@"+dom)+".</li>"+
     "</ol></details>";
   guide.appendChild(gb);
   c.appendChild(guide);
