@@ -43,16 +43,16 @@ package mirrors.
 
 ```bash
 # Debian / Ubuntu
-curl -fsSLO https://github.com/avandeputte/haproxy-manager/releases/latest/download/haproxy-manager_1.91.0_all.deb
-sudo apt-get install -y ./haproxy-manager_1.91.0_all.deb
+curl -fsSLO https://github.com/avandeputte/haproxy-manager/releases/latest/download/haproxy-manager_1.91.1_all.deb
+sudo apt-get install -y ./haproxy-manager_1.91.1_all.deb
 
 # Fedora
-curl -fsSLO https://github.com/avandeputte/haproxy-manager/releases/latest/download/haproxy-manager-1.91.0-1.noarch.rpm
-sudo dnf install -y ./haproxy-manager-1.91.0-1.noarch.rpm
+curl -fsSLO https://github.com/avandeputte/haproxy-manager/releases/latest/download/haproxy-manager-1.91.1-1.noarch.rpm
+sudo dnf install -y ./haproxy-manager-1.91.1-1.noarch.rpm
 
 # RHEL / Rocky / Alma -- python3-flask and python3-waitress live in EPEL
 sudo dnf install -y epel-release
-sudo dnf install -y ./haproxy-manager-1.91.0-1.noarch.rpm
+sudo dnf install -y ./haproxy-manager-1.91.1-1.noarch.rpm
 ```
 
 The package installs and starts the service, prints the generated

@@ -108,7 +108,25 @@ ok(len(sent) == 1 and "no servers left" in sent[0][0],
 traffic.check_services(cfg, stats_for(1, 3))
 ok(len(sent) == 2 and "serving again" in sent[1][0],
    "and one server coming back closes it: %s" % (sent[-1:],))
+
 ok("meant to run" not in sent[1][0], "with a subject that does not overclaim")
+
+# -- a paused service says nothing about its servers -------------------------
+# Pausing takes a service out with a clean 503, usually to work on its backend;
+# the servers then fail their checks, and alerting that they are down would be
+# telling the operator what they just did.
+sent.clear()
+notify._notify_state.clear()
+cfg["haproxy"]["backends"] = [{"id": "b1", "name": "shop", "servers": [],
+                               "maintenance": True}]
+traffic.check_services(cfg, stats_for(0, 2))
+traffic.check_services(cfg, stats_for(0, 2))
+ok(sent == [], "a paused service losing every server is not reported")
+
+# resumed and healthy again: the next round reports from wherever it was
+cfg["haproxy"]["backends"] = [{"id": "b1", "name": "shop", "servers": []}]
+traffic.check_services(cfg, stats_for(2, 2))
+ok(sent == [], "and resuming to healthy servers is quietly fine, no false recovery")
 
 sent.clear()
 notify._notify_state.clear()

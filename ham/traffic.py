@@ -231,6 +231,18 @@ def notify_modes(cfg):
             for b in merged(cfg)["haproxy"]["backends"]}
 
 
+def paused_pools(cfg):
+    """The pools in maintenance mode, by the name HAProxy reports.
+
+    A paused service answers a clean 503 on purpose, and the usual reason to
+    pause it is to take its backend down and work on it -- at which point the
+    servers fail their health checks. Alerting that they are down would be
+    telling the operator what they just did.
+    """
+    return {"be_" + _sec(b.get("name") or "")
+            for b in merged(cfg)["haproxy"]["backends"] if b.get("maintenance")}
+
+
 def check_services(cfg, data):
     """Say when a service loses servers, and when it gets them back.
 
@@ -242,9 +254,15 @@ def check_services(cfg, data):
     or nothing at all.
     """
     modes = notify_modes(cfg)
+    paused = paused_pools(cfg)
     for be in data.get("backends") or []:
         name = be.get("proxy") or ""
         if name in INTERNAL_POOLS:
+            continue
+        if name in paused:
+            # Paused on purpose: its servers being down is the operator's own
+            # doing, not news. When it is resumed and its servers pass again,
+            # the next round reports the recovery from whatever state it was in.
             continue
         mode = modes.get(name, "servers")
         if mode == "off":

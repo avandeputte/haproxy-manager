@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.91.0_all.deb
+sudo apt-get install -y ./haproxy-manager_1.91.1_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -667,6 +667,12 @@ deciding where traffic goes — so that is what the alerts come from. A service
 whose servers all fail their checks is reported as down, one that loses some
 of them as degraded, naming the servers and what their last check said. When
 it recovers, that is reported too.
+
+**A paused service says nothing about its servers.** Pausing a service is
+usually the prelude to taking its backend down and working on it, at which
+point the servers fail their checks — so a paused service is left out of these
+alerts entirely. When it is resumed and its servers pass again, the next round
+picks up from wherever it left off.
 
 **What losing a server means is the service's own business.** Not every pool
 means the same thing by a failing check. A load-balanced pool losing one of
