@@ -106,6 +106,14 @@ ok(!!document.querySelector("#f_client_secret") &&
    "the client secret is never echoed back into the form");
 ok([...page.querySelectorAll("button")].some(b => b.textContent === "Rotate secret"),
    "the kill switch is a button");
+for (const prov of ["authentik", "Authelia", "Google"]) {
+  const d = [...page.querySelectorAll("details summary")].find(x => x.textContent === prov);
+  ok(!!d, "there are setup steps for " + prov);
+}
+ok(page.textContent.split("https://auth.example.com/.ham-sso/callback").length >= 3,
+   "each guide carries the real redirect URI, not a placeholder");
+ok(page.textContent.includes("accounts.google.com"),
+   "and Google's fixed issuer is spelled out");
 
 console.log(fail ? `\n${fail} failed` : "\nthe browser's half of SSO holds together");
 process.exit(fail ? 1 : 0);

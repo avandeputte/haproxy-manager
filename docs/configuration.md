@@ -359,7 +359,9 @@ Keycloak, Authelia, Pocket ID, Google, Entra — and services opt in one by one.
 | Session length | default 12 hours. Single sessions cannot be revoked (nothing is stored); **Rotate secret** is the kill switch and signs everyone out everywhere. |
 
 Register the redirect URI the page shows —
-`https://<sign-in host>/.ham-sso/callback` — at the provider.
+`https://<sign-in host>/.ham-sso/callback` — at the provider. The page
+carries step-by-step setup instructions for authentik, Authelia and Google,
+with that URI filled in.
 
 On the service: **Require single sign-on** plus **Allowed identities**, one
 per line — an email, a domain as `@example.com`, or `*` for anyone the

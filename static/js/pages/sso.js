@@ -75,4 +75,56 @@ export async function renderSso(){
   bd.appendChild(foot);
   card.appendChild(bd);
   c.appendChild(card);
+
+  /* --- how to set up the common providers --- */
+  const ru=s.redirect_uri||"https://<sign-in host>/.ham-sso/callback";
+  const mono=t=>'<span class=mono>'+esc(t)+"</span>";
+  const guide=document.createElement("div");guide.className="card";
+  guide.innerHTML='<div class=hd><h2>Provider setup</h2></div>';
+  const gb=document.createElement("div");gb.className="bd";
+  gb.innerHTML=
+    '<p class=hint style="margin-bottom:12px">Every provider needs the same three things: a '+
+    "confidential OAuth2/OIDC client, the redirect URI "+mono(ru)+", and the "+
+    mono("openid email profile")+" scopes. Where to click differs:</p>"+
+
+    "<details style='margin-bottom:10px'><summary style='cursor:pointer;font-weight:600'>authentik</summary>"+
+    '<ol class=hint style="margin:8px 0 0 18px;line-height:1.7">'+
+    "<li><b>Applications &rsaquo; Providers &rsaquo; Create</b>: an <b>OAuth2/OpenID Provider</b>. "+
+    "Client type <b>Confidential</b>; add "+mono(ru)+" under <b>Redirect URIs</b> (Strict); pick "+
+    "an authorization flow (implicit consent is the usual choice) and a signing key. Note the "+
+    "client ID and secret it generates.</li>"+
+    "<li><b>Applications &rsaquo; Applications &rsaquo; Create</b>: bind an application to that "+
+    "provider. Its <b>slug</b> becomes part of the issuer.</li>"+
+    "<li>Issuer URL: "+mono("https://<authentik host>/application/o/<application slug>/")+
+    " -- authentik gives every application its own issuer, and the trailing slash matters.</li>"+
+    "<li>Who may sign in at all is authentik's side (application bindings); who may reach each "+
+    "service is the allow-list here. Both apply.</li></ol></details>"+
+
+    "<details style='margin-bottom:10px'><summary style='cursor:pointer;font-weight:600'>Authelia</summary>"+
+    '<ol class=hint style="margin:8px 0 0 18px;line-height:1.7">'+
+    "<li>Authelia 4.38 or later, with its OIDC provider enabled: "+
+    mono("identity_providers.oidc")+" in its configuration needs signing keys "+
+    "("+mono("jwks")+") -- Authelia's own documentation covers generating them.</li>"+
+    "<li>Add a client under "+mono("identity_providers.oidc.clients")+": "+
+    mono("client_id")+", a hashed "+mono("client_secret")+" (generate the pair with "+
+    mono("authelia crypto hash generate pbkdf2 --random")+" -- the plain half goes in the "+
+    "form above, the digest in Authelia's config), "+mono("redirect_uris")+" containing "+
+    mono(ru)+", "+mono("scopes: [openid, email, profile]")+", and "+
+    mono("token_endpoint_auth_method: client_secret_post")+".</li>"+
+    "<li>Issuer URL: the root Authelia answers on, e.g. "+mono("https://auth-portal.example.com")+
+    " -- no path.</li></ol></details>"+
+
+    "<details><summary style='cursor:pointer;font-weight:600'>Google</summary>"+
+    '<ol class=hint style="margin:8px 0 0 18px;line-height:1.7">'+
+    "<li>In <b>console.cloud.google.com</b>: <b>APIs &amp; Services &rsaquo; OAuth consent "+
+    "screen</b> first (External is fine; publish it, or list your accounts as test users), "+
+    "then <b>Credentials &rsaquo; Create credentials &rsaquo; OAuth client ID</b>, type "+
+    "<b>Web application</b>.</li>"+
+    "<li>Add "+mono(ru)+" under <b>Authorized redirect URIs</b>.</li>"+
+    "<li>Issuer URL: "+mono("https://accounts.google.com")+".</li>"+
+    "<li>Never use "+mono("*")+" on a service's allow-list with Google -- that is every Google "+
+    "account there is. List emails, or your workspace domain as "+mono("@example.com")+".</li>"+
+    "</ol></details>";
+  guide.appendChild(gb);
+  c.appendChild(guide);
 }
