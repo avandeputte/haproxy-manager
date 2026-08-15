@@ -60,13 +60,21 @@ GID=$(c -X POST $N1/api/access/groups -d '{"name":"staff"}' \
 c -X POST $N1/api/access/users -d "{\"username\":\"alice\",\"password\":\"demo-alice-pw\",\"groups\":[\"$GID\"]}" >/dev/null
 c -X POST $N1/api/access/users -d '{"username":"bob","password":"demo-bob-pw","groups":[]}' >/dev/null
 
+echo "== single sign-on through an identity provider"
+c -X PUT $N1/api/access/oauth -d '{
+  "enabled":true,"issuer":"https://auth.example.com/application/o/services/",
+  "client_id":"haproxy-manager","client_secret":"demo-oidc-client-secret",
+  "auth_host":"sso.example.com","cookie_domain":"example.com"}' \
+  | python3 -c 'import sys,json;print("  ",json.load(sys.stdin).get("ok"))'
+
 echo "== services"
 pub(){ c -X POST $N1/api/wizard/publish -d "$1" \
        | python3 -c 'import sys,json;d=json.load(sys.stdin);print("  ",d.get("ok"),d.get("error","")[:70])'; }
 pub '{"url":"https://shop.example.com","target":"http://172.28.0.12:9401, http://172.28.0.13:9401",
      "name":"shop","certificate":true,"health":{"type":"http","uri":"/","status":"200"},"apply":false}'
 pub '{"url":"https://media.example.com","target":"http://172.28.0.12:9402","name":"media",
-     "certificate":true,"health":{"type":"http","uri":"/","status":"200"},"apply":false}'
+     "certificate":true,"health":{"type":"http","uri":"/","status":"200"},
+     "oauth":{"enabled":true,"allow":"@example.com","forward":true},"apply":false}'
 pub '{"url":"https://git.example.com","target":"http://172.28.0.13:9403","name":"git",
      "certificate":true,"health":{"type":"http","uri":"/","status":"200"},
      "auth":{"enabled":true,"groups":["'"$GID"'"],"realm":"Git"},"apply":false}'

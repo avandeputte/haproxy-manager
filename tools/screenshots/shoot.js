@@ -21,6 +21,7 @@ const SHOTS = [
   { file: "watchdog",     hash: "#/p:watchdog",       wait: ".card" },
   { file: "webui",        hash: "#/p:webui",          wait: ".frm" },
   { file: "notifications", hash: "#/p:notify",        wait: ".card" },
+  { file: "sso",           hash: "#/p:sso",            wait: ".frm" },
   { file: "backends",     hash: "#/haproxy/backends", wait: "table" },
   { file: "history",      hash: "#/p:history",       wait: "table" },
 ];

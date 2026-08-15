@@ -114,6 +114,8 @@ service; who may enter stays a per-service decision.
 
 ### Setting it up
 
+<img src="img/sso.png" alt="The Single sign-on page: the provider connected, with the redirect URI to register and per-provider setup steps" width="900">
+
 **Sign-in → Single sign-on** holds the provider, once:
 
 | Setting | Notes |
