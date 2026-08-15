@@ -309,85 +309,21 @@ HTTP check; the rendered backend then checks one place and routes to another.
 
 ## Requiring a sign-in
 
-A service can be put behind HTTP basic authentication. HAProxy checks the
-credentials from a `userlist` in the generated configuration, so a request
-without valid ones is answered with a 401 and never reaches a server.
+Authentication has [a guide of its own](authentication.md) — it covers all
+three doors: this management UI's login (with optional TOTP two-factor),
+HTTP basic authentication on published services (users, groups, and the
+`userlist` HAProxy checks), and single sign-on through any OpenID Connect
+provider (Authentik, Keycloak, Authelia, Pocket ID, Google, Entra), with
+per-service allow-lists, identity-header forwarding, the trust model, and
+what to do when something refuses.
 
-**Sign-in → Users** and **Sign-in → Groups** hold who may sign in. These
-accounts are only for published services; they give no access to this
-management UI.
-
-| Field | Notes |
-| --- | --- |
-| User name | letters, digits, and `. - _ @` — it travels in a configuration line and comes back from a browser |
-| Password | at least 8 characters, stored only as a SHA-512 crypt (`$6$`) hash. Leaving the field empty when editing keeps the current one. |
-| Groups | which groups the user belongs to |
-| Enabled | off keeps the account but stops it signing in anywhere |
-
-On the service itself (the publish wizard, or a Backend Pool under Advanced):
-
-| Field | Notes |
-| --- | --- |
-| Require a sign-in | HTTP services only — a raw TCP port has nowhere to carry one |
-| Allowed groups | none ticked admits any user; otherwise only members of those groups |
-| Sign-in prompt | the realm the browser shows above its password box; defaults to the pool name |
-| Skip the sign-in from | networks trusted without a password, one per line — typically the LAN |
-| Allowed networks | one address or CIDR per line; requests from anywhere else get a 403. Works for `tcp://` services too, as `tcp-request content reject`. |
-
-Two edges are deliberate. A group that a service admits cannot be deleted while
-that service admits it — the request is refused and names the service. And a
-service that requires a sign-in nobody can satisfy (no users with a password
-yet, or every group it admitted is gone) renders as `http-request deny`:
-refusing everyone is safer than quietly becoming public.
-
-Users and groups are shared across the cluster, because the services that check
-them are. The backup carries them **without** the password hashes, like every
-other secret, so users restored from a backup need a password set again before
-they can sign in — the users already on the node keep theirs.
-
-### Single sign-on (OIDC)
-
-**Sign-in → Single sign-on** connects any OpenID Connect provider — Authentik,
-Keycloak, Authelia, Pocket ID, Google, Entra — and services opt in one by one.
-
-| Setting | Notes |
-| --- | --- |
-| Issuer URL | must be `https://`; its `/.well-known/openid-configuration` is read from here. **Test** proves it before saving. |
-| Client ID / secret | from the provider's client registration; a blank secret keeps the stored one |
-| Sign-in host | e.g. `auth.example.com` — point its DNS at the virtual IP; HAProxy routes exactly `/.ham-sso/` on it to this app and answers 404 for anything else. It needs certificate coverage on the HTTPS listener (a wildcard is enough). |
-| Cookie domain | the domain the session spans, e.g. `example.com`. The sign-in host and every protected service must sit under it. Never a bare public suffix (`com`, `co.uk`) — browsers refuse such cookies. |
-| Session length | default 12 hours. Single sessions cannot be revoked (nothing is stored); **Rotate secret** is the kill switch and signs everyone out everywhere. |
-| Accept unverified email claims | off by default. A provider sending `email_verified: false` is refused, because the allow-lists trust the address and an unverified one is just a text field. Keycloak marks admin-created users unverified until *Email verified* is switched on — prefer fixing it there; this toggle is for providers that cannot say so. |
-
-Register the redirect URI the page shows —
-`https://<sign-in host>/.ham-sso/callback` — at the provider. The page
-carries step-by-step setup instructions for authentik, Authelia and Google,
-with that URI filled in.
-
-On the service: **Require single sign-on** plus **Allowed identities**, one
-per line — an email, a domain as `@example.com`, or `*` for anyone the
-provider signs in. An empty list refuses everyone; `*` must be said out loud.
-One sign-in per service: OIDC and basic auth do not combine, and `tcp://`
-services cannot carry a redirect. **Pass the signed-in email to the servers**
-additionally sets `X-Auth-Request-Email` and `Remote-User` on forwarded
-requests, from the verified session — for apps that sign a proxy-identified
-visitor in themselves (Grafana auth-proxy and friends). Client-sent copies of
-those headers are stripped on every service, forwarding or not, so the value
-is always the proxy's own word; only safe while the app is reachable through
-the proxy alone.
-
-How it enforces: the sign-in issues a domain-wide, HMAC-signed cookie, and
-**HAProxy verifies it on every request in generated configuration** —
-signature, expiry, and the service's allow-list (matched against the
-hex-encoded address) — with the app out of the traffic path. The signing
-secret is shared configuration, so a failover signs nobody out. The cookie is
-stripped from requests before they reach the real servers. A signed-in
-visitor not on a service's list gets a 403 rather than a redirect loop; an
-identity the provider marks unverified (`email_verified: false`) is refused
-at the callback. Providers behind a private CA work by setting
-`REQUESTS_CA_BUNDLE` to the CA file in the service's environment
-(`Environment=REQUESTS_CA_BUNDLE=/etc/ssl/private-ca.pem` in a systemd
-drop-in, or `-e` for Docker).
+The short version: manage service accounts under **Sign-in → Users** and
+**Groups**; connect a provider under **Sign-in → Single sign-on**; then tick
+**Require a sign-in** or **Require single sign-on** on the service — one or
+the other, never both. Source-address controls (**Allowed networks**, **Skip
+the sign-in from**) compose with either. A sign-in nobody can satisfy
+renders as `http-request deny`: refusing everyone is safer than quietly
+becoming public.
 
 ## Certificates
 
@@ -434,11 +370,9 @@ reason, and keep the login they had.
 The login is node-local: set it on each node.
 
 **Two-factor authentication** is optional, per administrator, from the same
-dialog: standard TOTP, six digits every thirty seconds. Setup shows a QR code
-and only completes when the current code proves the app holds the secret;
-eight single-use recovery codes are shown once. *Apply to the other nodes*
-carries the second factor with the login. The escape hatch for a lost phone
-is `app.py disable-2fa` on the node's shell.
+dialog — standard TOTP with recovery codes; the details, along with the rest
+of how signing in works, are in [the authentication guide](authentication.md).
+The escape hatch for a lost phone is `app.py disable-2fa` on the node's shell.
 
 ## Serving the UI over HTTPS
 

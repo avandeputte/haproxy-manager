@@ -8,7 +8,7 @@ over, with settings and certificates syncing across all of them.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.90.1_all.deb
+sudo apt-get install -y ./haproxy-manager_1.90.2_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -35,6 +35,7 @@ a three-node cluster holding made-up data — see
 | [Installing on a server](docs/install-standalone.md) | requirements, what the installer does, options, updating, uninstalling, troubleshooting |
 | [Running in Docker](docs/install-docker.md) | images, compose, networking, volumes, capabilities, limitations |
 | [Configuration](docs/configuration.md) | every setting, what is shared between nodes, environment variables, ports |
+| [Authentication](docs/authentication.md) | the UI login and 2FA, basic auth for services, single sign-on (OIDC), the trust model |
 
 The rest of this file describes what each part does and why.
 
@@ -199,100 +200,34 @@ and the resulting `haproxy.cfg`, before anything is written.
 
 ## Requiring a sign-in
 
-A service can ask visitors for a user name and password before it lets them
-through — HTTP basic authentication, checked by HAProxy itself, so a request
-without valid credentials never reaches the servers behind it.
+A service can ask its visitors to prove who they are, two ways — and both
+are enforced by HAProxy itself, so an unauthenticated request never reaches
+the servers behind it:
 
-Tick **Require a sign-in** in the publish wizard (or on a Backend Pool under
-Advanced), and manage who may answer it under **Sign-in**:
+- **Basic authentication** — a user name and password, checked from a
+  `userlist` in the generated configuration. Users and groups are managed
+  under **Sign-in**; a service admits groups rather than people, so access
+  changes by moving someone in or out of a group. Passwords are stored only
+  as SHA-512 crypt hashes, and a sign-in nobody can satisfy renders as
+  `http-request deny` — refusing everyone is safer than quietly becoming
+  public.
+- **Single sign-on (OIDC)** — the service sends visitors through an OpenID
+  Connect provider (Authentik, Keycloak, Authelia, Pocket ID, Google,
+  Entra), with a per-service allow-list of emails and `@domains`. One
+  sign-in covers every protected service; **HAProxy verifies the session on
+  every request** in pure configuration — an HMAC-signed cookie, no Lua,
+  HAProxy 2.4+ — so the app stays out of the traffic path and a failover
+  signs nobody out. The upstream app sees none of the login unless a
+  per-service toggle passes the *verified* identity as
+  `X-Auth-Request-Email`/`Remote-User` for apps that trust a proxy identity.
 
-- **Users** — a name and a password. The password is stored only as a SHA-512
-  crypt hash, the format HAProxy reads, and cannot be read back: editing a user
-  and leaving the password field empty keeps the current one. A user can be
-  disabled without being deleted.
-- **Groups** — named sets of users. A service admits groups rather than people,
-  so who may reach it changes by moving someone in or out of a group. Leave no
-  group ticked on a service and any user may sign in. A group a service depends
-  on cannot be deleted until that service stops admitting it.
+Source-address controls compose with either: **Allowed networks** (a CIDR
+allow-list, which works for `tcp://` services too) and **Skip the sign-in
+from** (networks trusted without a password, typically the LAN).
 
-These accounts have nothing to do with the login for this management UI. They
-are shared across the cluster, like the services that check them, so a failover
-meets the same credentials. What ends up in `haproxy.cfg` is a `userlist` and
-one line per protected pool:
-
-```
-userlist ham_users
-    group staff
-    user alice password $6$... groups staff
-
-backend be_shop
-    http-request auth realm "The Shop" unless { http_auth_group(ham_users) staff }
-```
-
-A service that requires a sign-in nobody can give — no users yet, or the only
-group it admits has been removed — refuses every request rather than serving
-itself to everyone. Basic authentication is part of HTTP, so a `tcp://` service
-cannot use it, and the wizard does not offer it there. Use it over HTTPS: on
-plain HTTP the credentials cross the network in the clear.
-
-Two source-address controls sit beside it, in the same wizard section:
-
-- **Allowed networks** — one address or CIDR per line; requests from anywhere
-  else are refused with a 403. Unlike the sign-in this works for `tcp://`
-  services too (`tcp-request content reject`), which is how a database port is
-  kept to the LAN. An entry that does not parse is refused at the form; one
-  that somehow reaches the renderer anyway is left out, which only ever
-  narrows who gets in — and a list with no readable entries refuses everyone
-  rather than admitting everyone.
-- **Skip the sign-in from** — networks trusted without a password, typically
-  the LAN: `192.168.1.0/24` browses freely while everyone else meets the
-  password box. The addresses HAProxy tests are the TCP source — behind
-  another proxy that is the proxy's address, not the visitor's.
-
-### Single sign-on (OIDC)
-
-Instead of a password box, a service can send its visitors through an OpenID
-Connect provider — Authentik, Keycloak, Authelia, Pocket ID, Google, Entra:
-anything that answers OIDC discovery. Configure the provider once under
-**Sign-in → Single sign-on** (issuer URL, client id and secret, and two names:
-a **sign-in host** such as `auth.example.com` that HAProxy routes to this app,
-and the **cookie domain** every protected service must sit under). The page
-shows the redirect URI to register at the provider. Then tick **Require
-single sign-on** on a service and say who is allowed: exact emails, whole
-domains as `@example.com`, or a literal `*` for anyone the provider signs in
-— "anyone" is never the silent default, because with a public provider that
-would mean every account it has.
-
-What makes this fit a proxy is where the enforcement lives: **HAProxy itself
-verifies the session on every request**, in generated configuration — an
-HMAC-signed cookie checked with `hmac` and `secure_memcmp`, the signed-in
-address matched against the service's allow-list, all without this app in the
-traffic path. The app only plays the sign-in dance on the auth host: redirect
-to the provider with PKCE, exchange the code, set the cookie, return the
-visitor to the page they first asked for. One sign-in covers every protected
-service (the cookie spans the domain), while authorization stays per service
-— a signed-in visitor who is not on a service's list gets a 403, not another
-trip to the provider. The signing secret is shared configuration, so every
-node validates every session and a failover signs nobody out. The cookie is
-stripped before requests reach the real servers — no upstream app ever holds
-a token that opens the others — and sessions cannot be revoked singly
-(nothing is stored anywhere), so the kill switch is **Rotate secret**, which
-signs everyone out at once.
-
-The upstream app itself sees none of the login: the password only ever
-exists at the provider, the session cookie is stripped before requests are
-forwarded, and by default the request arrives looking anonymous. Apps that
-*want* the identity — Grafana's auth-proxy mode and its relatives — get it
-by ticking **Pass the signed-in email to the servers** on the service, which
-sets `X-Auth-Request-Email` and `Remote-User` from the verified session.
-Client-sent copies of those headers are deleted on every service whether or
-not it forwards, so the header is always the proxy's word and a forgery
-meets an empty header, never a passed-through one.
-
-A provider with a certificate from a private CA works by pointing
-`REQUESTS_CA_BUNDLE` at the CA file in the service's environment. Basic auth
-and OIDC do not combine on one service — one sign-in per service. Raw
-`tcp://` services cannot carry a redirect, so the option is HTTP-only.
+The whole subject — the settings, the sign-in flow, provider setup, the
+trust model, and what to do when something refuses — lives in
+[docs/authentication.md](docs/authentication.md).
 
 The **Advanced · HAProxy** menu group still exposes every object individually,
 for the cases the wizard does not cover (header rewriting, custom ACLs,
