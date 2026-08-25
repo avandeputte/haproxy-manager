@@ -6,6 +6,14 @@ A small self-hosted web UI to manage an **HAProxy** configuration, obtain
 Keepalived** on a shared virtual IP — one node active, the rest ready to take
 over, with settings and certificates syncing across all of them.
 
+**No database to run — no PostgreSQL, no Redis, no message broker.** The whole
+configuration is one JSON file on disk, and a cluster keeps its nodes in step
+by syncing that file between them over HTTPS. There is no separate datastore to
+install, secure, tune, back up, or keep alive alongside the proxy — which is
+the point: the tool that manages your load balancer should not itself be a
+stack that needs managing. A backup is one file; moving to new hardware is
+copying it across.
+
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
 sudo apt-get install -y ./haproxy-manager_1.91.2_all.deb
@@ -261,7 +269,12 @@ renewal happens on its own.)
 
 ## How it works
 
-- All state lives in a single JSON file (`$HAM_DATA_DIR/config.json`). No database.
+- **All state lives in a single JSON file** (`$HAM_DATA_DIR/config.json`) — no
+  database process, no schema, no migrations. The app is one Python process
+  behind waitress; the only things running are it, HAProxy, and Keepalived.
+  The generated `haproxy.cfg` and `keepalived.conf` are derived from that file
+  and can be regenerated at any time, so the JSON is the single source of truth
+  and the only thing worth backing up.
 - **Timestamps are stored and sent in UTC, and shown in the browser's own
   timezone** — certificate expiries, snapshots, the watchdog's actions, log
   lines. The server has no idea where the reader is; the browser is the one

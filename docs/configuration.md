@@ -2,10 +2,12 @@
 
 Everything is set from the UI and stored in one file,
 `/var/lib/haproxy-manager/config.json` (mode 0600 — it holds the API key, the
-session secret, the peers' keys and the password hash). HAProxy's and
-Keepalived's own configuration files are **generated** from it on Apply; editing
-them by hand is pointless, because the next Apply overwrites them (keeping a
-`.bak`).
+session secret, the peers' keys and the password hash). There is **no database**
+behind it — no PostgreSQL, no Redis — so that one file is the whole state:
+back it up, copy it to new hardware, and you have moved the installation.
+HAProxy's and Keepalived's own configuration files are **generated** from it on
+Apply; editing them by hand is pointless, because the next Apply overwrites them
+(keeping a `.bak`).
 
 - [The model](#the-model)
 - [Publishing a service](#publishing-a-service)

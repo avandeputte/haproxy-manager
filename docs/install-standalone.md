@@ -57,7 +57,11 @@ sudo dnf install -y ./haproxy-manager-1.91.2-1.noarch.rpm
 
 The package installs and starts the service, prints the generated
 administrator password, and requires `haproxy` and `keepalived`, so your
-package manager pulls both in.
+package manager pulls both in. There is **no database to install** — no
+PostgreSQL, no Redis — and nothing else to stand up alongside: the whole state
+is one JSON file under `/var/lib/haproxy-manager`, and the app is a single
+Python process. The dependencies are Flask and waitress, which the package
+pulls in, and that is all.
 
 Upgrading is `apt-get install ./…deb` or `dnf install ./…rpm` again: the
 configuration, the login and issued certificates are left alone. Removing the
