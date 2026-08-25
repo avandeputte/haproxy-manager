@@ -45,6 +45,9 @@ export async function renderNotify(){
     h:"a problem is announced when it starts, then repeated this often until it clears. "+
       "The message saying it has cleared is always sent, whatever the severity above says -- "+
       "being told what broke and never that it came back is worse than not being told."},
+   {k:"service_grace_seconds",l:"Wait before alerting a service is down (seconds)",t:"text",d:30,
+    h:"A service that goes down and comes back within this window -- a reboot, an update -- is "+
+      "not reported at all. The clock starts when it first goes bad. 0 alerts on the first check."},
   ];
   const wfrm=document.createElement("div");wfrm.className="frm";
   WHEN.forEach(f=>fieldRow(f,st[f.k]).forEach(el=>wfrm.appendChild(el)));

@@ -101,6 +101,10 @@ DEFAULT_CONFIG = {
         "enabled": True,
         "min_severity": "warning",       # info | warning | error
         "repeat_hours": 6,               # re-tell an unresolved problem this often
+        # Wait this long before alerting that a service has lost servers, so a
+        # reboot or an update that takes it down for a few seconds does not
+        # page anyone. 0 disables the wait (alert on the first round).
+        "service_grace_seconds": 30,
         "events": {"certificates": True, "watchdog": True, "apply": True,
                    "cluster": True, "updates": True},
         # [{id, name, type, enabled, ...type-specific fields}]

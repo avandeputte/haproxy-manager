@@ -16,7 +16,7 @@ copying it across.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.91.2_all.deb
+sudo apt-get install -y ./haproxy-manager_1.92.0_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -725,6 +725,14 @@ arrive thousands of times a week, so alerts fire on **transitions** and an
 unresolved problem is repeated only every `repeat_hours` (6 by default) until it
 clears. Six watchdog rounds against one dead service produce two messages — "was
 restarted", then "is healthy again" — not six.
+
+A service that loses its servers is held for a **grace period** — 30 seconds by
+default, on Notifications — before it is reported, so a reboot or an update that
+takes it down for a few seconds does not page anyone. The clock starts when it
+first goes bad, and a service that recovers inside the window says nothing at
+all: no down alert, so no recovery either. Set it to 0 to alert on the first
+check. (This is separate from the config-drift alert below, which has its own
+much longer wait.)
 
 One alert waits deliberately: **the nodes holding different configurations**.
 Saving a change makes the cluster disagree *by design* — the other nodes catch

@@ -237,6 +237,12 @@ def api_notify_put():
                 n["repeat_hours"] = max(0.25, float(body["repeat_hours"]))
             except (TypeError, ValueError):
                 return jsonify({"ok": False, "error": "repeat_hours must be a number"}), 400
+        if "service_grace_seconds" in body:
+            try:
+                n["service_grace_seconds"] = max(0, min(3600, int(body["service_grace_seconds"])))
+            except (TypeError, ValueError):
+                return jsonify({"ok": False, "error":
+                                "the grace period must be a whole number of seconds"}), 400
         if isinstance(body.get("events"), dict):
             for k, v in body["events"].items():
                 n.setdefault("events", {})[k] = bool(v)

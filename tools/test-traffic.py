@@ -144,6 +144,55 @@ ok(len(sent) == 1 and "1 of 3" in sent[0][0],
 cfg["haproxy"]["backends"] = []
 notify._notify_state.clear()
 
+# -- a grace period, so a quick reboot does not page anyone -------------------
+# A controllable clock: check_services reads traffic.time.time(), so a fake
+# with a settable value lets the test move the grace window without sleeping.
+import types                                              # noqa: E402
+_clock = {"t": 10000.0}
+_real_time = traffic.time
+traffic.time = types.SimpleNamespace(time=lambda: _clock["t"])
+try:
+    cfg["notify"]["service_grace_seconds"] = 30
+
+    # A service that bounces -- down, then back inside the window -- says nothing.
+    sent.clear(); notify._notify_state.clear(); traffic._down_since.clear()
+    _clock["t"] = 10000
+    traffic.check_services(cfg, stats_for(0, 2))
+    ok(sent == [], "a service just gone down is held through the grace period")
+    _clock["t"] = 10015
+    traffic.check_services(cfg, stats_for(0, 2))
+    ok(sent == [], "and still held part-way through it")
+    _clock["t"] = 10025
+    traffic.check_services(cfg, stats_for(2, 2))          # back before 30s elapsed
+    ok(sent == [], "recovering inside the window says nothing at all -- no alert, no recovery")
+
+    # A service that stays down past the window is reported, then its recovery.
+    sent.clear(); notify._notify_state.clear(); traffic._down_since.clear()
+    _clock["t"] = 20000
+    traffic.check_services(cfg, stats_for(0, 2))
+    ok(sent == [], "the outage is not announced on the first round")
+    _clock["t"] = 20031
+    traffic.check_services(cfg, stats_for(0, 2))
+    ok(len(sent) == 1 and "no servers left" in sent[0][0],
+       "but once it has stood past the grace period it is")
+    _clock["t"] = 20100
+    traffic.check_services(cfg, stats_for(2, 2))
+    ok(len(sent) == 2 and "healthy again" in sent[1][0],
+       "and the recovery follows, because the outage was reported")
+
+    # Zero disables the wait: the alert fires on the first round.
+    sent.clear(); notify._notify_state.clear(); traffic._down_since.clear()
+    cfg["notify"]["service_grace_seconds"] = 0
+    traffic.check_services(cfg, stats_for(0, 2))
+    ok(len(sent) == 1 and "no servers left" in sent[0][0],
+       "a grace of zero alerts on the first check, as before")
+finally:
+    traffic.time = _real_time
+    traffic._down_since.clear()
+    cfg["notify"].pop("service_grace_seconds", None)
+cfg["haproxy"]["backends"] = []
+notify._notify_state.clear()
+
 # -- our own requests are not traffic ----------------------------------------
 # The URL probes go through HAProxy on purpose, so HAProxy counts them like
 # anyone else's requests -- and a service nobody visits would show a steady

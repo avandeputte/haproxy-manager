@@ -209,6 +209,12 @@ def poll(cfg):
 # Pools the app makes for its own plumbing rather than for a service.
 INTERNAL_POOLS = ("bk_acme_challenge",)
 
+# When each service that is currently in trouble first went bad, so a brief
+# outage -- a reboot, an update -- can serve out its grace period before it
+# alerts. Touched only from the watchdog round (check_services), one thread,
+# so it needs no lock.
+_down_since = {}
+
 
 def _pool_label(name):
     """be_shop is what HAProxy calls it; shop is what it is called here."""
@@ -255,6 +261,9 @@ def check_services(cfg, data):
     """
     modes = notify_modes(cfg)
     paused = paused_pools(cfg)
+    grace = float((cfg.get("notify") or {}).get("service_grace_seconds") or 0)
+    now = time.time()
+    seen = set()
     for be in data.get("backends") or []:
         name = be.get("proxy") or ""
         if name in INTERNAL_POOLS:
@@ -270,6 +279,7 @@ def check_services(cfg, data):
         total = int(be.get("servers_total") or 0)
         if not total:
             continue                      # nothing to be up or down
+        seen.add(name)
         up = int(be.get("servers_up") or 0)
         label = _pool_label(name)
         down = [s for s in be.get("servers") or []
@@ -279,21 +289,33 @@ def check_services(cfg, data):
                               s.get("check_status") or s.get("status") or "")
             for s in down)
         if up == 0:
-            notify.notify_transition(
-                "service:" + name, "down", "service",
-                "%s has no servers left" % label,
-                "Every server behind %s is failing its health check, so requests for it "
-                "get a 503.\n\n%s" % (label, detail), "error", cfg)
+            bad = ("down", "error", "%s has no servers left" % label,
+                   "Every server behind %s is failing its health check, so requests for it "
+                   "get a 503.\n\n%s" % (label, detail))
         elif down and mode == "servers":
-            notify.notify_transition(
-                "service:" + name, "degraded", "service",
-                "%s is down to %d of %d servers" % (label, up, total),
-                "%s is still serving on the servers that are up.\n\n%s" % (label, detail),
-                "warning", cfg)
+            bad = ("degraded", "warning", "%s is down to %d of %d servers" % (label, up, total),
+                   "%s is still serving on the servers that are up.\n\n%s" % (label, detail))
         else:
-            # Healthy -- which for an outage-only pool includes servers
-            # failing their checks, so the recovery text must not claim they
-            # all pass when the point of the setting is that they need not.
+            bad = None
+
+        if bad:
+            state, severity, subject, body = bad
+            # A grace period, so a service down for a few seconds -- a reboot,
+            # an update -- does not page anyone. The clock starts when it first
+            # goes bad and is not reset by down->degraded->down, so the alert
+            # fires once the trouble has genuinely persisted. Zero disables it.
+            since = _down_since.setdefault(name, now)
+            if grace and now - since < grace:
+                continue
+            notify.notify_transition("service:" + name, state, "service",
+                                     subject, body, severity, cfg)
+        else:
+            _down_since.pop(name, None)
+            # Healthy -- which for an outage-only pool includes servers failing
+            # their checks, so the recovery text must not claim they all pass
+            # when the point of the setting is that they need not. If the alert
+            # never fired (recovered inside the grace period), notify_transition
+            # sends nothing -- there is no open report to close.
             body = ("All %d server%s behind %s are passing their health checks."
                     % (total, "" if total == 1 else "s", label)) if not down else \
                    ("%d of %d servers behind %s pass the health check, which is how "
@@ -303,6 +325,9 @@ def check_services(cfg, data):
                 "service:" + name, "ok", "service",
                 "%s is %s again" % (label, "healthy" if not down else "serving"),
                 body, "info", cfg)
+    # A pool that vanished (deleted, renamed) leaves no grace timer behind.
+    for gone in [n for n in _down_since if n not in seen]:
+        _down_since.pop(gone, None)
 
 
 def history(pool=None, minutes=None):

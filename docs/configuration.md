@@ -582,6 +582,7 @@ is repeated every `repeat_hours` (6 by default) until it clears.
 | Setting | Meaning |
 | --- | --- |
 | Only at or above | `error` for breakage only; `warning` adds repairs; `info` adds recoveries and new versions |
+| Wait before alerting a service is down | grace period (30s by default) before a service losing servers is reported — a reboot or an update that takes it down for a few seconds is not paged at all. The clock starts when it first goes bad; 0 alerts on the first check. |
 | Categories | certificates, watchdog, apply, cluster, updates — each switchable |
 
 Each destination has a **Test** button that sends a real message. Settings are
