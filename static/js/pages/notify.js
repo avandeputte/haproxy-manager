@@ -1,4 +1,5 @@
 import { $, api, pageGuard, btn, closeDlg, esc, fieldRow, localTime, openDlg, readForm } from "../core.js";
+import { t } from "../i18n.js";
 
 /* ---- notifications ---- */
 export const NOTIFY_TYPES={
@@ -32,8 +33,8 @@ export async function renderNotify(){
 
   /* --- when to send --- */
   const w=document.createElement("div");w.className="card";
-  w.innerHTML='<div class=hd><h2>Notifications</h2><div class=sp></div>'+
-    '<span class="pill '+(st.enabled?"up":"off")+'">'+(st.enabled?"on":"off")+"</span></div>";
+  w.innerHTML='<div class=hd><h2>'+t("Notifications")+'</h2><div class=sp></div>'+
+    '<span class="pill '+(st.enabled?"up":"off")+'">'+(st.enabled?t("on"):t("off"))+"</span></div>";
   const wb=document.createElement("div");wb.className="bd";
   const WHEN=[
    {k:"enabled",l:"Send notifications",t:"bool"},
@@ -60,12 +61,12 @@ export async function renderNotify(){
                 ["cluster","A node stops answering, or split brain"],
                 ["updates","A new version is published"]];
   const evWrap=document.createElement("div");
-  evWrap.innerHTML='<div class=fl style="margin-top:6px">Tell me about</div>';
+  evWrap.innerHTML='<div class=fl style="margin-top:6px">'+t("Tell me about")+'</div>';
   EVENTS.forEach(([k,l])=>{
     const row=document.createElement("label");
     row.className="ckbox";row.style.cssText="display:flex;gap:8px;align-items:center;margin:3px 0";
     row.innerHTML='<input type=checkbox data-event="'+k+'"'+(ev[k]!==false?" checked":"")+
-      "><span>"+esc(l)+"</span>";
+      "><span>"+esc(t(l))+"</span>";
     evWrap.appendChild(row);
   });
   wb.appendChild(evWrap);
@@ -80,10 +81,10 @@ export async function renderNotify(){
     body.destinations=dests;
     Object.assign(body,extra||{});
     await api("notify","PUT",body);
-    wnote.textContent=msg||"Saved.";
+    wnote.textContent=msg||t("Saved.");
   };
-  wf.appendChild(btn("Save","pri",async()=>{
-    wnote.textContent="saving...";
+  wf.appendChild(btn(t("Save"),"pri",async()=>{
+    wnote.textContent=t("saving...");
     try{await save();renderNotify();}catch(e){wnote.textContent=e.message;}
   }));
   wf.appendChild(wnote);
@@ -92,45 +93,45 @@ export async function renderNotify(){
 
   /* --- where to send --- */
   const dc=document.createElement("div");dc.className="card";
-  dc.innerHTML='<div class=hd><h2>Destinations</h2><div class=sp></div></div>';
+  dc.innerHTML='<div class=hd><h2>'+t("Destinations")+'</h2><div class=sp></div></div>';
   const tbl=document.createElement("div");
   const draw=()=>{
     tbl.innerHTML="";
     if(!dests.length){
-      tbl.innerHTML='<div class=empty>Nowhere to send yet. Add a destination below, '+
-        "then use Test to prove it works before you need it.</div>";
+      tbl.innerHTML='<div class=empty>'+t("Nowhere to send yet. Add a destination below, "+
+        "then use Test to prove it works before you need it.")+"</div>";
       return;
     }
-    const t=document.createElement("table");
-    t.innerHTML="<thead><tr><th>Name</th><th>Type</th><th>Where</th><th>On</th><th></th></tr></thead>";
+    const table=document.createElement("table");
+    table.innerHTML="<thead><tr><th>"+t("Name")+"</th><th>"+t("Type")+"</th><th>"+t("Where")+"</th><th>"+t("On")+"</th><th></th></tr></thead>";
     const tb=document.createElement("tbody");
     dests.forEach((d,i)=>{
       const tr=document.createElement("tr");
-      const where=d.type==="smtp"?(d.to||"")+" via "+(d.host||"")
+      const where=d.type==="smtp"?t("{to} via {host}",{to:d.to||"",host:d.host||""})
         :d.type==="webhook"?(d.url||"")
-        :(d.has_token?"token set":"no token")+", "+(d.has_user?"user key set":"no user key");
-      tr.innerHTML="<td>"+esc(d.name||"—")+"</td><td>"+esc((NOTIFY_TYPES[d.type]||{}).label||d.type)+"</td>"+
+        :(d.has_token?t("token set"):t("no token"))+", "+(d.has_user?t("user key set"):t("no user key"));
+      tr.innerHTML="<td>"+esc(d.name||"—")+"</td><td>"+esc(t((NOTIFY_TYPES[d.type]||{}).label||d.type))+"</td>"+
         "<td class=mono style=font-size:12px>"+esc(where)+"</td>"+
-        "<td>"+(d.enabled===false?'<span class="pill off">no</span>':"yes")+"</td>";
+        "<td>"+(d.enabled===false?'<span class="pill off">'+t("no")+'</span>':t("yes"))+"</td>";
       const act=document.createElement("td");act.style.cssText="text-align:right;white-space:nowrap";
       const out=document.createElement("div");out.className="sub";
       out.style.cssText="text-align:right;margin-bottom:4px";
       act.appendChild(out);
-      act.appendChild(btn("Test","sm",async()=>{
-        if(!d.id){out.textContent="save it first";return;}
-        out.textContent="sending...";
+      act.appendChild(btn(t("Test"),"sm",async()=>{
+        if(!d.id){out.textContent=t("save it first");return;}
+        out.textContent=t("sending...");
         try{const r=await api("notify/test","POST",{id:d.id});
           out.innerHTML=r.ok?'<span style="color:var(--up)">'+esc(r.message)+"</span>"
                             :'<span style="color:var(--down)">'+esc(r.error)+"</span>";}
         catch(e){out.innerHTML='<span style="color:var(--down)">'+esc(e.message)+"</span>";}
       }));
-      act.appendChild(btn("Edit","sm",()=>editDest(i)));
-      act.appendChild(btn("Remove","sm dngr",async()=>{
-        dests.splice(i,1);await save(null,"Removed.");renderNotify();
+      act.appendChild(btn(t("Edit"),"sm",()=>editDest(i)));
+      act.appendChild(btn(t("Remove"),"sm dngr",async()=>{
+        dests.splice(i,1);await save(null,t("Removed."));renderNotify();
       }));
       tr.appendChild(act);tb.appendChild(tr);
     });
-    t.appendChild(tb);tbl.appendChild(t);
+    table.appendChild(tb);tbl.appendChild(table);
   };
   const editDest=(idx)=>{
     const d=idx===null?{type:"smtp",enabled:true,security:"starttls",port:"587"}:dests[idx];
@@ -159,15 +160,15 @@ export async function renderNotify(){
     paint(d.type);
     typeSel.onchange=e=>paint(e.target.value);
     const err=document.createElement("span");err.className="err";
-    openDlg(idx===null?"Add a destination":"Edit destination",body,[err,
-      btn("Cancel","",closeDlg),
-      btn("Save","pri",async()=>{
+    openDlg(idx===null?t("Add a destination"):t("Edit destination"),body,[err,
+      btn(t("Cancel"),"",closeDlg),
+      btn(t("Save"),"pri",async()=>{
         try{
           const vals=readForm(common.concat([{k:"type",t:"select"}])
                               .concat(NOTIFY_TYPES[typeSel.value].fields));
           const merged=Object.assign({},d,vals);
           if(idx===null)dests.push(merged); else dests[idx]=merged;
-          await save(null,"Saved.");
+          await save(null,t("Saved."));
           closeDlg();renderNotify();
         }catch(e){err.textContent=e.message;}
       })]);
@@ -176,7 +177,7 @@ export async function renderNotify(){
   dc.appendChild(tbl);
   const df=document.createElement("div");df.className="bd";
   df.style.cssText="border-top:1px solid var(--hair)";
-  df.appendChild(btn("Add a destination","pri",()=>editDest(null)));
+  df.appendChild(btn(t("Add a destination"),"pri",()=>editDest(null)));
   dc.appendChild(df);
   c.appendChild(dc);
 
@@ -184,13 +185,13 @@ export async function renderNotify(){
   const mq=st.mqtt||{};
   const hc=document.createElement("div");hc.className="card";
   hc.innerHTML='<div class=hd><h2>Home Assistant</h2><div class=sp></div>'+
-    '<span class="pill '+(mq.enabled?"up":"off")+'">'+(mq.enabled?"on":"off")+"</span></div>";
+    '<span class="pill '+(mq.enabled?"up":"off")+'">'+(mq.enabled?t("on"):t("off"))+"</span></div>";
   const hb=document.createElement("div");hb.className="bd";
-  hb.innerHTML='<p class=hint style="margin-bottom:14px">Publishes every service, published URL, '+
-    'certificate and node over MQTT with Home Assistant discovery: the entities appear by '+
-    "themselves, grouped under a device per node plus one for the cluster, and the broker marks "+
-    "them unavailable the moment a node dies. Shared across the cluster; each node reports itself, "+
-    "and whichever node holds the virtual IP reports the services.</p>";
+  hb.innerHTML='<p class=hint style="margin-bottom:14px">'+
+    t("Publishes every service, published URL, certificate and node over MQTT with Home Assistant "+
+      "discovery: the entities appear by themselves, grouped under a device per node plus one for the "+
+      "cluster, and the broker marks them unavailable the moment a node dies. Shared across the cluster; "+
+      "each node reports itself, and whichever node holds the virtual IP reports the services.")+"</p>";
   const HFIELDS=[
    {k:"enabled",l:"Publish to MQTT",t:"bool"},
    {k:"host",l:"Broker host",t:"text",h:"e.g. 192.168.1.50, or the name your broker answers to"},
@@ -211,19 +212,19 @@ export async function renderNotify(){
   hb.appendChild(hfrm);
   const hnote=document.createElement("span");hnote.className="hint";hnote.style.marginLeft="10px";
   const hfoot=document.createElement("div");hfoot.style.marginTop="16px";
-  hfoot.appendChild(btn("Save","pri",async()=>{
-    hnote.textContent="saving...";
+  hfoot.appendChild(btn(t("Save"),"pri",async()=>{
+    hnote.textContent=t("saving...");
     try{
       await api("notify","PUT",{mqtt:readForm(HFIELDS)});
-      hnote.textContent="Saved. The entities appear within a watchdog round.";
+      hnote.textContent=t("Saved. The entities appear within a watchdog round.");
     }catch(e){hnote.textContent=e.message;}
   }));
   hfoot.appendChild(document.createTextNode(" "));
-  hfoot.appendChild(btn("Test","",async()=>{
-    hnote.textContent="connecting...";
+  hfoot.appendChild(btn(t("Test"),"",async()=>{
+    hnote.textContent=t("connecting...");
     try{
       const r=await api("hass/test","POST",readForm(HFIELDS));
-      hnote.textContent=r.ok?r.message:(r.error||"failed");
+      hnote.textContent=r.ok?r.message:(r.error||t("failed"));
     }catch(e){hnote.textContent=e.message;}
   }));
   hfoot.appendChild(hnote);
@@ -233,12 +234,12 @@ export async function renderNotify(){
 
   /* --- what has been sent --- */
   const rc=document.createElement("div");rc.className="card";
-  rc.innerHTML='<div class=hd><h2>Recent attempts</h2></div>'+
+  rc.innerHTML='<div class=hd><h2>'+t("Recent attempts")+'</h2></div>'+
     ((n.recent||[]).length
-      ? "<table><thead><tr><th>When</th><th>Destination</th><th>Result</th></tr></thead><tbody>"+
+      ? "<table><thead><tr><th>"+t("When")+"</th><th>"+t("Destination")+"</th><th>"+t("Result")+"</th></tr></thead><tbody>"+
         n.recent.map(r=>"<tr><td class=mono style=white-space:nowrap>"+esc(localTime(r.time))+"</td>"+
           "<td>"+esc(r.destination)+"</td><td"+(r.ok?"":' style="color:var(--down)"')+">"+
-          esc(r.ok?"sent":r.detail)+"</td></tr>").join("")+"</tbody></table>"
-      : '<div class=empty>Nothing has been sent yet.</div>');
+          esc(r.ok?t("sent"):r.detail)+"</td></tr>").join("")+"</tbody></table>"
+      : '<div class=empty>'+t("Nothing has been sent yet.")+'</div>');
   c.appendChild(rc);
 }

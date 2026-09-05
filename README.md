@@ -71,6 +71,29 @@ the node's administrator so it survives a new browser, and also remembered
 locally so the page is painted in the right colours before it has asked the
 server anything.
 
+## In your language
+
+The interface speaks the language your browser asks for. It reads the
+browser's preference list the way any website does and uses the first entry
+it has a dictionary for: English, German, French, Spanish, Italian,
+Portuguese, Dutch, Swedish, Danish, Norwegian or Finnish. Nothing is stored
+and nothing is asked -- change the language in the browser and the next page
+load follows.
+
+Everything the UI itself writes is translated: the menu, every page, every
+form label and hint, dialogs, confirmations, the login screen, and the fixed
+phrases the API answers with ("no such user", "the password is not correct").
+What the node's own tools print stays as they print it: the output of
+`haproxy -c` and `keepalived -t`, acme.sh logs, and any message the server
+assembles around a value it is reporting.
+
+A dictionary is one file, `static/js/i18n/<code>.js`, keyed by the English
+string exactly as it appears in the source. `node tools/i18n-check.mjs`
+extracts every string the UI can show and refuses a dictionary that is
+missing one or drops a placeholder, and `tools/uitests/i18n.mjs` renders
+every page and dialog in German and fails on any English left behind -- so
+a string added to the source cannot quietly ship untranslated.
+
 ## On a phone
 
 The same application, laid out for the screen it is on rather than shrunk to

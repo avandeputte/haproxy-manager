@@ -1,4 +1,5 @@
 import { $, api, btn, esc, fieldRow, readForm } from "../core.js";
+import { t, tn } from "../i18n.js";
 import { refreshStatus } from "../shell.js";
 import { CERT_MODE_LABEL } from "../pages/services.js";
 
@@ -19,28 +20,25 @@ export const WEBUI_FIELDS=[
 export function blurb(cur){
   const here=(location.protocol||"http:")+"//"+location.host;
   const trim=u=>String(u||"").replace(/\/+$/,"").toLowerCase();
+  const at="<span class=mono>"+esc(here)+"</span>";
   if(cur.enabled&&trim(cur.shared_url)===trim(here))
-    return 'You are reading this through the shared address <span class=mono>'+esc(here)+
-      '</span>, which reaches whichever node currently holds the virtual IP.';
+    return t("You are reading this through the shared address {here}, which reaches whichever node currently holds the virtual IP.",{here:at});
   if(cur.enabled&&trim(cur.url)===trim(here))
-    return 'You are reading this through <span class=mono>'+esc(here)+
-      '</span>, which reaches this node specifically.';
+    return t("You are reading this through {here}, which reaches this node specifically.",{here:at});
   if(cur.enabled)
-    return 'This management UI is published over HTTPS, though you have reached it directly at '+
-      '<span class=mono>'+esc(here)+'</span> rather than through one of its names.';
-  return 'Publish this management UI as a normal service, so it is reachable by name over HTTPS '+
-    'instead of <span class=mono>'+esc(here)+'</span>.';
+    return t("This management UI is published over HTTPS, though you have reached it directly at {here} rather than through one of its names.",{here:at});
+  return t("Publish this management UI as a normal service, so it is reachable by name over HTTPS instead of {here}.",{here:at});
 }
 
 export async function renderWebui(){
   const c=$("#content");c.innerHTML="";
   const cur=await api("webui");
   const card=document.createElement("div");card.className="card";
-  card.innerHTML='<div class=hd><h2>Web UI access</h2></div>';
+  card.innerHTML='<div class=hd><h2>'+t("Web UI access")+'</h2></div>';
   const bd=document.createElement("div");bd.className="bd";
-  bd.innerHTML='<p class=hint style="margin-bottom:14px">'+blurb(cur)+' It builds the same objects the '+
-    'publish wizard would: a pool pointing at <span class=mono>127.0.0.1:'+esc(cur.port)+'</span>, a host rule, the HTTPS '+
-    'listener and a certificate.</p>';
+  bd.innerHTML='<p class=hint style="margin-bottom:14px">'+blurb(cur)+' '+
+    t("It builds the same objects the publish wizard would: a pool pointing at "+
+      "<span class=mono>127.0.0.1:{port}</span>, a host rule, the HTTPS listener and a certificate.",{port:esc(cur.port)})+'</p>';
   /* The setting says what should be published; this says what is. They come
      apart -- a name that stopped being published looks like the node being
      down, and the form still shows the address that was typed. */
@@ -51,14 +49,13 @@ export async function renderWebui(){
       .map(u=>String(u).replace(/^https?:\/\//,"").replace(/\/.*$/,"").toLowerCase());
     const have=cur.hosts||[];
     const missing=want.filter(h=>have.indexOf(h)<0);
-    state.innerHTML="This node answers for "+
-      (have.length?have.map(h=>'<span class=mono>'+esc(h)+"</span>").join(", ")
-                  :"<b>nothing</b>")+".";
+    state.innerHTML=t("This node answers for {names}.",{names:
+      have.length?have.map(h=>'<span class=mono>'+esc(h)+"</span>").join(", ")
+                 :"<b>"+t("nothing")+"</b>"});
     if(missing.length)
       state.innerHTML+=' <b style="color:var(--drift)">'+
-        missing.map(esc).join(", ")+(missing.length===1?" is":" are")+
-        " not routed here</b> — Save rebuilds the service and adds "+
-        (missing.length===1?"it":"them")+".";
+        tn(missing.length,"{names} is not routed here","{names} are not routed here",{names:missing.map(esc).join(", ")})+
+        "</b> — "+tn(missing.length,"Save rebuilds the service and adds it.","Save rebuilds the service and adds them.");
     bd.appendChild(state);
   }
   /* Where the names point. A name resolving somewhere this node is not looks
@@ -70,21 +67,20 @@ export async function renderWebui(){
   if((cur.extra_rules||[]).length){
     const box=document.createElement("div");box.className="hint";
     box.style.cssText="margin-bottom:14px";
-    box.innerHTML="This node has "+(cur.extra_rules.length+1)+" rules routing to its own "+
-      "UI service, which is why it appears more than once on the Services page. Both send "+
-      "traffic to the same place, so nothing is broken; the extra "+
-      (cur.extra_rules.length===1?"one is":"ones are")+" left over from an older version. "+
-      "The extra: "+cur.extra_rules.map(r=>"<span class=mono>"+esc(r.name)+"</span>"+
-        (r.hosts&&r.hosts.length?" ("+r.hosts.map(esc).join(", ")+")":"")).join(", ")+".";
-    const b=btn("Remove the extra rule"+(cur.extra_rules.length===1?"":"s"),"sm warn",async()=>{
-      if(!confirm("Remove "+cur.extra_rules.length+" leftover rule"+
-                  (cur.extra_rules.length===1?"":"s")+" routing to this node's UI service?\n\n"+
-                  "The rule this node uses is kept, and the service is rebuilt and applied "+
-                  "afterwards."))return;
-      b.disabled=true;b.textContent="removing...";
+    const n=cur.extra_rules.length;
+    box.innerHTML=t("This node has {n} rules routing to its own UI service, which is why it appears "+
+      "more than once on the Services page. Both send traffic to the same place, so nothing is broken; ",{n:n+1})+
+      tn(n,"the extra one is left over from an older version.","the extra ones are left over from an older version.")+" "+
+      t("The extra: {rules}.",{rules:cur.extra_rules.map(r=>"<span class=mono>"+esc(r.name)+"</span>"+
+        (r.hosts&&r.hosts.length?" ("+r.hosts.map(esc).join(", ")+")":"")).join(", ")});
+    const b=btn(tn(n,"Remove the extra rule","Remove the extra rules"),"sm warn",async()=>{
+      if(!confirm(tn(n,"Remove {n} leftover rule routing to this node's UI service?",
+                       "Remove {n} leftover rules routing to this node's UI service?")+"\n\n"+
+                  t("The rule this node uses is kept, and the service is rebuilt and applied afterwards.")))return;
+      b.disabled=true;b.textContent=t("removing...");
       try{const r=await api("webui/tidy","POST",{});
         await renderWebui();
-        if(r.applied&&r.applied.ok===false)alert("Removed, but Apply failed: "+(r.applied.error||""));
+        if(r.applied&&r.applied.ok===false)alert(t("Removed, but Apply failed: {error}",{error:r.applied.error||""}));
       }catch(e){alert(e.message);b.disabled=false;}
     });
     const row=document.createElement("div");row.style.marginTop="8px";row.appendChild(b);
@@ -106,7 +102,7 @@ export async function renderWebui(){
   });
   bd.appendChild(frm);
   const sel=frm.querySelector("#f_certificate");
-  if(sel)[...sel.options].forEach(o=>{o.textContent=CERT_MODE_LABEL[o.value]||o.value;});
+  if(sel)[...sel.options].forEach(o=>{o.textContent=t(CERT_MODE_LABEL[o.value]||o.value);});
   const sync=()=>{
     const on=frm.querySelector("#f_enabled").checked;
     ["url","shared_url","certificate","http_redirect"].forEach(k=>(rows[k]||[]).forEach(el=>{el.style.display=on?"":"none";}));
@@ -116,33 +112,33 @@ export async function renderWebui(){
   const out=document.createElement("div");out.style.marginTop="14px";
   const msg=document.createElement("div");msg.className="hint";msg.style.marginTop="12px";
   const foot=document.createElement("div");foot.style.marginTop="16px";
-  foot.appendChild(btn("Save","pri",async()=>{
+  foot.appendChild(btn(t("Save"),"pri",async()=>{
     const d=readForm(WEBUI_FIELDS);
-    msg.textContent="Saving...";out.innerHTML="";
+    msg.textContent=t("Saving...");out.innerHTML="";
     try{
       const r=await api("webui","POST",d);
-      msg.innerHTML=esc(r.note||"Saved.")+(r.url?' You should be able to reach it at <b>'+esc(r.url)+"</b> once DNS points here.":"");
+      msg.innerHTML=esc(r.note||t("Saved."))+(r.url?" "+t("You should be able to reach it at <b>{url}</b> once DNS points here.",{url:esc(r.url)}):"");
       if(r.actions&&r.actions.length){
         out.innerHTML="<table><tbody>"+r.actions.map(a=>"<tr><td style='width:90px'><span class='pill "+
-          (a.action==="created"?"up":a.action==="updated"?"warn":"off")+"'>"+esc(a.action)+"</span></td><td>"+
+          (a.action==="created"?"up":a.action==="updated"?"warn":"off")+"'>"+esc(t(a.action))+"</span></td><td>"+
           esc(a.type)+"</td><td class=mono>"+esc(a.name)+"</td></tr>").join("")+"</tbody></table>";
       }
       if(r.removed&&r.removed.length){
-        out.innerHTML="<table><tbody>"+r.removed.map(x=>"<tr><td style='width:90px'><span class='pill off'>removed</span></td><td>"+
+        out.innerHTML="<table><tbody>"+r.removed.map(x=>"<tr><td style='width:90px'><span class='pill off'>"+t("removed")+"</span></td><td>"+
           esc(x.type)+"</td><td class=mono>"+esc(x.name)+"</td></tr>").join("")+"</tbody></table>";
       }
       (r.warnings||[]).forEach(w=>{const d2=document.createElement("div");d2.className="hint";d2.style.marginTop="10px";
         d2.textContent="! "+w;out.appendChild(d2);});
-      if(r.applied)msg.innerHTML+=r.applied.ok?" Applied.":(" Apply FAILED: "+esc(r.applied.error||""));
+      if(r.applied)msg.innerHTML+=r.applied.ok?" "+t("Applied."):(" "+t("Apply FAILED: {error}",{error:esc(r.applied.error||"")}));
       refreshStatus();
     }catch(e){msg.textContent=e.message;}
   }));
   bd.appendChild(foot);bd.appendChild(msg);bd.appendChild(out);
   if(cur.exposed_directly){
     const w=document.createElement("p");w.className="hint";w.style.marginTop="16px";
-    w.innerHTML="This UI currently listens on <span class=mono>"+esc(cur.listen)+":"+esc(cur.port)+
-      "</span>, reachable from anywhere in plain HTTP. Once the HTTPS name works, set "+
-      "<span class=mono>HAM_LISTEN=127.0.0.1</span> in the service unit and restart it, so only HAProxy can reach the UI.";
+    w.innerHTML=t("This UI currently listens on <span class=mono>{addr}</span>, reachable from anywhere "+
+      "in plain HTTP. Once the HTTPS name works, set <span class=mono>HAM_LISTEN=127.0.0.1</span> in the "+
+      "service unit and restart it, so only HAProxy can reach the UI.",{addr:esc(cur.listen)+":"+esc(cur.port)});
     bd.appendChild(w);
   }
   card.appendChild(bd);c.appendChild(card);

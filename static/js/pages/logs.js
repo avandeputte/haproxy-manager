@@ -1,4 +1,5 @@
 import { $, api, download, esc } from "../core.js";
+import { t, tn } from "../i18n.js";
 import { state } from "../state.js";
 
 /* ---- logs ---- */
@@ -22,8 +23,8 @@ export async function refreshLogs(view,note){
   const stick=logState.follow||
               view.scrollTop+view.clientHeight>=view.scrollHeight-40;  /* at the bottom */
   if(!r.entries.length){
-    view.innerHTML='<div class=logempty>Nothing matches. Widen the filters, or wait for '+
-      'something to happen.</div>';
+    view.innerHTML='<div class=logempty>'+t("Nothing matches. Widen the filters, or wait for "+
+      "something to happen.")+'</div>';
   }else{
     view.innerHTML="<table><tbody>"+r.entries.map(e=>
       "<tr class="+e.level+"><td class=t>"+logStamp(e.ts)+"</td>"+
@@ -31,42 +32,42 @@ export async function refreshLogs(view,note){
       "<td class=m>"+esc(e.text)+"</td></tr>").join("")+"</tbody></table>";
   }
   if(stick)view.scrollTop=view.scrollHeight;
-  note.textContent=r.entries.length+" line"+(r.entries.length===1?"":"s")+
-    (r.failed.length?"  ·  unreadable: "+r.failed.join("; "):"");
+  note.textContent=tn(r.entries.length,"{n} line","{n} lines")+
+    (r.failed.length?"  ·  "+t("unreadable: {what}",{what:r.failed.join("; ")}):"");
   note.className=r.failed.length?"err":"hint";
 }
 export async function renderLogs(){
   const c=$("#content");c.innerHTML="";
   const card=document.createElement("div");card.className="card";
-  card.innerHTML='<div class=hd><h2>Logs</h2><div class=sp></div>'+
-    '<button class="btn ghost" id=logdl>Download</button></div>';
+  card.innerHTML='<div class=hd><h2>'+t("Logs")+'</h2><div class=sp></div>'+
+    '<button class="btn ghost" id=logdl>'+t("Download")+'</button></div>';
 
   const bar=document.createElement("div");bar.className="logbar";
   bar.innerHTML=[["manager","Web UI"],["haproxy","HAProxy"],["acme","acme.sh"],
                  ["keepalived","Keepalived"]].map(([k,l])=>
       '<label><input type=checkbox data-src="'+k+'"'+(logState.sources[k]?" checked":"")+
-      '> <span class="src-'+k+'" style="font-weight:600">'+l+"</span></label>").join("")+
+      '> <span class="src-'+k+'" style="font-weight:600">'+esc(t(l))+"</span></label>").join("")+
     '<span style="flex:1"></span>'+
-    '<label>Level <select id=loglevel><option value=DEBUG>everything</option>'+
-      '<option value=INFO>info and above</option><option value=WARNING>warnings and errors</option>'+
-      '<option value=ERROR>errors only</option></select></label>'+
-    '<label>Lines <select id=loglines><option>100</option><option>300</option>'+
+    '<label>'+t("Level")+' <select id=loglevel><option value=DEBUG>'+t("everything")+'</option>'+
+      '<option value=INFO>'+t("info and above")+'</option><option value=WARNING>'+t("warnings and errors")+'</option>'+
+      '<option value=ERROR>'+t("errors only")+'</option></select></label>'+
+    '<label>'+t("Lines")+' <select id=loglines><option>100</option><option>300</option>'+
       '<option>1000</option><option>2000</option></select></label>'+
-    '<label><input type=search id=logq placeholder="search text" style="width:170px"></label>'+
-    '<label><input type=checkbox id=logfollow'+(logState.follow?" checked":"")+"> follow</label>";
+    '<label><input type=search id=logq placeholder="'+esc(t("search text"))+'" style="width:170px"></label>'+
+    '<label><input type=checkbox id=logfollow'+(logState.follow?" checked":"")+"> "+t("follow")+"</label>";
   card.appendChild(bar);
 
   const view=document.createElement("div");view.className="logview";
-  view.innerHTML='<div class=logempty>Loading...</div>';
+  view.innerHTML='<div class=logempty>'+t("Loading...")+'</div>';
   card.appendChild(view);
   const foot=document.createElement("div");foot.className="bd";
   const note=document.createElement("div");note.className="hint";
-  note.textContent="Loading...";
+  note.textContent=t("Loading...");
   foot.appendChild(note);
   foot.insertAdjacentHTML("beforeend",
-    '<div class=hint style="margin-top:6px">HAProxy and Keepalived are read from the '+
-    'system journal, acme.sh from its own log and the record of each issuance. '+
-    'Timestamps are this node\'s.</div>');
+    '<div class=hint style="margin-top:6px">'+
+    t("HAProxy and Keepalived are read from the system journal, acme.sh from its own log "+
+      "and the record of each issuance. Timestamps are this node's.")+'</div>');
   card.appendChild(foot);
   c.appendChild(card);
 

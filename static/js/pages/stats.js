@@ -1,4 +1,5 @@
 import { $, api, pageGuard, esc } from "../core.js";
+import { t } from "../i18n.js";
 import { trafficSpark } from "../sparkline.js";
 import { state } from "../state.js";
 
@@ -62,7 +63,7 @@ export async function renderStats(){
   catch(e){if(fresh())c.innerHTML='<div class="card"><div class="bd">'+esc(e.message)+"</div></div>";return;}
   if(!fresh())return;   // navigated away while the stats were loading
   if(!st.ok){
-    c.innerHTML='<div class="card"><div class=hd><h2>Statistics</h2></div><div class="bd"><p class=hint>'+esc(st.error)+"</p></div></div>";
+    c.innerHTML='<div class="card"><div class=hd><h2>'+t("Statistics")+'</h2></div><div class="bd"><p class=hint>'+esc(st.error)+"</p></div></div>";
     return;
   }
 
@@ -77,38 +78,37 @@ export async function renderStats(){
 
   const cards=[];
   if(historyHtml)cards.push({key:"traffic",html:historyHtml});
-  cards.push({key:"listeners",html:'<div class=hd><h2>Listeners</h2><div class=sp></div><span class=hint>refreshes every 5s</span></div>'+
-    (st.frontends.length?"<table><thead><tr><th>Name</th><th>Status</th><th>Sessions</th><th>Rate</th>"+
-      "<th>In</th><th>Out</th><th>Denied</th><th>Errors</th></tr></thead><tbody>"+
+  const th=keys=>"<thead><tr>"+keys.map(k=>"<th>"+t(k)+"</th>").join("")+"</tr></thead>";
+  cards.push({key:"listeners",html:'<div class=hd><h2>'+t("Listeners")+'</h2><div class=sp></div><span class=hint>'+t("refreshes every 5s")+'</span></div>'+
+    (st.frontends.length?"<table>"+th(["Name","Status","Sessions","Rate","In","Out","Denied","Errors"])+"<tbody>"+
       st.frontends.map(f=>"<tr><td class=mono>"+esc(f.proxy)+"</td><td>"+statusPill(f.status)+"</td>"+
-        "<td>"+num(f.scur)+" <span class=sub>max "+num(f.smax)+", total "+num(f.stot)+"</span></td>"+
-        "<td>"+num(f.rate)+"/s <span class=sub>max "+num(f.rate_max)+"</span></td>"+
+        "<td>"+num(f.scur)+" <span class=sub>"+t("max {max}, total {total}",{max:num(f.smax),total:num(f.stot)})+"</span></td>"+
+        "<td>"+num(f.rate)+"/s <span class=sub>"+t("max {max}",{max:num(f.rate_max)})+"</span></td>"+
         "<td>"+bytes(f.bin)+"</td><td>"+bytes(f.bout)+"</td>"+
         "<td>"+num(f.dreq)+"</td><td>"+num(f.ereq)+"</td></tr>").join("")+"</tbody></table>"
-     :'<div class=empty>No listeners are running. Publish a service and press Apply.</div>')});
+     :'<div class=empty>'+t("No listeners are running. Publish a service and press Apply.")+'</div>')});
 
   st.backends.forEach(be=>{
     const allUp=be.servers_total&&be.servers_up===be.servers_total;
     cards.push({key:"be:"+be.proxy,html:'<div class=hd><h2>'+esc(be.proxy)+'</h2><div class=sp></div>'+
         statusPill(be.status)+' <span class="pill '+(be.servers_total?(allUp?"up":be.servers_up?"warn":"down"):"off")+'">'+
-        be.servers_up+"/"+be.servers_total+" up</span></div>"+
-      "<table><thead><tr><th>Server</th><th>Status</th><th>Role</th><th>Sessions</th><th>Queue</th>"+
-      "<th>In</th><th>Out</th><th>Last check</th><th>Flaps</th><th>Downtime</th></tr></thead><tbody>"+
+        t("{up}/{total} up",{up:be.servers_up,total:be.servers_total})+"</span></div>"+
+      "<table>"+th(["Server","Status","Role","Sessions","Queue","In","Out","Last check","Flaps","Downtime"])+"<tbody>"+
       (be.servers.length?be.servers.map(s=>"<tr>"+
         "<td class=mono>"+esc(s.name)+(s.addr?"<div class=sub>"+esc(s.addr)+"</div>":"")+"</td>"+
-        "<td>"+statusPill(s.status)+"<div class=sub>for "+since(s.lastchg)+"</div></td>"+
-        "<td>"+(s.bck==="1"?"backup":"active")+"<div class=sub>weight "+esc(s.weight||"")+"</div></td>"+
-        "<td>"+num(s.scur)+" <span class=sub>max "+num(s.smax)+", total "+num(s.stot)+"</span></td>"+
+        "<td>"+statusPill(s.status)+"<div class=sub>"+t("for {since}",{since:since(s.lastchg)})+"</div></td>"+
+        "<td>"+(s.bck==="1"?t("backup"):t("active"))+"<div class=sub>"+t("weight {weight}",{weight:esc(s.weight||"")})+"</div></td>"+
+        "<td>"+num(s.scur)+" <span class=sub>"+t("max {max}, total {total}",{max:num(s.smax),total:num(s.stot)})+"</span></td>"+
         "<td>"+num(s.qcur)+"</td><td>"+bytes(s.bin)+"</td><td>"+bytes(s.bout)+"</td>"+
         "<td>"+esc(s.check_status||"—")+(s.check_code?" <span class=sub>"+esc(s.check_code)+"</span>":"")+
           (s.check_duration?"<div class=sub>"+esc(s.check_duration)+" ms</div>":"")+"</td>"+
-        "<td>"+num(s.chkfail)+" fail <span class=sub>"+num(s.chkdown)+" down</span></td>"+
+        "<td>"+t("{n} fail",{n:num(s.chkfail)})+" <span class=sub>"+t("{n} down",{n:num(s.chkdown)})+"</span></td>"+
         "<td>"+since(s.downtime)+"</td></tr>").join("")
-        :'<tr><td colspan=10 class=sub style="padding:14px 12px">This pool has no servers.</td></tr>')+
-      "<tr><td class=mono><b>total</b></td><td>"+statusPill(be.status)+"</td><td>"+esc(be.algo||"")+"</td>"+
-        "<td>"+num(be.scur)+" <span class=sub>total "+num(be.stot)+"</span></td><td>"+num(be.qcur)+"</td>"+
+        :'<tr><td colspan=10 class=sub style="padding:14px 12px">'+t("This pool has no servers.")+'</td></tr>')+
+      "<tr><td class=mono><b>"+t("total")+"</b></td><td>"+statusPill(be.status)+"</td><td>"+esc(be.algo||"")+"</td>"+
+        "<td>"+num(be.scur)+" <span class=sub>"+t("total {total}",{total:num(be.stot)})+"</span></td><td>"+num(be.qcur)+"</td>"+
         "<td>"+bytes(be.bin)+"</td><td>"+bytes(be.bout)+"</td><td>—</td>"+
-        "<td>"+num(be.econ)+" conn err</td><td>"+since(be.downtime)+"</td></tr>"+
+        "<td>"+t("{n} conn err",{n:num(be.econ)})+"</td><td>"+since(be.downtime)+"</td></tr>"+
       "</tbody></table>"});
   });
 
@@ -129,22 +129,21 @@ function historyCard(h){
             req:(s.req||[]).reduce((a,b)=>a+b,0),
             err:(s.e5||[]).reduce((a,b)=>a+b,0)};
   }).filter(r=>r.req||r.err).sort((a,b)=>b.req-a.req);
-  const head='<div class=hd><h2>Traffic</h2><div class=sp></div>'+
-    "<span class=hint>"+esc(h.span)+" of history, one point a minute</span></div>";
+  const head='<div class=hd><h2>'+t("Traffic")+'</h2><div class=sp></div>'+
+    "<span class=hint>"+t("{span} of history, one point a minute",{span:esc(h.span)})+"</span></div>";
   if(!rows.length)
-    return head+'<div class="bd"><p class=hint>Nothing has been served yet in the '+
-      "recorded window.</p></div>";
-  return head+'<div class="bd"><table><thead><tr><th>Pool</th><th>Traffic</th>'+
-    "<th>Requests</th><th>Server errors</th><th>Busiest minute</th></tr></thead><tbody>"+
+    return head+'<div class="bd"><p class=hint>'+t("Nothing has been served yet in the recorded window.")+"</p></div>";
+  return head+'<div class="bd"><table><thead><tr><th>'+t("Pool")+'</th><th>'+t("Traffic")+'</th>'+
+    "<th>"+t("Requests")+"</th><th>"+t("Server errors")+"</th><th>"+t("Busiest minute")+"</th></tr></thead><tbody>"+
     rows.map(r=>{
       const peak=Math.max(0,...(r.s.req||[]));
       return "<tr><td class=mono>"+esc(r.name.replace(/^b[ek]_/,""))+"</td>"+
         "<td>"+trafficSpark(r.s,{width:220,height:28})+"</td>"+
         "<td>"+num(r.req)+"</td>"+
         "<td>"+(r.err?'<span style="color:var(--down)">'+num(r.err)+"</span>":"0")+"</td>"+
-        "<td>"+num(peak)+" <span class=sub>req/min</span></td></tr>";
+        "<td>"+num(peak)+" <span class=sub>"+t("req/min")+"</span></td></tr>";
     }).join("")+"</tbody></table>"+
-    '<div class=hint style="padding:8px 16px">Collected on this node only, and '+
-    "only while it is running &mdash; a gap in the line is a gap in the recording, "+
-    "not in the traffic.</div></div>";
+    '<div class=hint style="padding:8px 16px">'+
+    t("Collected on this node only, and only while it is running &mdash; a gap in the line "+
+      "is a gap in the recording, not in the traffic.")+"</div></div>";
 }

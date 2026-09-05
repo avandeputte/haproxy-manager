@@ -2,6 +2,7 @@
 import { refreshWho, showLogin } from "./auth.js";
 import { $, enhanceTables } from "./core.js";
 import { E, renderEntity, renderSettings } from "./entities.js";
+import { initLanguage, translateStatic } from "./i18n.js";
 import { renderAcmeSettings } from "./pages/acme.js";
 import { renderBackup } from "./pages/backup.js";
 import { renderCluster } from "./pages/cluster.js";
@@ -18,6 +19,13 @@ import { renderWatchdog } from "./pages/watchdog.js";
 import { renderWebui } from "./pages/webui.js";
 import { state } from "./state.js";
 import { boot, buildNav, doApply, route, setPages, setRenderers, wireNav } from "./shell.js";
+
+/* The language first, and before anything else runs: every label below is
+   drawn in it, and a menu painted in English and repainted a moment later in
+   German is the kind of flicker nobody should have to see. The module waits
+   here, so main.js is not evaluated until the dictionary is in. */
+await initLanguage();
+translateStatic();
 
 const P={acme:renderAcmeSettings,services:renderServices,stats:renderStats,backup:renderBackup,
          updates:renderUpdates,webui:renderWebui,cluster:renderCluster,logs:renderLogs,history:renderHistory,

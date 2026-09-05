@@ -5,6 +5,7 @@
  * refreshStatus(), and only main.js knows what all the pages are.
  */
 import { $, api, btn, esc, showText } from "./core.js";
+import { t } from "./i18n.js";
 import { state } from "./state.js";
 
 let pages = {};        /* "p:" pages, keyed by name */
@@ -17,6 +18,9 @@ let render = {};       /* the generic renderers, and the entity definitions */
 export function setPages(map){ pages = map; }
 export function setRenderers(r){ render = r; }
 
+/* English here; the labels are translated where they are drawn. The group
+   labels double as the key the collapsed state is remembered under, which is
+   why that stays in English whatever the page speaks. */
 export const NAV=[
  ["","Overview",null],
  ["p:services","Services"],
@@ -72,12 +76,12 @@ export function buildNav(){
   NAV.forEach(([key,label,opt])=>{
     if(key==="grp"){
       if(opt!=="collapse"){
-        const g=document.createElement("div");g.className="grp";g.textContent=label;
+        const g=document.createElement("div");g.className="grp";g.textContent=t(label);
         n.appendChild(g);bucket=null;return;
       }
       const head=document.createElement("button");
       head.className="grp";head.type="button";head.dataset.group=label;
-      head.innerHTML='<span class=caret>&#9656;</span><span>'+esc(label)+"</span><span class=count></span>";
+      head.innerHTML='<span class=caret>&#9656;</span><span>'+esc(t(label))+"</span><span class=count></span>";
       const body=document.createElement("div");body.className="grp-body";
       head.setAttribute("aria-expanded","false");body.hidden=true;
       head.onclick=()=>toggleGroup(head);
@@ -86,7 +90,7 @@ export function buildNav(){
       if(remembered.includes(label))toggleGroup(head,true);
       return;
     }
-    const a=document.createElement("a");a.className="item";a.href="#/"+key;a.textContent=label;a.dataset.key=key;
+    const a=document.createElement("a");a.className="item";a.href="#/"+key;a.textContent=t(label);a.dataset.key=key;
     (bucket||n).appendChild(a);
     if(bucket){
       /* the count badge is decoration; do not take the whole menu down for it */
@@ -143,7 +147,7 @@ async function draw(){
     }
   });
   const entry=NAV.find(x=>x[0]===key)||NAV[0];
-  $("#pagetitle").textContent=entry[1];
+  $("#pagetitle").textContent=t(entry[1]);
   try{
     if(key.startsWith("s:"))await render.settings(key.slice(2));
     else if(key.startsWith("p:"))await pages[key.slice(2)]();
@@ -159,12 +163,12 @@ export async function refreshStatus(){
     $("#brandhost").textContent=st.hostname+(st.version?" · v"+st.version:"");
     const ns=$("#nodestrip");ns.innerHTML="";
     const role=document.createElement("span");
-    role.className="chip role-"+st.role;role.textContent=st.role.toUpperCase()+(st.vip_held.length?" · "+st.vip_held[0]:"");
+    role.className="chip role-"+st.role;role.textContent=t(st.role).toUpperCase()+(st.vip_held.length?" · "+st.vip_held[0]:"");
     ns.appendChild(role);
-    if(st.dirty){const d=document.createElement("span");d.className="chip drift";d.textContent="unapplied changes";ns.appendChild(d);}
+    if(st.dirty){const d=document.createElement("span");d.className="chip drift";d.textContent=t("unapplied changes");ns.appendChild(d);}
     if(st.update_available){
       const u=document.createElement("a");u.className="chip drift";u.href="#/p:updates";
-      u.style.textDecoration="none";u.textContent="v"+st.latest_version+" available";
+      u.style.textDecoration="none";u.textContent=t("v{version} available",{version:st.latest_version});
       ns.appendChild(u);
     }
     renderBanner(st);
@@ -173,21 +177,21 @@ export async function refreshStatus(){
   }catch(e){/* not fatal */}
 }
 export async function doApply(){
-  const b=$("#applybtn");b.disabled=true;b.textContent="Applying...";
+  const b=$("#applybtn");b.disabled=true;b.textContent=t("Applying...");
   try{
     const r=await api("apply","POST",{});
     const warn=r.warnings||[];
     let text="";
-    if(!r.ok)text+="FAILED: "+(r.error||"")+"\n\n";
-    else if(warn.length)text+="HAProxy was applied, but something else needs attention:\n\n";
-    else text+="Applied.\n\n";
+    if(!r.ok)text+=t("FAILED: {error}",{error:r.error||""})+"\n\n";
+    else if(warn.length)text+=t("HAProxy was applied, but something else needs attention:")+"\n\n";
+    else text+=t("Applied.")+"\n\n";
     if(warn.length)text+=warn.map(w=>"!! "+w).join("\n\n")+"\n\n";
     text+=(r.steps||[]).map(s=>"* "+s).join("\n")+
-      "\n\n--- haproxy -c output ---\n"+(r.haproxy_check||"(none)")+
-      (r.keepalived_check?"\n\n--- keepalived -t output ---\n"+r.keepalived_check:"");
-    showText(!r.ok?"Apply failed":warn.length?"Applied with problems":"Configuration applied",text);
-  }catch(e){showText("Apply failed",e.message);}
-  b.disabled=false;b.textContent="Apply";
+      "\n\n--- "+t("haproxy -c output")+" ---\n"+(r.haproxy_check||t("(none)"))+
+      (r.keepalived_check?"\n\n--- "+t("keepalived -t output")+" ---\n"+r.keepalived_check:"");
+    showText(!r.ok?t("Apply failed"):warn.length?t("Applied with problems"):t("Configuration applied"),text);
+  }catch(e){showText(t("Apply failed"),e.message);}
+  b.disabled=false;b.textContent=t("Apply");
   refreshStatus();
   if(!location.hash||location.hash==="#/")route();
 }
@@ -202,22 +206,23 @@ export function renderBanner(st){
   const box=document.createElement("div");box.className="ro";
   const txt=document.createElement("div");
   txt.innerHTML=state.readOnly
-    ? "<b>Read-only: this node is passive</b>"+esc(st.read_only_reason||"")
-    : "<b>Editing is unlocked on this passive node</b>Another node holds the virtual IP. "+
-      "Anything changed here will be overwritten the next time that node pushes, so make the "+
-      "change there once it is reachable again.";
+    ? "<b>"+t("Read-only: this node is passive")+"</b>"+esc(st.read_only_reason||"")
+    : "<b>"+t("Editing is unlocked on this passive node")+"</b>"+
+      t("Another node holds the virtual IP. "+
+        "Anything changed here will be overwritten the next time that node pushes, so make the "+
+        "change there once it is reachable again.");
   box.appendChild(txt);
   const act=state.readOnly
-    ? btn("Edit here anyway","sm",async()=>{
-        if(!confirm("Allow editing the shared configuration on this passive node?\n\n"+
-                    "Use this when no node holds the virtual IP, or when you are deliberately "+
-                    "working here. Whatever you change must still be pushed to the others, and "+
-                    "the active node's copy will overwrite this one if it pushes first.\n\n"+
-                    "This lasts for this sign-in only: logging out or back in locks it again."))return;
+    ? btn(t("Edit here anyway"),"sm",async()=>{
+        if(!confirm(t("Allow editing the shared configuration on this passive node?\n\n"+
+                      "Use this when no node holds the virtual IP, or when you are deliberately "+
+                      "working here. Whatever you change must still be pushed to the others, and "+
+                      "the active node's copy will overwrite this one if it pushes first.\n\n"+
+                      "This lasts for this sign-in only: logging out or back in locks it again.")))return;
         try{await api("unlock","POST",{on:true});refreshStatus();route();}
         catch(e){alert(e.message);}
       })
-    : btn("Lock again","sm",async()=>{
+    : btn(t("Lock again"),"sm",async()=>{
         try{await api("unlock","POST",{on:false});refreshStatus();route();}
         catch(e){alert(e.message);}
       });

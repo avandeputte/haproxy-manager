@@ -1,9 +1,10 @@
 import { setUnauthorisedHandler } from "./core.js";
 import { $, api, btn, closeDlg, esc, fieldEl, fieldRow, openDlg } from "./core.js";
+import { t, tn } from "./i18n.js";
 import { boot } from "./shell.js";
 import { maybeSetupWizard } from "./pages/setup.js";
 import { state } from "./state.js";
-import { THEMES, applyTheme, currentTheme } from "./theme.js";
+import { applyTheme, currentTheme } from "./theme.js";
 
 /* ---- authentication ---- */
 
@@ -19,13 +20,13 @@ export function showLogin(setup){
   if($("#login").classList.contains("show"))return;
   const s=setup!==undefined?setup:state.who.needs_setup;
   $("#lcodewrap").hidden=true;$("#lcode").value="";
-  $("#logintitle").textContent=s?"Create an administrator":"Sign in";
+  $("#logintitle").textContent=s?t("Create an administrator"):t("Sign in");
   $("#loginintro").textContent=s
-    ? "This node has no administrator yet. Choose the credentials you will use to sign in."
-    : "haproxy-manager on "+location.host;
+    ? t("This node has no administrator yet. Choose the credentials you will use to sign in.")
+    : t("haproxy-manager on {host}",{host:location.host});
   $("#lp2wrap").hidden=!s;
   $("#lp").autocomplete=s?"new-password":"current-password";
-  $("#lbtn").textContent=s?"Create and sign in":"Sign in";
+  $("#lbtn").textContent=s?t("Create and sign in"):t("Sign in");
   $("#lerr").textContent="";
   if(!s&&state.who.admin_username)$("#lu").value=state.who.admin_username;   // only once signed in before
   $("#login").classList.add("show");
@@ -51,29 +52,31 @@ async function openTwoFactor(){
   let setup;
   try{setup=await api("2fa/setup","POST",{});}catch(e){alert(e.message);return;}
   const wrap=document.createElement("div");
-  wrap.innerHTML='<p class=hint style="margin-bottom:12px">Scan this with an authenticator app '+
-    '(Aegis, Google Authenticator, 1Password...), then enter the six digits it shows to prove '+
-    'the phone holds the secret. Nothing changes until then.</p>'+
+  wrap.innerHTML='<p class=hint style="margin-bottom:12px">'+
+    t("Scan this with an authenticator app (Aegis, Google Authenticator, 1Password...), then "+
+      "enter the six digits it shows to prove the phone holds the secret. Nothing changes until then.")+
+    "</p>"+
     '<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">'+qrSvg(setup.matrix)+
-    '<div style="min-width:200px;flex:1"><div class=fl>Or enter it by hand</div>'+
+    '<div style="min-width:200px;flex:1"><div class=fl>'+t("Or enter it by hand")+'</div>'+
     '<div class=mono style="word-break:break-all;margin:6px 0 14px">'+esc(setup.secret)+"</div>"+
-    '<label class=fl for="f_totp_code">Code from the app</label>'+
+    '<label class=fl for="f_totp_code">'+t("Code from the app")+'</label>'+
     '<input id="f_totp_code" data-field="totp_code" inputmode="numeric" autocomplete="one-time-code" '+
     'style="width:120px;padding:7px 9px;border:1px solid var(--hair);border-radius:4px;'+
     'background:var(--field);color:var(--ink);font:15px var(--mono);margin-top:6px">'+
     "</div></div>";
   const err=document.createElement("div");err.className="err";
-  openDlg("Two-factor authentication",wrap,[err,btn("Cancel","",()=>{closeDlg();openAccount();}),
-    btn("Verify and turn on","pri",async()=>{
+  openDlg(t("Two-factor authentication"),wrap,[err,btn(t("Cancel"),"",()=>{closeDlg();openAccount();}),
+    btn(t("Verify and turn on"),"pri",async()=>{
       err.textContent="";
       try{
         const r=await api("2fa/enable","POST",{secret:setup.secret,code:fieldEl("totp_code").value});
         const done=document.createElement("div");
-        done.innerHTML='<p class=hint style="margin-bottom:10px">Two-factor authentication is on. '+
-          "These recovery codes each work once, in place of a code, if the phone is gone. "+
-          "<b>Keep them somewhere that is not the phone</b> \u2014 they are shown only now.</p>"+
+        done.innerHTML='<p class=hint style="margin-bottom:10px">'+
+          t("Two-factor authentication is on. These recovery codes each work once, in place of a "+
+            "code, if the phone is gone. <b>Keep them somewhere that is not the phone</b> \u2014 "+
+            "they are shown only now.")+"</p>"+
           '<pre style="user-select:all">'+r.recovery.map(esc).join("\n")+"</pre>";
-        openDlg("Recovery codes",done,[btn("I have saved them","pri",async()=>{
+        openDlg(t("Recovery codes"),done,[btn(t("I have saved them"),"pri",async()=>{
           closeDlg();await refreshWho();})]);
       }catch(e){err.textContent=e.message;}
     })]);
@@ -86,9 +89,9 @@ async function disableTwoFactor(){
             h:"Turning the second factor off changes how you sign in, so it asks for the password."},"")
     .forEach(el=>wrap.appendChild(el));
   const err=document.createElement("div");err.className="err";
-  openDlg("Turn off two-factor authentication",wrap,[err,
-    btn("Cancel","",()=>{closeDlg();openAccount();}),
-    btn("Turn off","warn",async()=>{
+  openDlg(t("Turn off two-factor authentication"),wrap,[err,
+    btn(t("Cancel"),"",()=>{closeDlg();openAccount();}),
+    btn(t("Turn off"),"warn",async()=>{
       try{
         await api("2fa/disable","POST",{password:fieldEl("pw_off").value});
         closeDlg();await refreshWho();openAccount();
@@ -104,7 +107,8 @@ export function openAccount(){
   const fields=[
     {k:"username",l:"Username",t:"text"},
     {k:"email",l:"Email",t:"text",h:"Optional. Offered as the default for ACME accounts and notifications."},
-    {k:"theme",l:"Appearance",t:"select",o:THEMES,d:"system",
+    {k:"theme",l:"Appearance",t:"select",d:"system",
+     o:[{value:"system",label:"system"},{value:"light",label:"light"},{value:"dark",label:"dark"}],
      h:"system follows what this machine is set to. Kept with your account, so it "+
        "follows you to another browser."},
     {k:"current",l:"Current password",t:"password",h:"Only needed to change the password"},
@@ -117,8 +121,8 @@ export function openAccount(){
      somewhere to send it. */
   const peers=state.who.peers||0;
   if(peers)fields.push({k:"propagate",l:"Apply to the other nodes",t:"bool",d:true,
-    h:"Sends the new login to the "+peers+" other node"+(peers===1?"":"s")+
-      ". Only the stored hash travels, never the password."});
+    h:tn(peers,"Sends the new login to the {n} other node. Only the stored hash travels, never the password.",
+               "Sends the new login to the {n} other nodes. Only the stored hash travels, never the password.")});
   fields.forEach(f=>fieldRow(f,f.k==="username"?(state.who.username||state.who.admin_username)
                              :f.k==="email"?(state.who.email||"")
                              :f.k==="theme"?currentTheme()
@@ -127,18 +131,18 @@ export function openAccount(){
   const err=document.createElement("div");err.className="err";
   const out=document.createElement("div");out.className="hint";out.style.marginTop="10px";
   /* The second factor: a state and one action, not a form. */
-  const tfLab=document.createElement("label");tfLab.className="fl";tfLab.textContent="Two-factor";
+  const tfLab=document.createElement("label");tfLab.className="fl";tfLab.textContent=t("Two-factor");
   const tfCell=document.createElement("div");
   const on=!!state.who.totp_enabled;
   tfCell.innerHTML='<span class="pill '+(on?"up":"off")+'" style="margin-right:10px">'+
-    (on?"on":"off")+"</span>";
-  tfCell.appendChild(btn(on?"Turn off...":"Set up...","sm",()=>{closeDlg();
+    (on?t("on"):t("off"))+"</span>";
+  tfCell.appendChild(btn(on?t("Turn off..."):t("Set up..."),"sm",()=>{closeDlg();
     (on?disableTwoFactor:openTwoFactor)();}));
   const tfHint=document.createElement("div");tfHint.className="hint";
   tfHint.textContent=on
-    ?"Signing in asks for a code from your authenticator app. Lost phone: a recovery code, "+
-     "or app.py disable-2fa on the node's shell."
-    :"Ask for a six-digit code from an authenticator app at every sign-in.";
+    ?t("Signing in asks for a code from your authenticator app. Lost phone: a recovery code, "+
+       "or app.py disable-2fa on the node's shell.")
+    :t("Ask for a six-digit code from an authenticator app at every sign-in.");
   tfCell.appendChild(tfHint);
   body.appendChild(tfLab);body.appendChild(tfCell);
   body.appendChild(out);
@@ -151,12 +155,12 @@ export function openAccount(){
     const el=fieldEl("theme");
     if(el)el.addEventListener("change",()=>applyTheme(el.value));
   };
-  openDlg("Account",body,[err,btn("Cancel","",()=>{applyTheme(wasTheme);closeDlg();}),
-    btn("Save","pri",async()=>{
+  openDlg(t("Account"),body,[err,btn(t("Cancel"),"",()=>{applyTheme(wasTheme);closeDlg();}),
+    btn(t("Save"),"pri",async()=>{
       const val=k=>{const el=fieldEl(k);return el?el.value:"";};
       const nw=val("new");
-      if(nw&&nw!==val("new2")){err.textContent="The two new passwords do not match.";return;}
-      if(nw&&!val("current")){err.textContent="Enter the current password to change it.";return;}
+      if(nw&&nw!==val("new2")){err.textContent=t("The two new passwords do not match.");return;}
+      if(nw&&!val("current")){err.textContent=t("Enter the current password to change it.");return;}
       const box=fieldEl("propagate");
       try{
         const r=await api("password","POST",{username:val("username").trim(),email:val("email").trim(),
@@ -167,9 +171,8 @@ export function openAccount(){
         if(failed.length){
           /* Saved here either way: the local change is done and reporting it as
              a failure would be worse than telling you exactly which node to fix. */
-          err.innerHTML="Saved on this node, but not on "+
-            failed.map(n=>"<b>"+esc(n.name)+"</b>: "+esc(n.error||"")).join("; ")+
-            ". Those nodes keep the old login until you change it there.";
+          err.innerHTML=t("Saved on this node, but not on {nodes}. Those nodes keep the old login until you change it there.",
+            {nodes:failed.map(n=>"<b>"+esc(n.name)+"</b>: "+esc(n.error||"")).join("; ")});
           out.textContent="";
           return;
         }
@@ -187,13 +190,13 @@ export async function refreshWho(){
   const f=$("#whofoot");f.innerHTML="";
   if(state.who.authenticated){
     const d=document.createElement("div");d.className="who";
-    d.innerHTML="<small>Signed in as</small>"+esc(state.who.username);
+    d.innerHTML="<small>"+t("Signed in as")+"</small>"+esc(state.who.username);
     const g=document.createElement("button");g.className="lo gear";
-    g.title="Account";g.setAttribute("aria-label","Account settings");
+    g.title=t("Account");g.setAttribute("aria-label",t("Account settings"));
     g.innerHTML='<svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">'+
       '<path fill="currentColor" fill-rule="evenodd" d="M6.27 0.80 L9.73 0.80 L10.10 2.92 L10.10 2.92 L11.87 1.69 L14.31 4.13 L13.08 5.90 L13.08 5.90 L15.20 6.27 L15.20 9.73 L13.08 10.10 L13.08 10.10 L14.31 11.87 L11.87 14.31 L10.10 13.08 L10.10 13.08 L9.73 15.20 L6.27 15.20 L5.90 13.08 L5.90 13.08 L4.13 14.31 L1.69 11.87 L2.92 10.10 L2.92 10.10 L0.80 9.73 L0.80 6.27 L2.92 5.90 L2.92 5.90 L1.69 4.13 L4.13 1.69 L5.90 2.92 L5.90 2.92 Z M5.50 8.00 a2.50 2.50 0 1 0 5.00 0 a2.50 2.50 0 1 0 -5.00 0 Z"/></svg>';
     g.onclick=openAccount;
-    const b=document.createElement("button");b.className="lo";b.textContent="Sign out";
+    const b=document.createElement("button");b.className="lo";b.textContent=t("Sign out");
     b.onclick=async()=>{try{await api("logout","POST",{});}catch(e){}
       state.who={authenticated:false,needs_setup:false,username:"",admin_username:state.who.admin_username};
       showLogin(false);};
@@ -203,7 +206,7 @@ export async function refreshWho(){
     f.appendChild(row);f.appendChild(b);
   }else if(state.who.needs_setup){
     const d=document.createElement("div");d.className="who";
-    d.innerHTML="<small>Security</small>no administrator";
+    d.innerHTML="<small>"+t("Security")+"</small>"+t("no administrator");
     f.appendChild(d);
   }
   return state.who;
@@ -212,7 +215,7 @@ $("#loginbox").addEventListener("submit",async e=>{
   e.preventDefault();
   const err=$("#lerr"),b=$("#lbtn"),setup=!$("#lp2wrap").hidden;
   const u=$("#lu").value.trim(),p=$("#lp").value;
-  if(setup&&p!==$("#lp2").value){err.textContent="The two passwords do not match.";return;}
+  if(setup&&p!==$("#lp2").value){err.textContent=t("The two passwords do not match.");return;}
   b.disabled=true;err.textContent="";
   try{
     await api(setup?"setup":"login","POST",{username:u,password:p,code:$("#lcode").value.trim()});

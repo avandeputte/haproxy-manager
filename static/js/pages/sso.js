@@ -1,5 +1,6 @@
 /* Single sign-on: the OIDC provider services can send their visitors to. */
 import { $, api, btn, esc, fieldRow, readForm } from "../core.js";
+import { t } from "../i18n.js";
 
 export async function renderSso(){
   const c=$("#content");c.innerHTML="";
@@ -8,23 +9,23 @@ export async function renderSso(){
   catch(e){c.innerHTML='<div class="card"><div class="bd">'+esc(e.message)+"</div></div>";return;}
 
   const card=document.createElement("div");card.className="card";
-  card.innerHTML='<div class=hd><h2>Single sign-on (OIDC)</h2><div class=sp></div>'+
-    '<span class="pill '+(s.enabled?"up":"off")+'">'+(s.enabled?"on":"off")+"</span></div>";
+  card.innerHTML='<div class=hd><h2>'+t("Single sign-on (OIDC)")+'</h2><div class=sp></div>'+
+    '<span class="pill '+(s.enabled?"up":"off")+'">'+(s.enabled?t("on"):t("off"))+"</span></div>";
   const bd=document.createElement("div");bd.className="bd";
-  bd.innerHTML='<p class=hint style="margin-bottom:14px">Services can require a sign-in through '+
-    "an OpenID Connect provider -- Authentik, Keycloak, Authelia, Pocket ID, Google, Entra. "+
-    "One sign-in covers every protected service: HAProxy itself verifies the session cookie and "+
-    "each service's allow-list on every request, on whichever node is active. Turn it on per "+
-    "service in the publish wizard.</p>"+
-    (s.redirect_uri?'<p class=hint style="margin-bottom:14px">Register this redirect URI at the '+
-    'provider: <span class=mono>'+esc(s.redirect_uri)+"</span></p>":"");
+  bd.innerHTML='<p class=hint style="margin-bottom:14px">'+
+    t("Services can require a sign-in through an OpenID Connect provider -- Authentik, Keycloak, "+
+      "Authelia, Pocket ID, Google, Entra. One sign-in covers every protected service: HAProxy itself "+
+      "verifies the session cookie and each service's allow-list on every request, on whichever node "+
+      "is active. Turn it on per service in the publish wizard.")+"</p>"+
+    (s.redirect_uri?'<p class=hint style="margin-bottom:14px">'+
+    t("Register this redirect URI at the provider: <span class=mono>{uri}</span>",{uri:esc(s.redirect_uri)})+"</p>":"");
   if((s.unreachable_hosts||[]).length){
     bd.innerHTML+='<p class=hint style="color:var(--down);margin-bottom:14px">'+
-      "<b>These protected services sit outside the cookie domain</b> ("+esc(s.cookie_domain||"")+
-      "), so the session cookie can never reach them and a visitor there would loop through the "+
-      "sign-in without end: <span class=mono>"+
-      (s.unreachable_hosts||[]).map(esc).join("</span>, <span class=mono>")+
-      "</span>. Move them under the cookie domain, or widen it.</p>";
+      t("<b>These protected services sit outside the cookie domain</b> ({domain}), so the session "+
+        "cookie can never reach them and a visitor there would loop through the sign-in without end: "+
+        "{hosts}. Move them under the cookie domain, or widen it.",
+        {domain:esc(s.cookie_domain||""),
+         hosts:"<span class=mono>"+(s.unreachable_hosts||[]).map(esc).join("</span>, <span class=mono>")+"</span>"})+"</p>";
   }
   const FIELDS=[
    {k:"enabled",l:"Enable single sign-on",t:"bool"},
@@ -33,7 +34,7 @@ export async function renderSso(){
       "Authentik. Its /.well-known/openid-configuration is read from here."},
    {k:"client_id",l:"Client ID",t:"text"},
    {k:"client_secret",l:"Client secret",t:"password",
-    h:s.has_client_secret?"Leave empty to keep the stored one":"From the provider's client registration"},
+    h:s.has_client_secret?t("Leave empty to keep the stored one"):t("From the provider's client registration")},
    {k:"auth_host",l:"Sign-in host",t:"text",
     h:"A name for the sign-in itself, e.g. auth.example.com. Point its DNS at the virtual IP; "+
       "HAProxy routes it to this app. It needs a certificate on the HTTPS listener -- "+
@@ -58,31 +59,31 @@ export async function renderSso(){
   bd.appendChild(frm);
   const note=document.createElement("span");note.className="hint";note.style.marginLeft="10px";
   const foot=document.createElement("div");foot.style.marginTop="16px";
-  foot.appendChild(btn("Save","pri",async()=>{
-    note.textContent="saving...";
+  foot.appendChild(btn(t("Save"),"pri",async()=>{
+    note.textContent=t("saving...");
     try{
       await api("access/oauth","PUT",readForm(FIELDS));
-      note.textContent="Saved.";
+      note.textContent=t("Saved.");
       renderSso();
     }catch(e){note.textContent=e.message;}
   }));
   foot.appendChild(document.createTextNode(" "));
-  foot.appendChild(btn("Test","",async()=>{
-    note.textContent="asking the provider...";
+  foot.appendChild(btn(t("Test"),"",async()=>{
+    note.textContent=t("asking the provider...");
     try{
       const r=await api("access/oauth/test","POST",{issuer:readForm(FIELDS).issuer});
-      note.textContent=r.ok?r.message:(r.error||"failed");
+      note.textContent=r.ok?r.message:(r.error||t("failed"));
     }catch(e){note.textContent=e.message;}
   }));
   foot.appendChild(document.createTextNode(" "));
-  foot.appendChild(btn("Rotate secret","dngr",async()=>{
-    if(!confirm("Rotate the signing secret?\n\nEvery signed-in session on every service stops "+
-                "verifying immediately -- everyone signs in again. This is the kill switch "+
-                "for a leaked session."))return;
-    note.textContent="rotating...";
+  foot.appendChild(btn(t("Rotate secret"),"dngr",async()=>{
+    if(!confirm(t("Rotate the signing secret?\n\nEvery signed-in session on every service stops "+
+                  "verifying immediately -- everyone signs in again. This is the kill switch "+
+                  "for a leaked session.")))return;
+    note.textContent=t("rotating...");
     try{
       const r=await api("access/oauth/rotate","POST",{});
-      note.textContent=r.ok?"Rotated: everyone is signed out.":(r.error||"failed");
+      note.textContent=r.ok?t("Rotated: everyone is signed out."):(r.error||t("failed"));
     }catch(e){note.textContent=e.message;}
   }));
   foot.appendChild(note);
@@ -112,59 +113,62 @@ export async function renderSso(){
   const pre=t=>'<pre class=mono style="margin:8px 0;padding:10px;border:1px solid '+
     'var(--line,#8884);border-radius:6px;overflow-x:auto;line-height:1.5">'+esc(t)+"</pre>";
   const guide=document.createElement("div");guide.className="card";
-  guide.innerHTML='<div class=hd><h2>Provider setup</h2></div>';
+  guide.innerHTML='<div class=hd><h2>'+t("Provider setup")+'</h2></div>';
   const gb=document.createElement("div");gb.className="bd";
   gb.innerHTML=
-    '<p class=hint style="margin-bottom:12px">Every provider needs the same three things: a '+
-    "confidential OAuth2/OIDC client, the redirect URI "+mono(ru)+", and the "+
-    mono("openid email profile")+" scopes. The URLs below are built from the settings above"+
-    (s.auth_host&&s.cookie_domain?"":" -- save the sign-in host and cookie domain first and "+
-    "they become exact")+". Where to click differs:</p>"+
+    '<p class=hint style="margin-bottom:12px">'+
+    t("Every provider needs the same three things: a confidential OAuth2/OIDC client, the redirect "+
+      "URI {uri}, and the {scopes} scopes.",{uri:mono(ru),scopes:mono("openid email profile")})+" "+
+    (s.auth_host&&s.cookie_domain
+      ?t("The URLs below are built from the settings above.")
+      :t("The URLs below are built from the settings above -- save the sign-in host and cookie "+
+         "domain first and they become exact."))+" "+t("Where to click differs:")+"</p>"+
 
     "<details style='margin-bottom:10px'><summary style='cursor:pointer;font-weight:600'>authentik</summary>"+
     '<ol class=hint style="margin:8px 0 0 18px;line-height:1.7">'+
-    "<li><b>Applications &rsaquo; Providers &rsaquo; Create</b>: an <b>OAuth2/OpenID Provider</b> "+
-    "named "+mono(nm)+". Client type <b>Confidential</b>; under <b>Redirect URIs</b> add a "+
-    "<b>Strict</b> entry:"+pre(ru)+
-    "Pick an authorization flow (implicit consent is the usual choice) and a signing key, and "+
-    "copy the client ID and secret it generates into the form above.</li>"+
-    "<li><b>Applications &rsaquo; Applications &rsaquo; Create</b>: an application named "+
-    mono(nm)+" with slug "+mono(nm)+", bound to that provider.</li>"+
-    "<li>Issuer URL"+((s.issuer&&s.issuer===akIssuer)?" (your saved issuer):"
-      :", assuming authentik answers at "+mono("authentik."+dom)+" and the slug above:")+
+    "<li>"+t("<b>Applications &rsaquo; Providers &rsaquo; Create</b>: an <b>OAuth2/OpenID Provider</b> "+
+      "named {name}. Client type <b>Confidential</b>; under <b>Redirect URIs</b> add a "+
+      "<b>Strict</b> entry:",{name:mono(nm)})+pre(ru)+
+    t("Pick an authorization flow (implicit consent is the usual choice) and a signing key, and "+
+      "copy the client ID and secret it generates into the form above.")+"</li>"+
+    "<li>"+t("<b>Applications &rsaquo; Applications &rsaquo; Create</b>: an application named "+
+      "{name} with slug {slug}, bound to that provider.",{name:mono(nm),slug:mono(nm)})+"</li>"+
+    "<li>"+((s.issuer&&s.issuer===akIssuer)?t("Issuer URL (your saved issuer):")
+      :t("Issuer URL, assuming authentik answers at {host} and the slug above:",{host:mono("authentik."+dom)}))+
     pre(akIssuer)+
-    "authentik gives every application its own issuer -- your authentik's hostname, the "+
-    "application's slug, and the trailing slash all matter.</li>"+
-    "<li>Who may sign in at all is authentik's side (application bindings); who may reach each "+
-    "service is the allow-list here. Both apply.</li></ol></details>"+
+    t("authentik gives every application its own issuer -- your authentik's hostname, the "+
+      "application's slug, and the trailing slash all matter.")+"</li>"+
+    "<li>"+t("Who may sign in at all is authentik's side (application bindings); who may reach each "+
+      "service is the allow-list here. Both apply.")+"</li></ol></details>"+
 
     "<details style='margin-bottom:10px'><summary style='cursor:pointer;font-weight:600'>Authelia</summary>"+
     '<ol class=hint style="margin:8px 0 0 18px;line-height:1.7">'+
-    "<li>Authelia 4.38 or later, with its OIDC provider enabled: "+
-    mono("identity_providers.oidc")+" needs signing keys ("+mono("jwks")+") -- Authelia's own "+
-    "documentation covers generating them.</li>"+
-    "<li>Generate the client secret pair: "+mono("authelia crypto hash generate pbkdf2 --random")+
-    ". The <b>plain</b> half goes in the form above; the <b>digest</b> goes in Authelia's "+
-    "configuration, in this client entry:"+
+    "<li>"+t("Authelia 4.38 or later, with its OIDC provider enabled: {section} needs signing keys "+
+      "({jwks}) -- Authelia's own documentation covers generating them.",
+      {section:mono("identity_providers.oidc"),jwks:mono("jwks")})+"</li>"+
+    "<li>"+t("Generate the client secret pair: {command}. The <b>plain</b> half goes in the form "+
+      "above; the <b>digest</b> goes in Authelia's configuration, in this client entry:",
+      {command:mono("authelia crypto hash generate pbkdf2 --random")})+
     pre("identity_providers:\n  oidc:\n    clients:\n      - client_id: "+cid+
-        "\n        client_secret: '$pbkdf2-sha512$...'   # the digest half"+
+        "\n        client_secret: '$pbkdf2-sha512$...'   # "+t("the digest half")+
         "\n        redirect_uris:\n          - "+ru+
         "\n        scopes: [openid, email, profile]"+
         "\n        token_endpoint_auth_method: client_secret_post")+"</li>"+
-    "<li>Issuer URL"+((s.issuer&&s.issuer===aeIssuer)?" (your saved issuer):"
-      :", assuming Authelia answers at "+mono("authelia."+dom)+":")+pre(aeIssuer)+
-    "the root it is served on -- no path.</li></ol></details>"+
+    "<li>"+((s.issuer&&s.issuer===aeIssuer)?t("Issuer URL (your saved issuer):")
+      :t("Issuer URL, assuming Authelia answers at {host}:",{host:mono("authelia."+dom)}))+pre(aeIssuer)+
+    t("the root it is served on -- no path.")+"</li></ol></details>"+
 
     "<details><summary style='cursor:pointer;font-weight:600'>Google</summary>"+
     '<ol class=hint style="margin:8px 0 0 18px;line-height:1.7">'+
-    "<li>In <b>console.cloud.google.com</b>: <b>APIs &amp; Services &rsaquo; OAuth consent "+
-    "screen</b> first (External is fine; publish it, or list your accounts as test users), "+
-    "then <b>Credentials &rsaquo; Create credentials &rsaquo; OAuth client ID</b>, type "+
-    "<b>Web application</b>, name "+mono(nm)+".</li>"+
-    "<li>Under <b>Authorized redirect URIs</b> add:"+pre(ru)+"</li>"+
-    "<li>Issuer URL, always the same for Google:"+pre("https://accounts.google.com")+"</li>"+
-    "<li>Never use "+mono("*")+" on a service's allow-list with Google -- that is every Google "+
-    "account there is. List emails, or your workspace domain as "+mono("@"+dom)+".</li>"+
+    "<li>"+t("In <b>console.cloud.google.com</b>: <b>APIs &amp; Services &rsaquo; OAuth consent "+
+      "screen</b> first (External is fine; publish it, or list your accounts as test users), "+
+      "then <b>Credentials &rsaquo; Create credentials &rsaquo; OAuth client ID</b>, type "+
+      "<b>Web application</b>, name {name}.",{name:mono(nm)})+"</li>"+
+    "<li>"+t("Under <b>Authorized redirect URIs</b> add:")+pre(ru)+"</li>"+
+    "<li>"+t("Issuer URL, always the same for Google:")+pre("https://accounts.google.com")+"</li>"+
+    "<li>"+t("Never use {star} on a service's allow-list with Google -- that is every Google "+
+      "account there is. List emails, or your workspace domain as {domain}.",
+      {star:mono("*"),domain:mono("@"+dom)})+"</li>"+
     "</ol></details>";
   guide.appendChild(gb);
   c.appendChild(guide);

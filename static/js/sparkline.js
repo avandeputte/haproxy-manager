@@ -4,6 +4,7 @@
    library is not an option -- and for a line of numbers it would be a poor
    trade anyway. An SVG polyline says everything a sparkline needs to. */
 import { esc } from "./core.js";
+import { t } from "./i18n.js";
 
 /* One line, sized to fit its own values, with errors drawn over requests. */
 export function sparkline(values, opts){
@@ -34,9 +35,9 @@ export function sparkline(values, opts){
 export function trafficSpark(series, opts){
   const o=opts||{};
   const req=(series&&series.req)||[], err=((series&&series.e5)||[]);
-  if(!req.length)return '<span class=sub>no traffic recorded yet</span>';
+  if(!req.length)return '<span class=sub>'+t("no traffic recorded yet")+'</span>';
   const total=req.reduce((a,b)=>a+b,0), bad=err.reduce((a,b)=>a+b,0);
-  if(!total&&!bad)return '<span class=sub>no traffic in the window</span>';
+  if(!total&&!bad)return '<span class=sub>'+t("no traffic in the window")+'</span>';
   const w=o.width||120, h=o.height||24;
   /* Ten a minute is the floor for "this chart may fill its box": below that,
      the line stays low, because that is what nearly nothing looks like. The
@@ -44,9 +45,9 @@ export function trafficSpark(series, opts){
      requests are a hairline, not a second mountain. */
   const top=Math.max(10,...req,...err);
   let html='<span class=sparkwrap>'+sparkline(req,{width:w,height:h,floor:top,
-    label:total+" requests"});
+    label:t("{n} requests",{n:total})});
   if(bad)html+=sparkline(err,{width:w,height:h,floor:top,stroke:"var(--down)",
-    fill:"var(--spark-fill-bad)",label:bad+" server errors"});
+    fill:"var(--spark-fill-bad)",label:t("{n} server errors",{n:bad})});
   html+="</span>";
   return html;
 }
@@ -55,6 +56,6 @@ export function trafficSpark(series, opts){
 export function sparkCaption(at){
   if(!at||!at.length)return "";
   const mins=Math.round((at[at.length-1]-at[0])/60);
-  if(mins<90)return "last "+mins+" min";
-  return "last "+Math.round(mins/60)+" h";
+  if(mins<90)return t("last {n} min",{n:mins});
+  return t("last {n} h",{n:Math.round(mins/60)});
 }

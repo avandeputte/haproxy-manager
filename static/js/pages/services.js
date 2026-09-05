@@ -1,4 +1,5 @@
 import { $, HEALTH_LABEL, api, btn, closeDlg, esc, fieldEl, fieldRow, list, openDlg, readForm, showText } from "../core.js";
+import { t } from "../i18n.js";
 import { refreshStatus, route } from "../shell.js";
 import { CERT_STATUS } from "../pages/certificates.js";
 import { state } from "../state.js";
@@ -82,21 +83,22 @@ export async function updateCertNote(note){
   let host="";
   try{host=new URL(raw.includes("://")?raw:"https://"+raw).hostname;}catch(e){}
   if(!host||!raw.trim().toLowerCase().startsWith("https")){note.innerHTML="";return;}
-  if(mode==="none"){note.innerHTML='<span class=sub>No certificate will be attached -- the listener still needs one to start TLS.</span>';return;}
-  if(mode==="new"){note.innerHTML='<span class=sub>A new certificate will be requested for '+esc(host)+".</span>";return;}
-  note.innerHTML='<span class=sub>Checking for an existing certificate...</span>';
+  if(mode==="none"){note.innerHTML='<span class=sub>'+t("No certificate will be attached -- the listener still needs one to start TLS.")+'</span>';return;}
+  if(mode==="new"){note.innerHTML='<span class=sub>'+t("A new certificate will be requested for {host}.",{host:esc(host)})+"</span>";return;}
+  note.innerHTML='<span class=sub>'+t("Checking for an existing certificate...")+'</span>';
   try{
     const r=await api("acme/cover?host="+encodeURIComponent(host));
     if(r.covered){
       const cls=CERT_STATUS[r.status]?CERT_STATUS[r.status][0]:"off";
-      note.innerHTML='<span class="pill '+cls+'">'+esc(r.how==="wildcard"?"wildcard match":"exact match")+"</span> "+
-        "Will reuse <b>"+esc(r.name)+"</b> <span class=mono>("+esc(r.domains.join(", "))+")</span>"+
-        (r.days_left!==null&&r.days_left!==undefined?" &mdash; expires in "+esc(r.days_left)+" days":"")+
-        ". No new certificate will be requested.";
+      note.innerHTML='<span class="pill '+cls+'">'+esc(r.how==="wildcard"?t("wildcard match"):t("exact match"))+"</span> "+
+        t("Will reuse <b>{name}</b> <span class=mono>({domains})</span>",{name:esc(r.name),domains:esc(r.domains.join(", "))})+
+        (r.days_left!==null&&r.days_left!==undefined?" &mdash; "+t("expires in {n} days",{n:esc(r.days_left)}):"")+
+        ". "+t("No new certificate will be requested.");
     }else{
-      note.innerHTML='<span class=sub>No existing certificate covers '+esc(host)+
-        " &mdash; a new one will be requested. Tip: a wildcard certificate for <span class=mono>*."+
-        esc(host.split('.').slice(1).join('.'))+"</span> would cover every subdomain at once.</span>";
+      note.innerHTML='<span class=sub>'+
+        t("No existing certificate covers {host} &mdash; a new one will be requested. Tip: a wildcard "+
+          "certificate for <span class=mono>*.{parent}</span> would cover every subdomain at once.",
+          {host:esc(host),parent:esc(host.split('.').slice(1).join('.'))})+"</span>";
     }
   }catch(e){note.innerHTML='<span class=sub>'+esc(e.message)+"</span>";}
 }
@@ -119,11 +121,11 @@ export function openWizard(prefill){
     picker=document.createElement("div");
     picker.className="bd";
     picker.style.cssText="border:1px solid var(--hair);border-radius:6px;padding:10px 12px;margin-bottom:14px";
-    picker.innerHTML='<div class=fl style="margin-bottom:6px">Start from a recipe</div>';
+    picker.innerHTML='<div class=fl style="margin-bottom:6px">'+t("Start from a recipe")+'</div>';
     const sel=document.createElement("select");sel.id="f_recipe";
-    sel.innerHTML='<option value="">Nothing — fill it in myself</option>';
+    sel.innerHTML='<option value="">'+t("Nothing — fill it in myself")+'</option>';
     const note=document.createElement("div");note.className="hint";note.style.marginTop="8px";
-    note.textContent="Well-known services come with the right ports, checks and timeouts already set.";
+    note.textContent=t("Well-known services come with the right ports, checks and timeouts already set.");
     picker.appendChild(sel);picker.appendChild(note);
     loadRecipes().then(list=>{
       const byCat={};
@@ -137,7 +139,7 @@ export function openWizard(prefill){
       });
       sel.onchange=()=>{
         const r=list.find(x=>x.id===sel.value);
-        if(!r){note.textContent="Well-known services come with the right ports, checks and timeouts already set.";return;}
+        if(!r){note.textContent=t("Well-known services come with the right ports, checks and timeouts already set.");return;}
         note.innerHTML="<b>"+esc(r.summary)+"</b><br>"+esc(r.notes);
         Object.keys(r.fields).forEach(k=>{
           const cell=(rows[k]||[])[1];
@@ -162,11 +164,11 @@ export function openWizard(prefill){
   wrap.appendChild(frm);
   // friendlier labels than the raw option values
   const sel=frm.querySelector("#f_cert_mode");
-  if(sel)[...sel.options].forEach(o=>{o.textContent=CERT_MODE_LABEL[o.value]||o.value;});
+  if(sel)[...sel.options].forEach(o=>{o.textContent=t(CERT_MODE_LABEL[o.value]||o.value);});
   const hsel=frm.querySelector("#f_health");
-  if(hsel)[...hsel.options].forEach(o=>{o.textContent=HEALTH_LABEL[o.value]||o.value;});
+  if(hsel)[...hsel.options].forEach(o=>{o.textContent=t(HEALTH_LABEL[o.value]||o.value);});
   const nsel=frm.querySelector("#f_notify_mode");
-  if(nsel)[...nsel.options].forEach(o=>{o.textContent=NOTIFY_MODE_LABEL[o.value]||o.value;});
+  if(nsel)[...nsel.options].forEach(o=>{o.textContent=t(NOTIFY_MODE_LABEL[o.value]||o.value);});
   const setRow=(k,on)=>{(rows[k]||[]).forEach(el=>{el.style.display=on?"":"none";});};
   const val=k=>((fieldEl(k)||{}).value||"");
   const syncRows=()=>{
@@ -219,24 +221,24 @@ export function openWizard(prefill){
   const show=(r,saved)=>{
     out.innerHTML="";
     const box=document.createElement("div");box.className="card";box.style.margin="0";
-    box.innerHTML='<div class=hd><h2>'+(saved?"Created":"What this will create")+'</h2></div>';
+    box.innerHTML='<div class=hd><h2>'+(saved?t("Created"):t("What this will create"))+'</h2></div>';
     const bd=document.createElement("div");bd.className="bd";
     bd.innerHTML='<div class=mono style="margin-bottom:10px">'+esc(r.public)+" &rarr; "+esc(r.target)+"</div>"+
       "<table><tbody>"+r.actions.map(a=>"<tr><td style='width:90px'><span class='pill "+
-        (a.action==="created"?"up":a.action==="updated"?"warn":"off")+"'>"+esc(a.action)+"</span></td><td>"+
+        (a.action==="created"?"up":a.action==="updated"?"warn":"off")+"'>"+esc(t(a.action))+"</span></td><td>"+
         esc(a.type)+"</td><td class=mono>"+esc(a.name)+"</td></tr>").join("")+"</tbody></table>"+
       (r.warnings||[]).map(w=>'<div class=hint style="margin-top:10px">! '+esc(w)+"</div>").join("");
-    bd.appendChild(btn("Show the generated haproxy.cfg","sm",()=>showText("haproxy.cfg (preview)",r.preview)));
-    if(saved&&r.applied)bd.appendChild(document.createTextNode(" "+(r.applied.ok?"Applied.":"Apply FAILED: "+(r.applied.error||""))));
+    bd.appendChild(btn(t("Show the generated haproxy.cfg"),"sm",()=>showText(t("haproxy.cfg (preview)"),r.preview)));
+    if(saved&&r.applied)bd.appendChild(document.createTextNode(" "+(r.applied.ok?t("Applied."):t("Apply FAILED: {error}",{error:r.applied.error||""}))));
     box.appendChild(bd);out.appendChild(box);
   };
 
-  const preview=btn("Preview","",async()=>{
+  const preview=btn(t("Preview"),"",async()=>{
     err.textContent="";
     try{show(await api("wizard/publish","POST",Object.assign(read(),{dry_run:true})),false);}
     catch(e){err.textContent=e.message;}
   });
-  const create=btn("Publish","pri",async()=>{
+  const create=btn(t("Publish"),"pri",async()=>{
     err.textContent="";create.disabled=true;
     try{
       const r=await api("wizard/publish","POST",read());
@@ -245,7 +247,7 @@ export function openWizard(prefill){
       await route();refreshStatus();
     }catch(e){err.textContent=e.message;create.disabled=false;}
   });
-  openDlg(prefill?"Edit service":"Publish a service",wrap,[err,btn("Close","",closeDlg),preview,create]);
+  openDlg(prefill?t("Edit service"):t("Publish a service"),wrap,[err,btn(t("Close"),"",closeDlg),preview,create]);
 
   /* Only now are these fields in the document, and only elements that are in
      it can be found by id or usefully listened to. Wiring the form while it
@@ -290,18 +292,18 @@ export async function servicesCard(){
   (probes.results||[]).forEach(p=>{if(p.state!=="ok")probeBad[p.url]=p;});
   const card=document.createElement("div");card.className="card";
   const hd=document.createElement("div");hd.className="hd";
-  hd.innerHTML="<h2>Services</h2><div class=sp></div>";
-  if(!state.readOnly)hd.appendChild(btn("Publish a service","pri sm",()=>openWizard()));
+  hd.innerHTML="<h2>"+t("Services")+"</h2><div class=sp></div>";
+  if(!state.readOnly)hd.appendChild(btn(t("Publish a service"),"pri sm",()=>openWizard()));
   card.appendChild(hd);
   const bd=document.createElement("div");
   if(!svcs.length){
-    bd.innerHTML='<div class=empty>Nothing published yet.<br><br>'+
-      '"Publish a service" maps a public URL such as <span class=mono>https://app.example.com</span> to a server '+
-      'such as <span class=mono>http://192.168.1.100:1781</span> and creates everything HAProxy needs for it.</div>';
+    bd.innerHTML='<div class=empty>'+t("Nothing published yet.")+'<br><br>'+
+      t("\"Publish a service\" maps a public URL such as <span class=mono>https://app.example.com</span> to a server "+
+        "such as <span class=mono>http://192.168.1.100:1781</span> and creates everything HAProxy needs for it.")+'</div>';
   }else{
-    const t=document.createElement("table");
-    t.innerHTML="<thead><tr><th>Public URL</th><th>Forwards to</th><th>Traffic</th>"+
-      "<th>Certificate</th><th></th></tr></thead>";
+    const tbl=document.createElement("table");
+    tbl.innerHTML="<thead><tr><th>"+t("Public URL")+"</th><th>"+t("Forwards to")+"</th><th>"+t("Traffic")+"</th>"+
+      "<th>"+t("Certificate")+"</th><th></th></tr></thead>";
     const tb=document.createElement("tbody");
     svcs.forEach(s=>{
       const tr=document.createElement("tr");
@@ -309,22 +311,22 @@ export async function servicesCard(){
       tr.innerHTML="<td>"+(s.urls||[s.url]).map(u=>"<span class=mono>"+esc(u)+"</span>"+
           (probeBad[u]?' <span class="pill '+(probeBad[u].state==="down"?"down":"warn")+
             '" title="'+esc(probeBad[u].note)+'">'+
-            (probeBad[u].state==="down"?"not answering":"certificate")+"</span>":"")).join("<br>")+
-          (s.managed==="web-ui"?'<div class=sub>this node\'s own web UI &mdash; managed under '+
-             'Settings &rsaquo; Web UI access, and never synced to the other nodes</div>':"")+
+            (probeBad[u].state==="down"?t("not answering"):t("certificate"))+"</span>":"")).join("<br>")+
+          (s.managed==="web-ui"?'<div class=sub>'+t("this node's own web UI &mdash; managed under "+
+             "Settings &rsaquo; Web UI access, and never synced to the other nodes")+'</div>':"")+
           /* Whether a visitor is asked to sign in belongs beside the address:
              it is part of what this URL does, not a detail of the pool. */
-          (auth.enabled?'<div class=sub>sign-in required &mdash; '+
-             ((auth.group_names||[]).length?esc(auth.group_names.join(", ")):"any user")+
-             (auth.exempt?", except from "+esc(auth.exempt.split("\n").join(", ")):"")+"</div>":"")+
-          ((s.oauth||{}).enabled?'<div class=sub>sign-in via SSO &mdash; '+
-             esc(((s.oauth||{}).allow||[]).map(a=>a==="*"?"anyone the provider signs in":a).join(", "))+"</div>":"")+
-          (s.allow_src?'<div class=sub>only from '+
-             esc(s.allow_src.split("\n").join(", "))+"</div>":"")+
-          (s.maintenance?'<div><span class="pill warn">paused &mdash; answering 503</span></div>':"")+
-          (s.enabled?"":"<div class=sub>disabled</div>")+"</td>"+
-        "<td class=mono>"+(s.targets.length?s.targets.map(esc).join("<br>"):"<span class=sub>no server</span>")+
-          "<div class=sub>pool "+esc(s.pool||"—")+"</div></td>"+
+          (auth.enabled?'<div class=sub>'+t("sign-in required &mdash; {who}",{who:
+             ((auth.group_names||[]).length?esc(auth.group_names.join(", ")):t("any user"))})+
+             (auth.exempt?", "+t("except from {networks}",{networks:esc(auth.exempt.split("\n").join(", "))}):"")+"</div>":"")+
+          ((s.oauth||{}).enabled?'<div class=sub>'+t("sign-in via SSO &mdash; {who}",{who:
+             esc(((s.oauth||{}).allow||[]).map(a=>a==="*"?t("anyone the provider signs in"):a).join(", "))})+"</div>":"")+
+          (s.allow_src?'<div class=sub>'+t("only from {networks}",{networks:
+             esc(s.allow_src.split("\n").join(", "))})+"</div>":"")+
+          (s.maintenance?'<div><span class="pill warn">'+t("paused &mdash; answering 503")+'</span></div>':"")+
+          (s.enabled?"":"<div class=sub>"+t("disabled")+"</div>")+"</td>"+
+        "<td class=mono>"+(s.targets.length?s.targets.map(esc).join("<br>"):"<span class=sub>"+t("no server")+"</span>")+
+          "<div class=sub>"+t("pool {name}",{name:esc(s.pool||"—")})+"</div></td>"+
         /* Requests a minute over the last day, with server errors over them.
            Answers "when did this start", which the live figures cannot. */
         "<td>"+trafficSpark((traffic.series||{})["be_"+(s.pool||"")],{width:110,height:22})+
@@ -332,11 +334,11 @@ export async function servicesCard(){
         "</td>"+
         /* just which certificate serves it; its state lives on the Certificates page */
         "<td>"+(s.certificate
-                 ? esc(s.certificate)+(s.certificate_match==="wildcard"?" <span class=sub>(wildcard)</span>":"")
+                 ? esc(s.certificate)+(s.certificate_match==="wildcard"?" <span class=sub>"+t("(wildcard)")+"</span>":"")
                  : '<span class=sub>&mdash;</span>')+"</td>";
       const act=document.createElement("td");act.style.textAlign="right";act.style.whiteSpace="nowrap";
       if(!state.readOnly&&s.managed!=="web-ui"){
-      act.appendChild(btn("Edit","sm",()=>openWizard({
+      act.appendChild(btn(t("Edit"),"sm",()=>openWizard({
         service_id:s.id,
         url:(s.urls||[s.url]).join("\n"),
         target:s.targets.map(t=>s.scheme==="tcp"?t.replace(/^tcp:\/\//,""):t).join(", "),
@@ -359,29 +361,29 @@ export async function servicesCard(){
         certificate_id:s.certificate_id,
       })));
       act.appendChild(document.createTextNode(" "));
-      act.appendChild(btn(s.maintenance?"Resume":"Pause","sm"+(s.maintenance?" warn":""),async()=>{
-        if(!s.maintenance&&!confirm("Pause "+s.url+"?\n\nEvery request is answered with a clean "+
-            "503 until it is resumed. The servers and their health checks are untouched."))return;
+      act.appendChild(btn(s.maintenance?t("Resume"):t("Pause"),"sm"+(s.maintenance?" warn":""),async()=>{
+        if(!s.maintenance&&!confirm(t("Pause {url}?\n\nEvery request is answered with a clean "+
+            "503 until it is resumed. The servers and their health checks are untouched.",{url:s.url})))return;
         try{
           await api("services/"+s.id+"/maintenance","POST",{on:!s.maintenance});
           await route();refreshStatus();
         }catch(e){alert(e.message);}
       }));
       act.appendChild(document.createTextNode(" "));
-      act.appendChild(btn("Delete","sm dngr",async()=>{
-        if(!confirm("Remove "+s.url+"?\n\nThe rule, its conditions, the backend pool and its servers are deleted "+
-                    "when nothing else uses them. Certificates and the listening service are kept."))return;
+      act.appendChild(btn(t("Delete"),"sm dngr",async()=>{
+        if(!confirm(t("Remove {url}?\n\nThe rule, its conditions, the backend pool and its servers are deleted "+
+                      "when nothing else uses them. Certificates and the listening service are kept.",{url:s.url})))return;
         try{
           const r=await api("services/"+s.id,"DELETE");
-          showText("Removed "+s.url,(r.removed||[]).map(x=>"- "+x.type+" "+x.name).join("\n")+"\n\n"+r.note);
+          showText(t("Removed {url}",{url:s.url}),(r.removed||[]).map(x=>"- "+x.type+" "+x.name).join("\n")+"\n\n"+r.note);
           await route();refreshStatus();
         }catch(e){alert(e.message);}
       }));}
       tr.appendChild(act);tb.appendChild(tr);
     });
-    t.appendChild(tb);bd.appendChild(t);
+    tbl.appendChild(tb);bd.appendChild(tbl);
     const hint=document.createElement("div");hint.className="hint";hint.style.padding="10px 16px";
-    hint.textContent="Each row is a host name routed to a backend pool. The Advanced pages expose the same objects individually.";
+    hint.textContent=t("Each row is a host name routed to a backend pool. The Advanced pages expose the same objects individually.");
     bd.appendChild(hint);
   }
   card.appendChild(bd);

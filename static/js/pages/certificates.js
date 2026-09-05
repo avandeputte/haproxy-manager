@@ -1,5 +1,6 @@
 import { $, api, btn, closeDlg, esc, fieldRow, list, lists, localTime, openDlg, readForm, showText } from "../core.js";
 import { E, renderEntity } from "../entities.js";
+import { t, tn } from "../i18n.js";
 import { refreshStatus, route } from "../shell.js";
 import { state } from "../state.js";
 
@@ -20,7 +21,7 @@ export async function loadDnsApis(){
 }
 export function varList(list){
   return list.map(o=>'<span class=mono>'+esc(o.name)+"</span>"+
-    (o.optional?" <span class=sub>(optional)</span>":"")+
+    (o.optional?" <span class=sub>"+t("(optional)")+"</span>":"")+
     (o.desc?" &mdash; "+esc(o.desc):"")).join("<br>");
 }
 /* Show what the chosen hook needs, and offer to seed the credentials box. */
@@ -32,14 +33,14 @@ export function dnsCredentialHelp(frm){
   const render=()=>{
     const h=dnsApiByHook[sel.value.trim()];
     if(!sel.value.trim()){note.innerHTML=dnsApiNote?esc(dnsApiNote):"";return;}
-    if(!h){note.innerHTML='<span class=sub>Unknown hook &mdash; it will be passed to acme.sh as typed.</span>';return;}
-    let html="<b>"+esc(h.title)+"</b> needs:<br>"+(h.options.length?varList(h.options):"<span class=sub>no credentials</span>");
-    if(h.options_alt.length)html+="<br><i>or instead:</i><br>"+varList(h.options_alt);
-    if(h.docs)html+='<br><a href="'+esc(h.docs.startsWith("http")?h.docs:"https://"+h.docs)+'" target="_blank" rel="noopener">documentation</a>';
+    if(!h){note.innerHTML='<span class=sub>'+t("Unknown hook &mdash; it will be passed to acme.sh as typed.")+'</span>';return;}
+    let html=t("<b>{name}</b> needs:",{name:esc(h.title)})+"<br>"+(h.options.length?varList(h.options):"<span class=sub>"+t("no credentials")+"</span>");
+    if(h.options_alt.length)html+="<br><i>"+t("or instead:")+"</i><br>"+varList(h.options_alt);
+    if(h.docs)html+='<br><a href="'+esc(h.docs.startsWith("http")?h.docs:"https://"+h.docs)+'" target="_blank" rel="noopener">'+t("documentation")+'</a>';
     note.innerHTML=html;
     const need=(h.options.length?h.options:h.options_alt).filter(o=>!o.optional);
     if(need.length){
-      const b=btn("Fill in the variable names","sm",()=>{
+      const b=btn(t("Fill in the variable names"),"sm",()=>{
         const have=creds.value.split("\n").map(l=>l.split("=")[0].trim()).filter(Boolean);
         const add=need.filter(o=>!have.includes(o.name)).map(o=>o.name+"=");
         if(add.length)creds.value=(creds.value.trim()?creds.value.replace(/\s*$/,"")+"\n":"")+add.join("\n")+"\n";
@@ -121,32 +122,32 @@ export async function openCertWizard(){
   const show=(r,saved)=>{
     out.innerHTML="";
     const box=document.createElement("div");box.className="card";box.style.margin="0";
-    box.innerHTML='<div class=hd><h2>'+(saved?"Done":"What this will create")+'</h2></div>'+
+    box.innerHTML='<div class=hd><h2>'+(saved?t("Done"):t("What this will create"))+'</h2></div>'+
       '<div class=bd><div class=mono style="margin-bottom:10px">'+esc((r.domains||[]).join(", "))+"</div>"+
       "<table><tbody>"+(r.actions||[]).map(a=>"<tr><td style='width:90px'><span class='pill "+
-        (a.action==="created"?"up":a.action==="updated"?"warn":"off")+"'>"+esc(a.action)+"</span></td><td>"+
+        (a.action==="created"?"up":a.action==="updated"?"warn":"off")+"'>"+esc(t(a.action))+"</span></td><td>"+
         esc(a.type)+"</td><td class=mono>"+esc(a.name)+"</td></tr>").join("")+"</tbody></table>"+
       (r.warnings||[]).map(w=>'<div class=hint style="margin-top:10px">! '+esc(w)+"</div>").join("")+
       (r.issued?('<div style="margin-top:12px">'+(r.issued.ok
-          ?'<span class="pill up">issued</span> The certificate is deployed.'
-          :'<span class="pill down">failed</span> '+esc(r.issued.error||""))+"</div>"):"")+"</div>";
+          ?'<span class="pill up">'+t("issued")+'</span> '+t("The certificate is deployed.")
+          :'<span class="pill down">'+t("failed")+'</span> '+esc(r.issued.error||""))+"</div>"):"")+"</div>";
     if(r.issued&&r.issued.log){
-      const b=btn("Show the acme.sh log","sm",()=>showText("acme.sh",r.issued.log));
+      const b=btn(t("Show the acme.sh log"),"sm",()=>showText("acme.sh",r.issued.log));
       b.style.margin="0 16px 16px";box.appendChild(b);
     }
     out.appendChild(box);
   };
 
-  const prev=btn("Preview","",async()=>{
+  const prev=btn(t("Preview"),"",async()=>{
     err.textContent="";
     try{show(await api("wizard/certificate","POST",Object.assign(read(),{dry_run:true,issue:false})),false);}
     catch(e){err.textContent=e.message;}
   });
-  const go=btn("Create","pri",async()=>{
+  const go=btn(t("Create"),"pri",async()=>{
     err.textContent="";go.disabled=true;prev.disabled=true;
     const body=read();
     if(body.issue)show({domains:(body.domains||"").split(/[\s,]+/).filter(Boolean),actions:[],
-                        warnings:["Running acme.sh -- this can take a minute."]},false);
+                        warnings:[t("Running acme.sh -- this can take a minute.")]},false);
     try{
       const r=await api("wizard/certificate","POST",body);
       show(r,true);
@@ -154,7 +155,7 @@ export async function openCertWizard(){
       await route();refreshStatus();
     }catch(e){err.textContent=e.message;go.disabled=false;prev.disabled=false;}
   });
-  openDlg("Request a certificate",wrap,[err,btn("Close","",closeDlg),prev,go]);
+  openDlg(t("Request a certificate"),wrap,[err,btn(t("Close"),"",closeDlg),prev,go]);
 }
 
 /* ---- acme.sh health ---- */
@@ -169,21 +170,22 @@ export async function loadAcmeHealth(){
 export function acmeSetupNotice(){
   const accounts=lists["acme/accounts"]||[], challenges=lists["acme/challenges"]||[];
   if(accounts.length&&challenges.length)return null;
-  const missing=[];
-  if(!accounts.length)missing.push("an ACME account");
-  if(!challenges.length)missing.push("a challenge type");
   const card=document.createElement("div");card.className="card";
   card.style.borderColor="#e3cfa8";
-  card.innerHTML='<div class=hd><h2>Set up ACME first</h2></div>'+
-    '<div class=bd><p>Issuing a certificate needs '+esc(missing.join(" and "))+
-      ', and this node has '+(missing.length===2?"neither":"none")+' yet.</p>'+
-    '<p class=hint style="margin-top:8px">An account is who the certificate is '+
-      'requested as; a challenge type is how the certificate authority checks you '+
-      'control the domain &mdash; HTTP-01 over port 80, or DNS-01 through your DNS '+
-      'provider for wildcards.</p></div>';
+  card.innerHTML='<div class=hd><h2>'+t("Set up ACME first")+'</h2></div>'+
+    '<div class=bd><p>'+
+      (!accounts.length&&!challenges.length
+        ?t("Issuing a certificate needs an ACME account and a challenge type, and this node has neither yet.")
+        :!accounts.length
+        ?t("Issuing a certificate needs an ACME account, and this node has none yet.")
+        :t("Issuing a certificate needs a challenge type, and this node has none yet."))+'</p>'+
+    '<p class=hint style="margin-top:8px">'+
+      t("An account is who the certificate is requested as; a challenge type is how the "+
+        "certificate authority checks you control the domain &mdash; HTTP-01 over port 80, "+
+        "or DNS-01 through your DNS provider for wildcards.")+'</p></div>';
   const foot=document.createElement("div");foot.className="bd";
   foot.style.cssText="border-top:1px solid var(--hair)";
-  foot.appendChild(btn("Open ACME Settings","pri",()=>{location.hash="#/p:acme";}));
+  foot.appendChild(btn(t("Open ACME Settings"),"pri",()=>{location.hash="#/p:acme";}));
   card.appendChild(foot);
   return card;
 }
@@ -199,14 +201,15 @@ export function acmeNotice(){
   const card=document.createElement("div");card.className="card";
   card.style.borderColor=h.ok?"#e3cfa8":"var(--down)";
   const bad=!h.ok;
-  card.innerHTML='<div class=hd><h2>'+(bad?"Certificates cannot be issued on this node"
-                                         :"acme.sh warning")+"</h2></div>"+
+  card.innerHTML='<div class=hd><h2>'+(bad?t("Certificates cannot be issued on this node")
+                                         :t("acme.sh warning"))+"</h2></div>"+
     '<div class=bd><p>'+esc(h.problem||h.warning||"")+"</p>"+
     (h.hint?'<p class=hint style="margin-top:8px">'+esc(h.hint)+"</p>":"")+
-    '<p class=hint style="margin-top:8px">Looked for it at <span class=mono>'+esc(h.path)+
-      "</span>"+(h.version?", found "+esc(h.version):"")+
-      ". Existing certificates are still served and still sync between nodes"+
-      (bad?"; only issuing and renewing are affected.":".")+"</p></div>";
+    '<p class=hint style="margin-top:8px">'+
+      t("Looked for it at <span class=mono>{path}</span>",{path:esc(h.path)})+
+      (h.version?", "+t("found {version}",{version:esc(h.version)}):"")+
+      ". "+(bad?t("Existing certificates are still served and still sync between nodes; only issuing and renewing are affected.")
+               :t("Existing certificates are still served and still sync between nodes."))+"</p></div>";
   return card;
 }
 
@@ -228,20 +231,20 @@ export const CERT_STATUS={
 };
 export function certStatusCell(r){
   const s=certStat[r.id];
-  if(!s)return '<span class="pill off">unknown</span>';
+  if(!s)return '<span class="pill off">'+t("unknown")+'</span>';
   const [cls,label]=CERT_STATUS[s.status]||["off",s.status];
-  let h='<span class="pill '+cls+'">'+esc(label)+"</span>";
-  if(s.status==="placeholder")h+='<div class=sub>self-signed stand-in — press Issue</div>';
-  else if(s.status==="missing")h+='<div class=sub>no PEM on disk yet</div>';
-  if(s.auto_renew===false)h+='<div class=sub>auto-renew off</div>';
+  let h='<span class="pill '+cls+'">'+esc(t(label))+"</span>";
+  if(s.status==="placeholder")h+='<div class=sub>'+t("self-signed stand-in — press Issue")+'</div>';
+  else if(s.status==="missing")h+='<div class=sub>'+t("no PEM on disk yet")+'</div>';
+  if(s.auto_renew===false)h+='<div class=sub>'+t("auto-renew off")+'</div>';
   /* A name added to a certificate is not a name the certificate covers: the
      file on disk still holds whatever was last issued. Until it is issued
      again, that address is served the wrong certificate, which looks to a
      browser like the site being unreachable rather than like a certificate
      problem -- so it is said here plainly. */
   if((s.not_issued_for||[]).length)
-    h+='<div class=sub style="color:var(--drift)">not in the issued certificate: '+
-       s.not_issued_for.map(esc).join(", ")+" — press Issue</div>";
+    h+='<div class=sub style="color:var(--drift)">'+
+       t("not in the issued certificate: {names} — press Issue",{names:s.not_issued_for.map(esc).join(", ")})+"</div>";
   return h;
 }
 /* Shown in the reader's own timezone; the server only ever speaks UTC. */
@@ -252,32 +255,33 @@ export function certExpiryCell(r){
   const d=s.days_left;
   let h='<span class=mono>'+fmtTime(s.expires_iso||s.expires)+"</span>";
   if(d!==null&&d!==undefined){
-    const n=Math.abs(d),unit=" day"+(n===1?"":"s");
-    h+='<div class=sub>'+(d<0?("expired "+n+unit+" ago"):("in "+d+unit))+"</div>";
+    const n=Math.abs(d);
+    h+='<div class=sub>'+(d<0?tn(n,"expired {n} day ago","expired {n} days ago")
+                             :tn(n,"in {n} day","in {n} days"))+"</div>";
   }
   return h;
 }
 export function certLastCell(r){
   const li=(certStat[r.id]||{}).last_issue;
-  if(!li)return '<span class=sub>never attempted</span>';
-  let h='<span class="pill '+(li.ok?"up":"down")+'">'+(li.ok?"succeeded":"failed")+"</span>"+
+  if(!li)return '<span class=sub>'+t("never attempted")+'</span>';
+  let h='<span class="pill '+(li.ok?"up":"down")+'">'+(li.ok?t("succeeded"):t("failed"))+"</span>"+
         "<div class=sub>"+fmtTime(li.time)+" · "+esc(li.seconds)+"s</div>";
   if(!li.ok&&li.error)h+="<div class=sub>"+esc(li.error)+"</div>";
   return h;
 }
 export async function issueCert(row,force){
   const pre=document.createElement("pre");
-  pre.textContent="Requesting a certificate for \""+row.name+"\" ...\n\n"+
-    "acme.sh usually needs 10-60 seconds for HTTP-01; DNS-01 can take several minutes\n"+
-    "while the TXT record propagates. The result and the full log appear here.";
-  openDlg((force?"Force issue: ":"Issue: ")+row.name,pre,[btn("Close","",closeDlg)]);
+  pre.textContent=t("Requesting a certificate for \"{name}\" ...",{name:row.name})+"\n\n"+
+    t("acme.sh usually needs 10-60 seconds for HTTP-01; DNS-01 can take several minutes\n"+
+      "while the TXT record propagates. The result and the full log appear here.");
+  openDlg(t(force?"Force issue: {name}":"Issue: {name}",{name:row.name}),pre,[btn(t("Close"),"",closeDlg)]);
   try{
     const r=await api("acme/issue/"+row.id,"POST",{force:!!force});
     pre.textContent=(r.ok
-        ? "SUCCESS -- certificate issued and written to the HAProxy certificate directory.\nHAProxy has been reloaded and the certificate pushed to the other nodes."
-        : "FAILED -- "+(r.error||"unknown error"))+
-      "\n\n--- acme.sh log ---\n"+(r.log||"(no output)");
-  }catch(e){pre.textContent="FAILED -- "+e.message;}
+        ? t("SUCCESS -- certificate issued and written to the HAProxy certificate directory.\nHAProxy has been reloaded and the certificate pushed to the other nodes.")
+        : t("FAILED -- {error}",{error:r.error||t("unknown error")}))+
+      "\n\n--- "+t("acme.sh log")+" ---\n"+(r.log||t("(no output)"));
+  }catch(e){pre.textContent=t("FAILED -- {error}",{error:e.message});}
   // Only repaint if the Certificates page is still the one on screen: issuing
   // takes tens of seconds (minutes for DNS-01), and landing this on whatever
   // page the person moved to would replace it. route() serializes with any
@@ -288,11 +292,11 @@ export async function issueCert(row,force){
 export async function showCertLog(row){
   try{
     const r=await api("acme/log/"+row.id);
-    if(!r.ok){showText("Last issuance: "+row.name,r.error);return;}
+    if(!r.ok){showText(t("Last issuance: {name}",{name:row.name}),r.error);return;}
     const e=r.entry;
-    showText("Last issuance: "+row.name,
-      (e.ok?"Result: succeeded":"Result: FAILED"+(e.error?" -- "+e.error:""))+
-      "\nWhen:   "+String(e.time).replace("T"," ").replace("+00:00"," UTC")+
-      "\nTook:   "+e.seconds+"s\n\n--- acme.sh log ---\n"+(e.log||"(no output)"));
-  }catch(e){showText("Last issuance: "+row.name,e.message);}
+    showText(t("Last issuance: {name}",{name:row.name}),
+      (e.ok?t("Result: succeeded"):t("Result: FAILED")+(e.error?" -- "+e.error:""))+
+      "\n"+t("When:   {when}",{when:String(e.time).replace("T"," ").replace("+00:00"," UTC")})+
+      "\n"+t("Took:   {seconds}s",{seconds:e.seconds})+"\n\n--- "+t("acme.sh log")+" ---\n"+(e.log||t("(no output)")));
+  }catch(e){showText(t("Last issuance: {name}",{name:row.name}),e.message);}
 }

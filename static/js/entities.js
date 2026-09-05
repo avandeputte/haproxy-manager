@@ -1,16 +1,19 @@
 import { $, HEALTH_LABEL, api, btn, closeDlg, esc, fieldRow, list, lists, nameOf, openDlg, readForm, showText } from "./core.js";
+import { t } from "./i18n.js";
 import { refreshStatus, route } from "./shell.js";
 import { certificateNotices, certExpiryCell, certLastCell, certStatusCell, dnsApiByHook, dnsApiOptions, dnsCredentialHelp, issueCert, loadAcmeHealth, loadCertStatus, loadDnsApis, openCertWizard, showCertLog } from "./pages/certificates.js";
 import { state } from "./state.js";
 
 /* ---- entity registry ---- */
-/* Field types: text number bool select ref refmulti textarea password */
+/* Field types: text number bool select ref refmulti textarea password.
+   Every label, hint, heading and intro is English here and translated where
+   it is drawn; `one` is the singular the editor's title needs. */
 export const E={
- "haproxy/servers":{title:"Real Servers",add:"Add server",
+ "haproxy/servers":{title:"Real Servers",one:"Real Server",add:"Add server",
   intro:"The upstream hosts traffic is forwarded to. Attach them to Backend Pools.",
   cols:[["name","Name"],["address","Address",r=>esc(r.address)+":"+esc(r.port)],
         ["opts","Options",r=>[r.ssl?"ssl":"",r.backup?"backup":""].filter(Boolean).join(", ")||"—"],
-        ["enabled","Enabled",r=>r.enabled!==false?"yes":"no"]],
+        ["enabled","Enabled",r=>r.enabled!==false?t("yes"):t("no")]],
   fields:[
    {k:"name",l:"Name",t:"text"},
    {k:"enabled",l:"Enabled",t:"bool",d:true},
@@ -23,11 +26,11 @@ export const E={
    {k:"backup",l:"Backup server",t:"bool",h:"Only receives traffic when all non-backup servers are down"},
    {k:"description",l:"Description",t:"text"}]},
 
- "haproxy/backends":{title:"Backend Pools",add:"Add pool",
+ "haproxy/backends":{title:"Backend Pools",one:"Backend Pool",add:"Add pool",
   intro:"Groups of Real Servers with a balancing algorithm, health checks and persistence.",
   cols:[["name","Name"],["mode","Mode"],["balance","Balance",r=>r.balance||"roundrobin"],
         ["servers","Servers",r=>(r.servers||[]).map(id=>esc(nameOf("haproxy/servers",id))).join(", ")||"—"],
-        ["hc","Check",r=>r.healthcheck_enabled?esc(nameOf("haproxy/healthchecks",r.healthcheck)):"off"]],
+        ["hc","Check",r=>r.healthcheck_enabled?esc(nameOf("haproxy/healthchecks",r.healthcheck)):t("off")]],
   refs:["haproxy/servers","haproxy/healthchecks","access/groups"],
   fields:[
    {k:"name",l:"Name",t:"text"},
@@ -62,12 +65,12 @@ export const E={
     h:"X-Auth-Request-Email and Remote-User, set from the verified session; client-sent copies are stripped everywhere."},
    {k:"custom",l:"Extra directives",t:"textarea",h:"Advanced. Raw lines added inside this backend, for anything the fields above do not cover -- for example \"http-reuse safe\". One per line. See the HAProxy configuration manual: https://docs.haproxy.org/2.6/configuration.html"}]},
 
- "haproxy/frontends":{title:"Public Services",add:"Add service",
+ "haproxy/frontends":{title:"Public Services",one:"Public Service",add:"Add service",
   intro:"Listening sockets clients connect to (frontends). Certificates come from the Certificates page.",
   cols:[["name","Name"],["binds","Listen on",r=>"<span class=mono>"+esc((r.binds||"").split("\n").filter(Boolean).join(", "))+"</span>"],
         ["mode","Mode",r=>esc(r.mode||"http")+(r.ssl_enabled?" +ssl":"")],
         ["be","Default pool",r=>r.default_backend?esc(nameOf("haproxy/backends",r.default_backend)):"—"],
-        ["enabled","Enabled",r=>r.enabled!==false?"yes":"no"]],
+        ["enabled","Enabled",r=>r.enabled!==false?t("yes"):t("no")]],
   refs:["haproxy/backends","haproxy/rules","acme/certificates"],
   fields:[
    {k:"name",l:"Name",t:"text"},
@@ -83,10 +86,10 @@ export const E={
    {k:"rules",l:"Rules",t:"refmulti",ref:"haproxy/rules",h:"Applied in the order shown here (the order of the Rules list)"},
    {k:"custom",l:"Extra directives",t:"textarea",h:"Advanced. Raw lines added inside this frontend, for anything the fields above do not cover. One per line. See the HAProxy configuration manual: https://docs.haproxy.org/2.6/configuration.html"}]},
 
- "haproxy/conditions":{title:"Conditions",add:"Add condition",
+ "haproxy/conditions":{title:"Conditions",one:"Condition",add:"Add condition",
   intro:"Named tests (ACLs) evaluated against traffic. Combine them in Rules.",
   cols:[["name","Name"],["type","Type"],["value","Value",r=>"<span class=mono>"+esc((r.param?r.param+" = ":"")+(r.value||""))+"</span>"],
-        ["negate","Negate",r=>r.negate?"yes":"no"]],
+        ["negate","Negate",r=>r.negate?t("yes"):t("no")]],
   fields:[
    {k:"name",l:"Name",t:"text"},
    {k:"type",l:"Condition type",t:"select",o:["host_matches","host_starts_with","host_ends_with","path_matches","path_starts_with","path_ends_with","path_contains","url_parameter","http_header","source_ip","ssl_sni","custom"],d:"host_matches"},
@@ -95,10 +98,10 @@ export const E={
    {k:"negate",l:"Negate",t:"bool"},
    {k:"description",l:"Description",t:"text"}]},
 
- "haproxy/rules":{title:"Rules",add:"Add rule",
+ "haproxy/rules":{title:"Rules",one:"Rule",add:"Add rule",
   intro:"Actions taken when Conditions match: select a pool, redirect, set headers, deny.",
   cols:[["name","Name"],["type","Action"],
-        ["cond","Conditions",r=>(r.conditions||[]).map(id=>esc(nameOf("haproxy/conditions",id))).join(", ")||"always"],
+        ["cond","Conditions",r=>(r.conditions||[]).map(id=>esc(nameOf("haproxy/conditions",id))).join(", ")||t("always")],
         ["tgt","Target",r=>r.type==="use_backend"?esc(nameOf("haproxy/backends",r.backend)):esc([r.param1,r.param2].filter(Boolean).join(" "))||"—"]],
   refs:["haproxy/conditions","haproxy/backends"],
   fields:[
@@ -111,12 +114,12 @@ export const E={
    {k:"param1",l:"Name / location / raw line",t:"text"},
    {k:"param2",l:"Value",t:"text"}]},
 
- "haproxy/healthchecks":{title:"Health Monitors",add:"Add monitor",
+ "haproxy/healthchecks":{title:"Health Monitors",one:"Health Monitor",add:"Add monitor",
   intro:"How Backend Pools decide whether a Real Server is alive.",
-  cols:[["name","Name"],["type","Type",r=>esc(HEALTH_LABEL[r.type]||r.type)],
+  cols:[["name","Name"],["type","Type",r=>esc(t(HEALTH_LABEL[r.type]||r.type))],
         ["interval","Interval",r=>r.interval||"2s"],
         ["det","Detail",r=>r.type==="http"?"<span class=mono>"+esc((r.http_method||"GET")+" "+(r.http_uri||"/")+(r.expect_status?" -> "+r.expect_status:""))+"</span>"
-              :(r.type==="pgsql"||r.type==="mysql")?"<span class=mono>user "+esc(r.db_user||"")+"</span>":"—"]],
+              :(r.type==="pgsql"||r.type==="mysql")?"<span class=mono>"+t("user {name}",{name:esc(r.db_user||"")})+"</span>":"—"]],
   fields:[
    {k:"name",l:"Name",t:"text"},
    {k:"type",l:"Type",t:"select",o:["tcp","http","ssl","pgsql","mysql"],d:"tcp"},
@@ -131,14 +134,14 @@ export const E={
 
  /* Who a service may ask to sign in. Nothing to do with the login for this UI:
     these credentials are checked by HAProxy, in front of the service. */
- "access/users":{title:"Users",add:"Add user",
+ "access/users":{title:"Users",one:"User",add:"Add user",
   intro:"People who may sign in to a service that asks for a password. HAProxy checks them itself, "+
         "so a request without a valid password never reaches the servers behind it. "+
         "They have no access to this management UI.",
   cols:[["username","User name"],
         ["groups","Groups",r=>(r.groups||[]).map(id=>esc(nameOf("access/groups",id))).join(", ")||"—"],
-        ["pw","Password",r=>r.has_password?"set":'<span class="pill warn">not set</span>'],
-        ["enabled","Enabled",r=>r.enabled!==false?"yes":"no"]],
+        ["pw","Password",r=>r.has_password?t("set"):'<span class="pill warn">'+t("not set")+'</span>'],
+        ["enabled","Enabled",r=>r.enabled!==false?t("yes"):t("no")]],
   refs:["access/groups"],
   fields:[
    {k:"username",l:"User name",t:"text",h:"What they type in the browser's password box"},
@@ -147,7 +150,7 @@ export const E={
    {k:"enabled",l:"Enabled",t:"bool",d:true,h:"Off keeps the account but stops it signing in anywhere"},
    {k:"description",l:"Description",t:"text"}]},
 
- "access/groups":{title:"Groups",add:"Add group",
+ "access/groups":{title:"Groups",one:"Group",add:"Add group",
   intro:"Named sets of users. A service admits groups, so who may reach it changes by moving people "+
         "in and out of a group rather than by editing the service.",
   cols:[["name","Name"],["description","Description"]],
@@ -155,7 +158,7 @@ export const E={
    {k:"name",l:"Name",t:"text"},
    {k:"description",l:"Description",t:"text"}]},
 
- "acme/accounts":{title:"ACME Accounts",add:"Add account",
+ "acme/accounts":{title:"ACME Accounts",one:"ACME Account",add:"Add account",
   intro:"ACME accounts used to request certificates.",
   cols:[["name","Name"],["email","E-mail"],["ca","CA"]],
   fields:[
@@ -165,7 +168,7 @@ export const E={
    {k:"eab_kid",l:"EAB key ID",t:"text",h:"Only for ZeroSSL / Google"},
    {k:"eab_hmac",l:"EAB HMAC key",t:"password"}]},
 
- "acme/challenges":{title:"Challenge Types",add:"Add challenge type",
+ "acme/challenges":{title:"Challenge Types",one:"Challenge Type",add:"Add challenge type",
   intro:"How domain ownership is proven. HTTP-01 uses a local listener that HAProxy routes /.well-known/acme-challenge/ to; DNS-01 uses an acme.sh DNS hook.",
   cols:[["name","Name"],["method","Method"],
         ["prov","DNS provider",r=>r.method==="dns01"?"<span class=mono>"+esc(r.dns_provider||"")+"</span>"+
@@ -180,7 +183,7 @@ export const E={
    {k:"dns_credentials",l:"DNS API credentials",t:"textarea",
     h:"One KEY=value per line. Choosing a hook above fills in the names it needs."}]},
 
- "acme/certificates":{title:"Certificates",add:"Add certificate",
+ "acme/certificates":{title:"Certificates",one:"Certificate",add:"Add certificate",
   intro:"Certificates are issued with acme.sh and written as combined PEMs to the HAProxy certificate directory. HAProxy is reloaded and the certificate is pushed to the other nodes automatically. "+
         "Until a certificate is issued, Apply installs a short-lived self-signed placeholder so HAProxy can still start.",
   cols:[["name","Name",r=>esc(r.name)+"<div class=sub>"+esc((r.domains||"").split(/\s+/).filter(Boolean).join(", "))+"</div>"],
@@ -263,23 +266,24 @@ export async function renderEntity(key,into){
   }
   const card=document.createElement("div");card.className="card";
   const hd=document.createElement("div");hd.className="hd";
-  hd.innerHTML="<h2>"+esc(def.title)+"</h2><div class=sp></div>";
+  hd.innerHTML="<h2>"+esc(t(def.title))+"</h2><div class=sp></div>";
   if(!state.readOnly){
     if(key==="acme/certificates"){
-      hd.appendChild(btn("Request a certificate","pri sm",()=>openCertWizard()));
+      hd.appendChild(btn(t("Request a certificate"),"pri sm",()=>openCertWizard()));
       hd.appendChild(document.createTextNode(" "));
-      hd.appendChild(btn(def.add,"sm",()=>openEditor(key)));
+      hd.appendChild(btn(t(def.add),"sm",()=>openEditor(key)));
     }else{
-      hd.appendChild(btn(def.add,"pri sm",()=>openEditor(key)));
+      hd.appendChild(btn(t(def.add),"pri sm",()=>openEditor(key)));
     }
   }
   card.appendChild(hd);
   const bd=document.createElement("div");
   if(!items.length){
-    bd.innerHTML='<div class="empty">'+esc(def.intro)+"<br><br>Nothing here yet -- use "+esc(def.add)+" to create the first entry.</div>";
+    bd.innerHTML='<div class="empty">'+esc(t(def.intro))+"<br><br>"+
+      t("Nothing here yet -- use {add} to create the first entry.",{add:esc(t(def.add))})+"</div>";
   }else{
-    const t=document.createElement("table");
-    t.innerHTML="<thead><tr>"+def.cols.map(c=>"<th>"+esc(c[1])+"</th>").join("")+"<th></th></tr></thead>";
+    const tbl=document.createElement("table");
+    tbl.innerHTML="<thead><tr>"+def.cols.map(c=>"<th>"+esc(t(c[1]))+"</th>").join("")+"<th></th></tr></thead>";
     const tb=document.createElement("tbody");
     items.forEach(row=>{
       const tr=document.createElement("tr");
@@ -289,32 +293,33 @@ export async function renderEntity(key,into){
         /* Mark what a published service owns, in the first column where the
            name is, so it is obvious before anything is clicked. */
         if(ci===0&&row.managed_by){
-          td.innerHTML+=' <span class="pill off" title="Part of the service '+
-            esc(row.managed_by)+'. Change it under Services, not here.">service</span>';
+          td.innerHTML+=' <span class="pill off" title="'+
+            esc(t("Part of the service {name}. Change it under Services, not here.",{name:row.managed_by}))+
+            '">'+t("service")+'</span>';
         }
         tr.appendChild(td);
       });
       const act=document.createElement("td");act.style.textAlign="right";act.style.whiteSpace="nowrap";
       (state.readOnly?[]:(def.rowActions||[])).forEach(a=>{
-        const b=btn(a.label,"sm "+(a.cls||""),()=>a.fn(row));
-        if(a.title)b.title=a.title;
+        const b=btn(t(a.label),"sm "+(a.cls||""),()=>a.fn(row));
+        if(a.title)b.title=t(a.title);
         act.appendChild(b);act.appendChild(document.createTextNode(" "));
       });
-      act.appendChild(btn(state.readOnly?"View":"Edit","sm",()=>openEditor(key,row)));
+      act.appendChild(btn(state.readOnly?t("View"):t("Edit"),"sm",()=>openEditor(key,row)));
       if(!state.readOnly){
       act.appendChild(document.createTextNode(" "));
-      act.appendChild(btn("Delete","sm dngr",async()=>{
+      act.appendChild(btn(t("Delete"),"sm dngr",async()=>{
         /* users are named by username, everything else by name */
-        if(!confirm("Delete \""+(row.name||row.username||"this")+"\"?"))return;
+        if(!confirm(t("Delete \"{name}\"?",{name:row.name||row.username||t("this")})))return;
         /* re-render the page, not just this table: it may be one of several */
           try{await api(key+"/"+row.id,"DELETE");await route();refreshStatus();}
         catch(e){alert(e.message);}
       }));}
       tr.appendChild(act);tb.appendChild(tr);
     });
-    t.appendChild(tb);bd.appendChild(t);
+    tbl.appendChild(tb);bd.appendChild(tbl);
     const hint=document.createElement("div");hint.className="hint";hint.style.padding="10px 16px";
-    hint.textContent=def.intro;bd.appendChild(hint);
+    hint.textContent=t(def.intro);bd.appendChild(hint);
   }
   card.appendChild(bd);c.appendChild(card);
 }
@@ -336,10 +341,10 @@ export function openEditor(key,item){
     w.className="hint";
     w.style.cssText="border:1px solid #e3cfa8;border-radius:6px;padding:10px 12px;"+
                     "margin-bottom:14px;color:var(--ink)";
-    w.innerHTML="<b>This belongs to the service &ldquo;"+esc(item.managed_by)+"&rdquo;.</b><br>"+
-      "Edit it under <b>Services</b> instead: publishing that service again rebuilds "+
-      "these objects, and anything changed here that the service also sets would be "+
-      "overwritten.";
+    w.innerHTML="<b>"+t("This belongs to the service &ldquo;{name}&rdquo;.",{name:esc(item.managed_by)})+"</b><br>"+
+      t("Edit it under <b>Services</b> instead: publishing that service again rebuilds "+
+        "these objects, and anything changed here that the service also sets would be "+
+        "overwritten.");
     wrap.appendChild(w);
   }
   const frm=document.createElement("div");frm.className="frm";
@@ -352,18 +357,18 @@ export function openEditor(key,item){
     const mk=label=>{const b=document.createElement("button");b.type="button";b.className="btn sm";
       b.style.cssText="border:0;border-radius:4px 4px 0 0;border-bottom:2px solid transparent";
       b.textContent=label;tabs.appendChild(b);return b;};
-    const tFields=mk("Settings"),tCfg=mk("haproxy.cfg");
+    const tFields=mk(t("Settings")),tCfg=mk("haproxy.cfg");
     const pre=document.createElement("pre");pre.textContent="";
     const note=document.createElement("div");note.className="hint";note.style.marginTop="8px";
-    note.textContent="Exactly what Apply will write for this object, from the values as they "+
-      "are now. Raw lines the fields do not cover go in Extra directives, under Settings.";
+    note.textContent=t("Exactly what Apply will write for this object, from the values as they "+
+      "are now. Raw lines the fields do not cover go in Extra directives, under Settings.");
     cfgPane.appendChild(pre);cfgPane.appendChild(note);
     const show=which=>{
       frm.hidden=which!=="fields";cfgPane.hidden=which!=="cfg";
       tFields.style.borderBottomColor=which==="fields"?"var(--line)":"transparent";
       tCfg.style.borderBottomColor=which==="cfg"?"var(--line)":"transparent";
       if(which==="cfg"){
-        pre.textContent="rendering...";
+        pre.textContent=t("rendering...");
         api("haproxy/preview-object","POST",{col:key.split("/")[1],
             item:Object.assign({},item||{},readForm(def.fields))})
           .then(r=>{pre.textContent=r.text||r.note||"";})
@@ -377,9 +382,9 @@ export function openEditor(key,item){
   wrap.appendChild(frm);
   wrap.appendChild(cfgPane);
   const err=document.createElement("div");err.className="err";
-  openDlg((item?"Edit ":"New ")+def.title.replace(/s$/,""),wrap,[err,
-    btn("Cancel","",closeDlg),
-    btn("Save","pri",async()=>{
+  openDlg(t(item?"Edit {what}":"New {what}",{what:t(def.one)}),wrap,[err,
+    btn(t("Cancel"),"",closeDlg),
+    btn(t("Save"),"pri",async()=>{
       const data=readForm(def.fields);
       try{
         if(item)await api(key+"/"+item.id,"PUT",Object.assign({},item,data));
@@ -398,9 +403,9 @@ export async function renderSettings(key,into){
   const c=into||$("#content");
   if(!into)c.innerHTML="";
   const card=document.createElement("div");card.className="card";
-  card.innerHTML='<div class=hd><h2>'+esc(def.title)+'</h2></div>';
+  card.innerHTML='<div class=hd><h2>'+esc(t(def.title))+'</h2></div>';
   const bd=document.createElement("div");bd.className="bd";
-  const intro=document.createElement("p");intro.className="hint";intro.style.marginBottom="14px";intro.textContent=def.intro;
+  const intro=document.createElement("p");intro.className="hint";intro.style.marginBottom="14px";intro.textContent=t(def.intro);
   bd.appendChild(intro);
   const frm=document.createElement("div");frm.className="frm";
   def.fields.forEach(f=>fieldRow(f,cur[f.k]).forEach(el=>frm.appendChild(el)));
@@ -408,27 +413,27 @@ export async function renderSettings(key,into){
   const foot=document.createElement("div");foot.style.marginTop="16px";
   const msg=document.createElement("span");msg.className="hint";msg.style.marginLeft="10px";
   const shared=!def.sub;          // sub-keyed pages write to local settings
-  const save=btn("Save","pri",async()=>{
+  const save=btn(t("Save"),"pri",async()=>{
     const data=readForm(def.fields);
     try{
       await api(def.ep,"PUT",def.sub?{[def.sub]:data}:data);
-      msg.textContent="Saved.";refreshStatus();
+      msg.textContent=t("Saved.");refreshStatus();
     }catch(e){
-      msg.innerHTML='<span class="pill down">not saved</span>';
-      showText("Not saved",e.message);
+      msg.innerHTML='<span class="pill down">'+t("not saved")+'</span>';
+      showText(t("Not saved"),e.message);
     }
   });
-  if(state.readOnly&&shared){save.disabled=true;msg.textContent="Read-only on a passive node.";}
+  if(state.readOnly&&shared){save.disabled=true;msg.textContent=t("Read-only on a passive node.");}
   foot.appendChild(save);
   if(shared){
     foot.appendChild(document.createTextNode(" "));
-    foot.appendChild(btn("Validate","",async()=>{
-      msg.textContent="Checking...";
+    foot.appendChild(btn(t("Validate"),"",async()=>{
+      msg.textContent=t("Checking...");
       try{
         const r=await api("validate","POST",{section:def.ep.split("/")[0],settings:readForm(def.fields)});
-        msg.innerHTML=r.ok?'<span class="pill up">valid</span> '+esc(r.message)
-                          :'<span class="pill down">not valid</span>';
-        if(!r.ok)showText("These settings would not work",r.message);
+        msg.innerHTML=r.ok?'<span class="pill up">'+t("valid")+'</span> '+esc(r.message)
+                          :'<span class="pill down">'+t("not valid")+'</span>';
+        if(!r.ok)showText(t("These settings would not work"),r.message);
       }catch(e){msg.textContent=e.message;}
     }));
   }
