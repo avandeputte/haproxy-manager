@@ -1,73 +1,105 @@
-import { $, HEALTH_LABEL, api, btn, closeDlg, esc, fieldEl, fieldRow, list, openDlg, readForm, showText } from "../core.js";
+import { $, HEALTH_LABEL, api, btn, closeDlg, esc, fieldEl, fieldRow, list, openDlg, readForm, selectOption, showText } from "../core.js";
 import { t } from "../i18n.js";
 import { refreshStatus, route } from "../shell.js";
 import { CERT_STATUS } from "../pages/certificates.js";
 import { state } from "../state.js";
 import { sparkCaption, trafficSpark } from "../sparkline.js";
 
-/* ---- services (the simple view) ---- */
-export const WIZ_FIELDS=[
- {k:"url",l:"Public URLs",t:"textarea",
-  h:"One per line. Several names are alternatives that all reach the same servers, e.g. "+
-    "https://app.example.com and https://www.example.com. A path like /api is allowed on a single "+
-    "URL, and tcp://0.0.0.0:3306 forwards a raw TCP port."},
- {k:"target",l:"Forward to",t:"text",
-  h:"e.g. http://192.168.1.100:1781. Several (comma separated) are load balanced, and each may be named: galera1=192.168.1.81:3306"},
- {k:"name",l:"Name",t:"text",h:"Optional -- derived from the host name or port when left empty"},
- {k:"balance",l:"Load balancing",t:"select",d:"roundrobin",o:["roundrobin","leastconn","source","static-rr","uri"],
-  h:"source keeps a client on one server by IP; the default for tcp:// services"},
- {k:"persistence",l:"Stickiness",t:"select",d:"none",o:["none","source","cookie"],
-  h:"source = a stick table on the client IP (works for TCP). cookie = HTTP only."},
- {k:"stick_type",l:"Stick table type",t:"select",d:"ip",o:["ip","ipv6"],h:"ip stores IPv4 addresses; ipv6 also holds IPv4-mapped ones"},
- {k:"stick_size",l:"Stick table size",t:"text",d:"50k"},
- {k:"stick_expire",l:"Stick table expiry",t:"text",d:"30m"},
- {k:"cert_mode",l:"Certificate",t:"select",d:"auto",
-  o:["auto","new","none"],
-  h:"HTTPS only. \"auto\" reuses an existing certificate that already covers this host -- including a wildcard -- and only requests a new one when nothing does."},
- {k:"account",l:"ACME account",t:"ref",ref:"acme/accounts",h:"For a new certificate; only needed when you have more than one"},
- {k:"challenge",l:"Challenge type",t:"ref",ref:"acme/challenges"},
- {k:"health",l:"Health check",t:"select",d:"http",o:["none","tcp","http","ssl","pgsql","mysql"],
-  h:"How HAProxy decides a server is alive. Dead servers are taken out of rotation."},
- {k:"health_interval",l:"Check every",t:"text",d:"2s",h:"e.g. 2s, 10s"},
- {k:"health_uri",l:"Request path",t:"text",d:"/",h:"For the HTTP check, e.g. /health"},
- {k:"health_status",l:"Expected status",t:"text",d:"200",h:"For the HTTP check. Leave empty to accept any 2xx/3xx."},
- {k:"health_method",l:"Request method",t:"select",d:"GET",o:["GET","HEAD","OPTIONS","POST"]},
- {k:"health_version",l:"HTTP version",t:"select",d:"",o:["","HTTP/1.1","HTTP/2"],
-  h:"Leave empty unless the checked service needs one -- Patroni's REST API wants HTTP/2"},
- {k:"health_host",l:"Host header",t:"text",h:"Sent with the check request, e.g. localhost"},
- {k:"health_user",l:"Database user",t:"text",h:"For the database checks. Only the login handshake runs -- no password is sent -- so an unprivileged account is enough."},
- {k:"check_port",l:"Check port",t:"text",
-  h:"Optional. Check a different port from the one traffic uses -- e.g. route to PostgreSQL on 5432 while checking Patroni's HTTP API on 8008."},
- {k:"timeout_connect",l:"Connect timeout",t:"text",h:"Optional, for this pool only, e.g. 5s"},
- {k:"timeout_server",l:"Server timeout",t:"text",h:"Optional, for this pool only, e.g. 30s. Long-lived connections such as databases usually need more than the default."},
- {k:"log_health_checks",l:"Log health check changes",t:"bool",h:"option log-health-checks -- records every up/down transition"},
- {k:"notify_mode",l:"Alert when",t:"select",d:"servers",o:["servers","outage","off"],
-  h:"What losing a server means here. For a pool where only one server is meant to pass -- a Patroni leader, a primary with standbys -- the rest failing is normal running, so alert only when no server is left."},
- {k:"allow_src",l:"Allowed networks",t:"textarea",
-  h:"Optional. One address or CIDR per line, e.g. 192.168.0.0/16 -- requests from anywhere else are refused. Works for tcp:// services too. Empty allows all."},
- {k:"rate_limit",l:"Requests per client",t:"number",
-  h:"Optional. A client address that asks more than this many times in the window below is refused until it slows down -- HTTP answers 429, TCP drops the connection. Counted in the pool's stick table. Empty means no limit."},
- {k:"rate_window",l:"Rate window (seconds)",t:"number",d:10,h:"The sliding window the requests are counted over, e.g. 10. Only used when a limit is set."},
- {k:"auth_enabled",l:"Require a sign-in",t:"bool",
-  h:"Ask visitors for a user name and password before letting them through. HAProxy checks it, so an unauthenticated request never reaches the servers. Manage the accounts under Sign-in."},
- {k:"auth_groups",l:"Allowed groups",t:"refmulti",ref:"access/groups",
-  h:"Leave nothing ticked to admit any user"},
- {k:"auth_realm",l:"Sign-in prompt",t:"text",
-  h:"What the browser shows above its password box. Defaults to the service name."},
- {k:"auth_exempt",l:"Skip the sign-in from",t:"textarea",
-  h:"Optional. Networks trusted without a password -- typically the LAN, e.g. 192.168.1.0/24. Everyone else is asked to sign in."},
- {k:"oauth_enabled",l:"Require single sign-on (OIDC)",t:"bool",
-  h:"Send visitors to the identity provider before letting them through. HAProxy verifies the session and this service's allow-list on every request. Configure the provider under Sign-in > Single sign-on."},
- {k:"oauth_allow",l:"Allowed identities",t:"textarea",
-  h:"One per line: an email, a whole domain as @example.com, or * for anyone the provider signs in."},
- {k:"oauth_forward",l:"Pass the signed-in email to the servers",t:"bool",
-  h:"Sets X-Auth-Request-Email and Remote-User on forwarded requests, so apps that trust a "+
-    "proxy identity (Grafana auth-proxy and friends) sign the visitor in themselves. Any copy "+
-    "of these headers a client sends is stripped on every service, so the value is always this "+
-    "proxy's word. Only safe while the app is reachable through the proxy alone."},
- {k:"http_redirect",l:"Redirect HTTP to HTTPS",t:"bool",d:true,h:"Also listens on port 80 and sends visitors to HTTPS"},
- {k:"apply",l:"Apply immediately",t:"bool",d:true,h:"Write haproxy.cfg and reload once the objects are created"},
+/* ---- services (the simple view) ----
+   The form is long, so it is laid out in sections under headings. A section
+   that is optional opens with one checkbox and shows its settings only once
+   that is ticked; an unticked section means what it says -- no check, no
+   limit, no sign-in -- whatever the hidden fields still hold. The checkboxes
+   are not stored: whether a section is on is read off what it holds. */
+export const WIZ_SECTIONS=[
+ {title:"Service",fields:[
+  {k:"url",l:"Public URLs",t:"textarea",
+   h:"One per line. Several names are alternatives that all reach the same servers, e.g. "+
+     "https://app.example.com and https://www.example.com. A path like /api is allowed on a single "+
+     "URL, and tcp://0.0.0.0:3306 forwards a raw TCP port."},
+  {k:"target",l:"Forward to",t:"text",
+   h:"e.g. http://192.168.1.100:1781. Several (comma separated) are load balanced, and each may be named: galera1=192.168.1.81:3306"},
+  {k:"name",l:"Name",t:"text",h:"Optional -- derived from the host name or port when left empty"},
+  {k:"apply",l:"Apply immediately",t:"bool",d:true,h:"Write haproxy.cfg and reload once the objects are created"},
+ ]},
+ /* HTTPS only: a raw TCP port has no host name to certify. */
+ {title:"Certificate",http:true,fields:[
+  {k:"cert_mode",l:"Certificate",t:"select",d:"auto",
+   o:["auto","new","none"],
+   h:"\"auto\" reuses an existing certificate that already covers this host -- including a wildcard -- and only requests a new one when nothing does."},
+  {k:"account",l:"ACME account",t:"ref",ref:"acme/accounts",h:"For a new certificate; only needed when you have more than one"},
+  {k:"challenge",l:"Challenge type",t:"ref",ref:"acme/challenges"},
+  {k:"http_redirect",l:"Redirect HTTP to HTTPS",t:"bool",d:true,h:"Also listens on port 80 and sends visitors to HTTPS"},
+ ]},
+ {title:"Health check",toggle:"health_enabled",fields:[
+  {k:"health_enabled",l:"Check the servers' health",t:"bool",d:true,
+   h:"A server that fails the check is taken out of rotation and put back when it answers again. Without a check every server is always considered up."},
+  {k:"health",l:"Check type",t:"select",d:"http",o:["tcp","http","ssl","pgsql","mysql"],
+   h:"How HAProxy decides a server is alive."},
+  {k:"health_interval",l:"Check every",t:"text",d:"2s",h:"e.g. 2s, 10s"},
+  {k:"health_uri",l:"Request path",t:"text",d:"/",h:"For the HTTP check, e.g. /health"},
+  {k:"health_status",l:"Expected status",t:"text",d:"200",h:"For the HTTP check. Leave empty to accept any 2xx/3xx."},
+  {k:"health_method",l:"Request method",t:"select",d:"GET",o:["GET","HEAD","OPTIONS","POST"]},
+  {k:"health_version",l:"HTTP version",t:"select",d:"",o:["","HTTP/1.1","HTTP/2"],
+   h:"Leave empty unless the checked service needs one -- Patroni's REST API wants HTTP/2"},
+  {k:"health_host",l:"Host header",t:"text",h:"Sent with the check request, e.g. localhost"},
+  {k:"health_user",l:"Database user",t:"text",h:"For the database checks. Only the login handshake runs -- no password is sent -- so an unprivileged account is enough."},
+  {k:"check_port",l:"Check port",t:"text",
+   h:"Optional. Check a different port from the one traffic uses -- e.g. route to PostgreSQL on 5432 while checking Patroni's HTTP API on 8008."},
+  {k:"log_health_checks",l:"Log health check changes",t:"bool",h:"option log-health-checks -- records every up/down transition"},
+  {k:"notify_mode",l:"Alert when",t:"select",d:"servers",o:["servers","outage","off"],
+   h:"What losing a server means here. For a pool where only one server is meant to pass -- a Patroni leader, a primary with standbys -- the rest failing is normal running, so alert only when no server is left."},
+ ]},
+ {title:"Balancing and timeouts",fields:[
+  {k:"balance",l:"Load balancing",t:"select",d:"roundrobin",o:["roundrobin","leastconn","source","static-rr","uri"],
+   h:"source keeps a client on one server by IP; the default for tcp:// services"},
+  {k:"persistence",l:"Stickiness",t:"select",d:"none",o:["none","source","cookie"],
+   h:"source = a stick table on the client IP (works for TCP). cookie = HTTP only."},
+  {k:"stick_type",l:"Stick table type",t:"select",d:"ip",o:["ip","ipv6"],h:"ip stores IPv4 addresses; ipv6 also holds IPv4-mapped ones"},
+  {k:"stick_size",l:"Stick table size",t:"text",d:"50k"},
+  {k:"stick_expire",l:"Stick table expiry",t:"text",d:"30m"},
+  {k:"timeout_connect",l:"Connect timeout",t:"text",h:"Optional, for this pool only, e.g. 5s"},
+  {k:"timeout_server",l:"Server timeout",t:"text",h:"Optional, for this pool only, e.g. 30s. Long-lived connections such as databases usually need more than the default."},
+ ]},
+ {title:"Allowed networks",toggle:"allow_enabled",fields:[
+  {k:"allow_enabled",l:"Only allow certain networks",t:"bool",
+   h:"Requests from anywhere else are refused. Works for tcp:// services too."},
+  {k:"allow_src",l:"Networks",t:"textarea",h:"One address or CIDR per line, e.g. 192.168.0.0/16"},
+ ]},
+ {title:"Rate limiting",toggle:"rate_enabled",fields:[
+  {k:"rate_enabled",l:"Enable rate limiting",t:"bool",
+   h:"A client address that asks too often is refused until it slows down -- HTTP answers 429, TCP drops the connection. Counted in the pool's stick table."},
+  {k:"rate_limit",l:"Requests per client",t:"number",
+   h:"How many requests one client address may make in the window below, e.g. 100"},
+  {k:"rate_window",l:"Rate window (seconds)",t:"number",d:10,h:"The sliding window the requests are counted over, e.g. 10"},
+ ]},
+ /* Basic authentication is part of HTTP; a raw TCP port has nowhere to carry it. */
+ {title:"Sign-in",toggle:"auth_enabled",http:true,fields:[
+  {k:"auth_enabled",l:"Require a sign-in",t:"bool",
+   h:"Ask visitors for a user name and password before letting them through. HAProxy checks it, so an unauthenticated request never reaches the servers. Manage the accounts under Sign-in."},
+  {k:"auth_groups",l:"Allowed groups",t:"refmulti",ref:"access/groups",
+   h:"Leave nothing ticked to admit any user"},
+  {k:"auth_realm",l:"Sign-in prompt",t:"text",
+   h:"What the browser shows above its password box. Defaults to the service name."},
+  {k:"auth_exempt",l:"Skip the sign-in from",t:"textarea",
+   h:"Optional. Networks trusted without a password -- typically the LAN, e.g. 192.168.1.0/24. Everyone else is asked to sign in."},
+ ]},
+ {title:"Single sign-on (OIDC)",toggle:"oauth_enabled",http:true,fields:[
+  {k:"oauth_enabled",l:"Require single sign-on (OIDC)",t:"bool",
+   h:"Send visitors to the identity provider before letting them through. HAProxy verifies the session and this service's allow-list on every request. Configure the provider under Sign-in > Single sign-on."},
+  {k:"oauth_allow",l:"Allowed identities",t:"textarea",
+   h:"One per line: an email, a whole domain as @example.com, or * for anyone the provider signs in."},
+  {k:"oauth_forward",l:"Pass the signed-in email to the servers",t:"bool",
+   h:"Sets X-Auth-Request-Email and Remote-User on forwarded requests, so apps that trust a "+
+     "proxy identity (Grafana auth-proxy and friends) sign the visitor in themselves. Any copy "+
+     "of these headers a client sends is stripped on every service, so the value is always this "+
+     "proxy's word. Only safe while the app is reachable through the proxy alone."},
+ ]},
 ];
+/* every field, in the order it is shown -- what the form reads and sends */
+export const WIZ_FIELDS=WIZ_SECTIONS.flatMap(sec=>sec.fields);
+/* the three checkboxes that only stand for a section being on or off */
+const SECTION_ONLY=["health_enabled","allow_enabled","rate_enabled"];
 /* which of the health_* rows make sense for each check kind */
 export const HEALTH_SHOWS={none:[],tcp:["health_interval"],ssl:["health_interval"],
   http:["health_interval","health_uri","health_status","health_method","health_version","health_host"],
@@ -114,6 +146,18 @@ export async function loadRecipes(){
 }
 
 export function openWizard(prefill){
+  if(prefill){
+    /* What is being edited says which optional sections are on: a service
+       with a limit has rate limiting on, one whose check is "none" has the
+       check off. Nothing asked the caller to say so. */
+    prefill=Object.assign({},prefill);
+    if(prefill.health_enabled===undefined)
+      prefill.health_enabled=prefill.health===undefined||(!!prefill.health&&prefill.health!=="none");
+    if(prefill.health==="none")prefill.health="http";   // the checkbox carries "none"
+    if(prefill.allow_enabled===undefined)prefill.allow_enabled=!!String(prefill.allow_src||"").trim();
+    if(prefill.rate_enabled===undefined)
+      prefill.rate_enabled=prefill.rate_limit!==undefined&&prefill.rate_limit!==null&&String(prefill.rate_limit).trim()!=="";
+  }
   const wrap=document.createElement("div");
 
   /* A recipe fills in everything except the name to publish and the servers
@@ -148,6 +192,12 @@ export function openWizard(prefill){
           const cell=(rows[k]||[])[1];
           const el=cell&&cell.querySelector("input,select,textarea");
           if(!el)return;
+          if(k==="health"){   // "none" is the section's checkbox, not an option
+            const tg=rows.health_enabled[1].querySelector("input");
+            tg.checked=r.fields.health!=="none";
+            if(tg.checked)el.value=r.fields.health;
+            return;
+          }
           if(el.type==="checkbox")el.checked=!!r.fields[k];
           else el.value=r.fields[k];
         });
@@ -158,11 +208,15 @@ export function openWizard(prefill){
   }
 
   const frm=document.createElement("div");frm.className="frm";
-  const rows={};
-  WIZ_FIELDS.forEach(f=>{
-    const cells=fieldRow(f,prefill?prefill[f.k]:undefined);
-    rows[f.k]=cells;
-    cells.forEach(el=>frm.appendChild(el));
+  const rows={},heads={};
+  WIZ_SECTIONS.forEach(sec=>{
+    const h=document.createElement("div");h.className="fsec";h.textContent=t(sec.title);
+    heads[sec.title]=h;frm.appendChild(h);
+    sec.fields.forEach(f=>{
+      const cells=fieldRow(f,prefill?prefill[f.k]:undefined);
+      rows[f.k]=cells;
+      cells.forEach(el=>frm.appendChild(el));
+    });
   });
   wrap.appendChild(frm);
   // friendlier labels than the raw option values
@@ -174,28 +228,29 @@ export function openWizard(prefill){
   if(nsel)[...nsel.options].forEach(o=>{o.textContent=t(NOTIFY_MODE_LABEL[o.value]||o.value);});
   const setRow=(k,on)=>{(rows[k]||[]).forEach(el=>{el.style.display=on?"":"none";});};
   const val=k=>((fieldEl(k)||{}).value||"");
+  const on=k=>!!(fieldEl(k)||{}).checked;
+  /* a select's value, read off the marked option where .value is not there */
+  const chosen=sel=>sel?(sel.value!==undefined?sel.value:(([...sel.options].find(o=>o.selected)||{}).value||"")):"";
   const syncRows=()=>{
-    const show=HEALTH_SHOWS[hsel?hsel.value:"none"]||[];
+    /* tcp:// forwards a raw port: no host name, so no certificate and no
+       redirect, and nowhere to carry a sign-in. Those sections go, heading
+       and all, rather than being offered and refused. */
+    const isTcp=val("url").trim().toLowerCase().startsWith("tcp");
+    WIZ_SECTIONS.forEach(sec=>{
+      const shown=!(sec.http&&isTcp);
+      heads[sec.title].style.display=shown?"":"none";
+      const open=shown&&(!sec.toggle||on(sec.toggle));
+      sec.fields.forEach(f=>setRow(f.k,f.k===sec.toggle?shown:open));
+    });
+    // and within an open section, the rows that follow from a choice in it
+    const show=on("health_enabled")?(HEALTH_SHOWS[chosen(hsel)||"none"]||[]):[];
     ["health_interval","health_uri","health_status","health_user","health_method",
      "health_version","health_host"].forEach(k=>setRow(k,show.includes(k)));
-    setRow("check_port",(hsel?hsel.value:"none")!=="none");
-    // tcp:// forwards a raw port: no host name, so no certificate and no redirect
-    const isTcp=val("url").trim().toLowerCase().startsWith("tcp");
-    ["cert_mode","account","challenge","http_redirect"].forEach(k=>setRow(k,!isTcp));
-    /* Basic authentication is part of HTTP; a raw TCP port has nowhere to
-       carry it, so the whole idea is hidden rather than offered and refused. */
-    const authOn=!isTcp&&!!(fieldEl("auth_enabled")||{}).checked;
-    setRow("auth_enabled",!isTcp);
-    ["auth_groups","auth_realm","auth_exempt"].forEach(k=>setRow(k,authOn));
-    const oauthOn=!isTcp&&!!(fieldEl("oauth_enabled")||{}).checked;
-    setRow("oauth_enabled",!isTcp);
-    setRow("oauth_allow",oauthOn);
-    setRow("oauth_forward",oauthOn);
     ["stick_type","stick_size","stick_expire"].forEach(k=>setRow(k,val("persistence")==="source"));
     /* A raw TCP port cannot answer an HTTP check -- unless the check is aimed at
        a different port, which is exactly how Patroni is fronted: traffic to
        PostgreSQL on 5432, the check to its REST API on 8008. */
-    if(isTcp&&!val("check_port").trim()&&hsel&&hsel.value==="http")hsel.value="tcp";
+    if(isTcp&&!val("check_port").trim()&&chosen(hsel)==="http")selectOption(hsel,"tcp");
   };
   const note=document.createElement("div");note.className="hint";note.style.margin="2px 0 0";
   const noteRow=document.createElement("div");noteRow.appendChild(note);
@@ -205,6 +260,11 @@ export function openWizard(prefill){
 
   const read=()=>{
     const d=readForm(WIZ_FIELDS);
+    /* an unticked section is off, whatever its hidden fields still say */
+    if(!d.health_enabled)d.health="none";
+    if(!d.allow_enabled)d.allow_src="";
+    if(!d.rate_enabled)d.rate_limit="";
+    SECTION_ONLY.forEach(k=>delete d[k]);
     d.certificate=d.cert_mode!=="none";        // "none" attaches nothing
     d.new_certificate=d.cert_mode==="new";     // otherwise reuse whatever covers the host
     if(prefill&&prefill.certificate_id&&d.cert_mode==="auto")d.certificate_id=prefill.certificate_id;
@@ -258,7 +318,7 @@ export function openWizard(prefill){
      rows that should appear and disappear as the URL changes stayed as they
      were first drawn. */
   if(hsel)hsel.addEventListener("change",syncRows);
-  ["url","persistence","auth_enabled"].forEach(k=>{
+  ["url","persistence","auth_enabled","oauth_enabled",...SECTION_ONLY].forEach(k=>{
     const el=fieldEl(k);
     if(el){el.addEventListener("change",syncRows);el.addEventListener("input",syncRows);
            el.addEventListener("blur",syncRows);}

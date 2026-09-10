@@ -125,7 +125,7 @@ for name, text in (DOCS.items() if shape and not shape.group(2) else []):
 # names and the select values are checked against WIZ_FIELDS itself.
 import json
 wiz = (ROOT / "static" / "js" / "pages" / "services.js").read_text()
-wiz = wiz[wiz.index("export const WIZ_FIELDS"):]
+wiz = wiz[wiz.index("export const WIZ_SECTIONS"):]
 wiz = wiz[:wiz.index("\n];")]
 WIZ_KEYS, WIZ_OPTIONS = set(), {}
 for row in re.findall(r"\{k:\"(\w+)\"(.*?)\}", wiz, re.S):

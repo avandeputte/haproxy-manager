@@ -173,6 +173,11 @@ pre{font:12px/1.5 var(--mono);background:#0f191e;color:#d5e2e0;padding:14px;bord
 /* ---- forms ---- */
 .frm{display:grid;grid-template-columns:190px 1fr;gap:12px 16px;align-items:start}
 .frm label.fl{font:600 12px var(--mono);color:var(--mist);padding-top:7px;text-align:right}
+/* A section heading in a form: across both columns, a hairline above all
+   but the first, so a long form reads as a few short ones. */
+.frm .fsec{grid-column:1/-1;font:600 11px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;
+  color:var(--mist);border-top:1px solid var(--hair);padding-top:14px;margin-top:4px}
+.frm .fsec:first-child{border-top:0;padding-top:0;margin-top:0}
 .frm input[type=text],.frm input[type=number],.frm input[type=password],.frm select,.frm textarea{
   width:100%;max-width:460px;padding:7px 9px;border:1px solid var(--hair);border-radius:4px;font:13px var(--sans);background:var(--field);color:var(--ink)}
 .frm textarea{font-family:var(--mono);font-size:12.5px;min-height:74px}
