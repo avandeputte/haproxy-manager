@@ -8,12 +8,13 @@ import base64
 import json
 import os
 import re
+import shlex
 import shutil
 import time
 import urllib.parse
 import urllib.request
 
-from .base import (DATA_DIR, INSTALL_URL, PEER_CONNECT_TIMEOUT, PEER_READ_TIMEOUT,
+from .base import (BETA_REF, DATA_DIR, INSTALL_URL, PEER_CONNECT_TIMEOUT, PEER_READ_TIMEOUT,
     UPDATE_CHECK_HOURS, UPDATE_REF, UPDATE_REPO, VERSION, VERSION_URL, _lock,
     _requests, app, log)
 from .config import load_config, save_config
@@ -26,16 +27,34 @@ UPDATE_LOG = DATA_DIR / "update.log"
 UPDATE_UNIT = "haproxy-manager-update"
 
 
+# A version is numbers, and may carry a prerelease mark: 1.95.0-beta.1.
+# Nothing else read off the network is taken for one.
+VERSION_RE = re.compile(r"^v?\d+(?:\.\d+)*(?:-(?:alpha|beta|rc)(?:\.\d+)?)?$")
+_STAGE = {"alpha": 0, "beta": 1, "rc": 2}
+
+
 def version_tuple(v):
-    parts = re.split(r"[.\-+]", (v or "").strip().lstrip("vV"))
-    out = []
-    for p in parts[:4]:
-        out.append(int(p) if p.isdigit() else 0)
-    return tuple(out + [0] * (4 - len(out)))
+    """A sortable shape. A prerelease sits above every earlier version and
+    below its own release: 1.94.1 < 1.95.0-beta.1 < 1.95.0-beta.2 < 1.95.0."""
+    number, _, pre = (v or "").strip().lstrip("vV").partition("-")
+    out = [int(p) if p.isdigit() else 0 for p in number.split(".")[:4]]
+    out += [0] * (4 - len(out))
+    if not pre:
+        return tuple(out) + (1, 0, 0)
+    stage, _, n = pre.partition(".")
+    return tuple(out) + (0, _STAGE.get(stage.lower(), 0), int(n) if n.isdigit() else 0)
 
 
 def is_newer(candidate, current):
     return version_tuple(candidate) > version_tuple(current)
+
+
+def is_prerelease(v):
+    return "-" in (v or "").strip()
+
+
+def wants_beta(cfg):
+    return bool(((cfg.get("local") or {}).get("updates") or {}).get("beta"))
 
 
 def _read_version_url(url):
@@ -50,23 +69,21 @@ def _read_version_url(url):
     return body
 
 
-def fetch_latest_version():
-    """The published version.
+def _version_at(ref):
+    """The VERSION file on one ref.
 
     Ask the GitHub API first: raw.githubusercontent.com is behind a CDN that
     serves a file for up to five minutes after it changes, so a check straight
     after a release reports the previous version. The API is not cached that
     way. Fall back to raw if the API is unreachable or rate limited.
     """
-    if os.environ.get("HAM_VERSION_URL"):
-        return _read_version_url(VERSION_URL)      # explicitly pointed somewhere
-    urls = ["https://api.github.com/repos/%s/contents/VERSION?ref=%s" % (UPDATE_REPO, UPDATE_REF),
-            VERSION_URL]
+    urls = ["https://api.github.com/repos/%s/contents/VERSION?ref=%s" % (UPDATE_REPO, ref),
+            "https://raw.githubusercontent.com/%s/%s/VERSION" % (UPDATE_REPO, ref)]
     last = None
     for url in urls:
         try:
             body = _read_version_url(url)
-            if re.match(r"^v?\d+(\.\d+)*$", body):
+            if VERSION_RE.match(body):
                 return body
             last = ValueError("unexpected content at %s: %r" % (url, body[:40]))
         except Exception as e:
@@ -74,15 +91,52 @@ def fetch_latest_version():
     raise last or ValueError("no version source answered")
 
 
+def fetch_latest_version(beta=False):
+    """(version, ref) of the newest version this node is willing to take.
+
+    A release is whatever main carries: publishing one is a push there. A
+    beta is the same file on the beta branch, read only when this node has
+    asked for betas, and taken only when it is newer than the release. A beta
+    branch that cannot be read means there is no beta, not that the check
+    failed -- the branch is simply absent between betas.
+    """
+    if os.environ.get("HAM_VERSION_URL"):
+        return _read_version_url(VERSION_URL), UPDATE_REF      # explicitly pointed somewhere
+    latest, ref = _version_at(UPDATE_REF), UPDATE_REF
+    if beta and BETA_REF != UPDATE_REF:
+        try:
+            candidate = _version_at(BETA_REF)
+        except Exception as e:
+            log.info("no beta to read on %s: %s", BETA_REF, e)
+        else:
+            if is_newer(candidate, latest):
+                latest, ref = candidate, BETA_REF
+    return latest, ref
+
+
+def _offer(cfg):
+    """(version, ref) the last check found, as this node would take it now.
+
+    A beta seen while betas were wanted is not on offer once they are not:
+    the page would otherwise keep showing an update the node has just said
+    it does not want, until the next daily check.
+    """
+    info = cfg["_meta"].get("update") or {}
+    latest = info.get("latest") or ""
+    if latest and is_prerelease(latest) and not wants_beta(cfg):
+        return "", UPDATE_REF
+    return latest, info.get("ref") or UPDATE_REF
+
+
 def check_for_update():
     """Ask GitHub for the published version and remember the answer."""
     result = {"checked": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-              "latest": "", "available": False, "error": ""}
+              "latest": "", "ref": UPDATE_REF, "available": False, "error": ""}
     try:
-        latest = fetch_latest_version()
-        if not re.match(r"^v?\d+(\.\d+)*$", latest):
+        latest, ref = fetch_latest_version(wants_beta(load_config()))
+        if not VERSION_RE.match(latest):
             raise ValueError("unexpected content at VERSION: %r" % latest[:40])
-        result["latest"] = latest
+        result["latest"], result["ref"] = latest, ref
         result["available"] = is_newer(latest, VERSION)
     except Exception as e:
         result["error"] = str(e)
@@ -94,11 +148,12 @@ def check_for_update():
         cur["_meta"]["update"] = result      # _meta: not hashed, not synced
         save_config(cur)
     if result["available"]:
+        kind = "beta" if is_prerelease(result["latest"]) else "version"
         notify.notify_transition("update:" + result["latest"], "available", "updates",
                           "haproxy-manager %s is available" % result["latest"],
-                          "This node runs %s. Version %s has been published.\n\n"
+                          "This node runs %s. %s %s has been published.\n\n"
                           "Update from Settings > Updates."
-                          % (VERSION, result["latest"]), "info", cur)
+                          % (VERSION, kind.capitalize(), result["latest"]), "info", cur)
     return result
 
 
@@ -115,16 +170,21 @@ def update_supported():
 def api_version():
     cfg = load_config()
     info = cfg["_meta"].get("update") or {}
+    latest, ref = _offer(cfg)
     ok, why = update_supported()
     return jsonify({
         "version": VERSION,
-        "latest": info.get("latest", ""),
+        "this_is_beta": is_prerelease(VERSION),
+        "latest": latest,
+        "latest_ref": ref,
+        "latest_is_beta": is_prerelease(latest),
         # Recomputed, not read back: after an update the stored flag is stale
         # until the next daily check.
-        "available": bool(info.get("latest")) and is_newer(info["latest"], VERSION),
+        "available": bool(latest) and is_newer(latest, VERSION),
         "checked": info.get("checked", ""),
         "error": info.get("error", ""),
         "repo": UPDATE_REPO, "ref": UPDATE_REF,
+        "beta": wants_beta(cfg), "beta_ref": BETA_REF,
         "can_update": ok, "cannot_update_reason": why,
         "updating": _update_running(),
         # How many other nodes there are, so the page can offer to update them
@@ -144,15 +204,16 @@ def _update_running():
     return out.strip().startswith("activ")
 
 
-def update_peers(cfg):
-    """Ask every other node to update itself.
+def update_peers(cfg, ref):
+    """Ask every other node to update itself, from the same ref as this one.
 
     Sent before this node starts its own: the update restarts this service, so
     a node that has already begun cannot be the one telling the others. The
     other nodes are told, and then this one goes.
 
     Each node runs the same installer against the same source, so there is
-    nothing to hand over -- only the instruction. A node that does not answer
+    nothing to hand over -- only the instruction, and the branch it names, so
+    a beta started here is the beta they take too. A node that does not answer
     is named and left alone rather than retried: an update is a thing a person
     started, and they should be the one to decide what to do about the node
     that missed it.
@@ -169,7 +230,7 @@ def update_peers(cfg):
         url = (peer.get("url") or "").rstrip("/")
         name = peer.get("name") or url
         try:
-            r = _requests.post(url + "/api/update", json={},
+            r = _requests.post(url + "/api/update", json={"ref": ref},
                                headers={"X-API-Key": peer.get("api_key", "")},
                                timeout=(PEER_CONNECT_TIMEOUT, PEER_READ_TIMEOUT),
                                verify=bool(peer.get("verify_tls")))
@@ -192,6 +253,27 @@ def update_peers(cfg):
     return out
 
 
+def _update_ref(asked, cfg):
+    """The branch or tag the updater installs.
+
+    What another node asked for, when it started the update; otherwise what
+    this node's own last check found, which is main unless a beta was wanted
+    and newer. A ref is a name for the installer's command line, so it is
+    held to the characters one can be made of.
+    """
+    if asked:
+        asked = str(asked)
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,99}", asked):
+            raise ValueError("not a branch or tag: %r" % asked[:40])
+        return asked
+    return _offer(cfg)[1]
+
+
+def _update_shell(url, ref):
+    return ("curl -fsSL %s | bash -s -- --update --yes --ref %s >>%s 2>&1"
+            % (url, shlex.quote(ref), UPDATE_LOG))
+
+
 @app.post("/api/update")
 def api_update():
     ok, why = update_supported()
@@ -199,9 +281,15 @@ def api_update():
         return jsonify({"ok": False, "error": why}), 400
     if _update_running():
         return jsonify({"ok": False, "error": "an update is already running"}), 409
+    body = request.get_json(silent=True) or {}
+    cfg = load_config()
+    try:
+        ref = _update_ref(body.get("ref"), cfg)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
 
     # The other nodes first, while this one is still running to ask them.
-    peers = update_peers(load_config()) if (request.get_json(silent=True) or {}).get("peers") else None
+    peers = update_peers(cfg, ref) if body.get("peers") else None
 
     url = INSTALL_URL
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -211,13 +299,13 @@ def api_update():
     except OSError:
         pass
     with open(UPDATE_LOG, "a") as f:
-        f.write("\n=== update started %s (from %s) ===\n"
-                % (datetime.now(timezone.utc).isoformat(timespec="seconds"), url))
+        f.write("\n=== update started %s (from %s, ref %s) ===\n"
+                % (datetime.now(timezone.utc).isoformat(timespec="seconds"), url, ref))
 
     # systemd-run puts the updater in its own unit. Running it as a child of
     # this service would kill it halfway: restarting haproxy-manager.service
     # takes down everything in that service's cgroup, the updater included.
-    shell = "curl -fsSL %s | bash -s -- --update --yes >>%s 2>&1" % (url, UPDATE_LOG)
+    shell = _update_shell(url, ref)
     if shutil.which("systemd-run"):
         cmd = ["systemd-run", "--unit=" + UPDATE_UNIT, "--collect", "--quiet",
                "/bin/sh", "-c", shell]
@@ -228,7 +316,7 @@ def api_update():
         log.error("could not start the updater: %s", out)
         return jsonify({"ok": False, "error": "could not start the updater: %s" % out,
                         "nodes": peers}), 500
-    log.warning("update started from %s -- this service will restart", url)
+    log.warning("update started from %s (ref %s) -- this service will restart", url, ref)
     body = {"ok": True,
             "note": "The update is running. This service restarts when it finishes."}
     if peers is not None:

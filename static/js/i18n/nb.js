@@ -1169,4 +1169,10 @@ export default {
 "the rate limit must be at least 1, or empty for no limit": "grensen må være minst 1, eller tom for ingen grense",
 "the rate window must be a whole number of seconds": "tidsvinduet må være et helt antall sekunder",
 "the rate window must be between 1 and 3600 seconds": "tidsvinduet må være mellom 1 og 3600 sekunder",
+
+/* ---- updates.js: the beta channel ---- */
+"Also offer beta versions": "Tilby også betaversjoner",
+"A beta is published to try a change out before it becomes a release. It can still change, and a node on a beta takes the release when it comes. Updating the other nodes from here moves them to the same version, beta or not.": "En beta publiseres for å prøve en endring før den blir en utgivelse. Den kan fortsatt endre seg, og en node på en beta tar utgivelsen når den kommer. Oppdateres de andre nodene herfra, flyttes de til samme versjon, beta eller ikke.",
+"beta": "beta",
+"Checked once a day against <span class=mono>{repo}</span> ({ref}, and {beta} for betas).": "Sjekkes én gang om dagen mot <span class=mono>{repo}</span> ({ref}, og {beta} for betaversjoner).",
 };

@@ -1169,4 +1169,10 @@ export default {
 "the rate limit must be at least 1, or empty for no limit": "la limite de débit doit être d'au moins 1, ou vide pour aucune limite",
 "the rate window must be a whole number of seconds": "la fenêtre de débit doit être un nombre entier de secondes",
 "the rate window must be between 1 and 3600 seconds": "la fenêtre de débit doit être comprise entre 1 et 3600 secondes",
+
+/* ---- updates.js: the beta channel ---- */
+"Also offer beta versions": "Proposer aussi les versions bêta",
+"A beta is published to try a change out before it becomes a release. It can still change, and a node on a beta takes the release when it comes. Updating the other nodes from here moves them to the same version, beta or not.": "Une bêta est publiée pour essayer un changement avant qu'il ne devienne une version. Elle peut encore changer, et un nœud sur une bêta prend la version quand elle sort. Mettre à jour les autres nœuds d'ici les amène à la même version, bêta ou non.",
+"beta": "bêta",
+"Checked once a day against <span class=mono>{repo}</span> ({ref}, and {beta} for betas).": "Vérifié une fois par jour auprès de <span class=mono>{repo}</span> ({ref}, et {beta} pour les bêtas).",
 };

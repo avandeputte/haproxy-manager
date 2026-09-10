@@ -1169,4 +1169,10 @@ export default {
 "the rate limit must be at least 1, or empty for no limit": "el límite de tasa debe ser al menos 1, o vacío para no limitar",
 "the rate window must be a whole number of seconds": "la ventana de tasa debe ser un número entero de segundos",
 "the rate window must be between 1 and 3600 seconds": "la ventana de tasa debe estar entre 1 y 3600 segundos",
+
+/* ---- updates.js: the beta channel ---- */
+"Also offer beta versions": "Ofrecer también versiones beta",
+"A beta is published to try a change out before it becomes a release. It can still change, and a node on a beta takes the release when it comes. Updating the other nodes from here moves them to the same version, beta or not.": "Una beta se publica para probar un cambio antes de que se convierta en versión. Todavía puede cambiar, y un nodo en una beta toma la versión cuando sale. Actualizar los otros nodos desde aquí los lleva a la misma versión, beta o no.",
+"beta": "beta",
+"Checked once a day against <span class=mono>{repo}</span> ({ref}, and {beta} for betas).": "Se comprueba una vez al día contra <span class=mono>{repo}</span> ({ref}, y {beta} para las betas).",
 };

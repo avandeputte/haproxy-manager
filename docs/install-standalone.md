@@ -43,16 +43,16 @@ package mirrors.
 
 ```bash
 # Debian / Ubuntu
-curl -fsSLO https://github.com/avandeputte/haproxy-manager/releases/latest/download/haproxy-manager_1.94.1_all.deb
-sudo apt-get install -y ./haproxy-manager_1.94.1_all.deb
+curl -fsSLO https://github.com/avandeputte/haproxy-manager/releases/latest/download/haproxy-manager_1.94.2_all.deb
+sudo apt-get install -y ./haproxy-manager_1.94.2_all.deb
 
 # Fedora
-curl -fsSLO https://github.com/avandeputte/haproxy-manager/releases/latest/download/haproxy-manager-1.94.1-1.noarch.rpm
-sudo dnf install -y ./haproxy-manager-1.94.1-1.noarch.rpm
+curl -fsSLO https://github.com/avandeputte/haproxy-manager/releases/latest/download/haproxy-manager-1.94.2-1.noarch.rpm
+sudo dnf install -y ./haproxy-manager-1.94.2-1.noarch.rpm
 
 # RHEL / Rocky / Alma -- python3-flask and python3-waitress live in EPEL
 sudo dnf install -y epel-release
-sudo dnf install -y ./haproxy-manager-1.94.1-1.noarch.rpm
+sudo dnf install -y ./haproxy-manager-1.94.2-1.noarch.rpm
 ```
 
 The package installs and starts the service, prints the generated
@@ -192,6 +192,11 @@ From the shell, which does the same thing:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash -s -- --update --yes
 ```
+
+A beta — a version published on the `beta` branch to try before its release —
+is offered by the UI once *Also offer beta versions* is ticked on the Updates
+page. From the shell it is the same command with `--ref beta`; the release,
+when it comes, is newer than the beta and is offered as usual.
 
 An update replaces `app.py`, `ham/`, `static/` and `VERSION`, and rewrites the systemd
 unit. It does not touch `config.json`, certificates or ACME account keys. If the

@@ -12,17 +12,43 @@ export async function renderUpdates(){
   card.innerHTML='<div class=hd><h2>'+t("Version")+'</h2></div>';
   const bd=document.createElement("div");bd.className="bd";
   bd.innerHTML='<div class=grid style="margin-bottom:16px">'+
-    '<div class=stat><div class=k>'+t("Installed")+'</div><div class=v>'+esc(v.version)+"</div></div>"+
-    '<div class=stat><div class=k>'+t("Published")+'</div><div class=v>'+esc(v.latest||"—")+"</div></div>"+
+    '<div class=stat><div class=k>'+t("Installed")+'</div><div class=v>'+esc(v.version)+
+      (v.this_is_beta?' <span class="pill warn">'+t("beta")+'</span>':"")+"</div></div>"+
+    '<div class=stat><div class=k>'+t("Published")+'</div><div class=v>'+esc(v.latest||"—")+
+      (v.latest_is_beta?' <span class="pill warn">'+t("beta")+'</span>':"")+"</div></div>"+
     '<div class=stat><div class=k>'+t("Status")+'</div><div class="v" style="font-size:13px">'+
       (v.available?'<span class="pill warn">'+t("update available")+'</span>'
                   :v.latest?'<span class="pill up">'+t("up to date")+'</span>':'<span class="pill off">'+t("not checked yet")+'</span>')+"</div></div>"+
     '<div class=stat><div class=k>'+t("Last checked")+'</div><div class="v" style="font-size:13px">'+
       (v.checked?fmtTime(v.checked):t("never"))+"</div></div></div>"+
-    '<p class=hint>'+t("Checked once a day against <span class=mono>{repo}</span> ({ref}).",{repo:esc(v.repo),ref:esc(v.ref)})+
+    '<p class=hint>'+(v.beta
+      ?t("Checked once a day against <span class=mono>{repo}</span> ({ref}, and {beta} for betas).",{repo:esc(v.repo),ref:esc(v.ref),beta:esc(v.beta_ref)})
+      :t("Checked once a day against <span class=mono>{repo}</span> ({ref}).",{repo:esc(v.repo),ref:esc(v.ref)}))+
     (v.error?" "+t("Last check failed: {error}",{error:esc(v.error)}):"")+"</p>";
   const row=document.createElement("div");row.style.marginTop="14px";
   const msg=document.createElement("div");msg.className="hint";msg.style.marginTop="12px";
+  /* Betas: the same version file on the beta branch, read only by a node that
+     has asked. Changing the answer checks again at once, so the page never
+     shows an update the node has just said it does not want, or hides one it
+     has just asked for. */
+  const chan=document.createElement("label");chan.style.cssText="display:block;margin-bottom:10px";
+  const beta=document.createElement("input");beta.type="checkbox";beta.id="f_update_beta";beta.checked=!!v.beta;
+  chan.appendChild(beta);
+  chan.appendChild(document.createTextNode(" "+t("Also offer beta versions")));
+  const bh=document.createElement("div");bh.className="hint";
+  bh.textContent=t("A beta is published to try a change out before it becomes a release. It can still "+
+    "change, and a node on a beta takes the release when it comes. Updating the other nodes "+
+    "from here moves them to the same version, beta or not.");
+  chan.appendChild(bh);
+  beta.addEventListener("change",async()=>{
+    beta.disabled=true;msg.textContent=t("Checking...");
+    try{
+      await api("local","PUT",{updates:{beta:beta.checked}});
+      await api("version/check","POST",{});
+      await renderUpdates();
+    }catch(e){msg.textContent=e.message;beta.disabled=false;}
+  });
+  row.appendChild(chan);
   /* Updating a cluster one node at a time means visiting each one and waiting.
      Offered only when there is somewhere to send it. */
   let alsoPeers=null;

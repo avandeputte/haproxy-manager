@@ -102,9 +102,12 @@ for path in ["/var/lib/haproxy-manager/config.json", "/opt/haproxy-manager",
 # Three components, so the package filenames match VERSION exactly rather than
 # being normalised to semver by the packager.
 version = (ROOT / "VERSION").read_text().strip()
-check(re.fullmatch(r"\d+\.\d+\.\d+", version) is not None,
-      "VERSION is not three components", version)
-for name, text in DOCS.items():
+shape = re.fullmatch(r"(\d+\.\d+\.\d+)(-beta\.\d+)?", version)
+check(shape is not None, "VERSION is not three components, with at most a -beta.N", version)
+# The documented file names are the release's. A beta has its own packages
+# and image, but releases/latest never serves a pre-release, so on a beta the
+# docs keep naming the release they came from and are not held to VERSION.
+for name, text in (DOCS.items() if shape and not shape.group(2) else []):
     for quoted in re.findall(r'haproxy-manager:(\d+\.\d+(?:\.\d+)?)', text):
         check(quoted == version, "%s pins an old image tag" % name,
               "says %s, VERSION is %s" % (quoted, version))

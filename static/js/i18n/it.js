@@ -1169,4 +1169,10 @@ export default {
 "the rate limit must be at least 1, or empty for no limit": "il limite di frequenza deve essere almeno 1, oppure vuoto per nessun limite",
 "the rate window must be a whole number of seconds": "la finestra di frequenza deve essere un numero intero di secondi",
 "the rate window must be between 1 and 3600 seconds": "la finestra di frequenza deve essere compresa tra 1 e 3600 secondi",
+
+/* ---- updates.js: the beta channel ---- */
+"Also offer beta versions": "Offri anche le versioni beta",
+"A beta is published to try a change out before it becomes a release. It can still change, and a node on a beta takes the release when it comes. Updating the other nodes from here moves them to the same version, beta or not.": "Una beta viene pubblicata per provare una modifica prima che diventi una versione. Può ancora cambiare, e un nodo su una beta passa alla versione quando esce. Aggiornare gli altri nodi da qui li porta alla stessa versione, beta o no.",
+"beta": "beta",
+"Checked once a day against <span class=mono>{repo}</span> ({ref}, and {beta} for betas).": "Controllato una volta al giorno su <span class=mono>{repo}</span> ({ref}, e {beta} per le beta).",
 };

@@ -1169,4 +1169,10 @@ export default {
 "the rate limit must be at least 1, or empty for no limit": "das Ratenlimit muss mindestens 1 sein, oder leer für kein Limit",
 "the rate window must be a whole number of seconds": "das Ratenfenster muss eine ganze Zahl von Sekunden sein",
 "the rate window must be between 1 and 3600 seconds": "das Ratenfenster muss zwischen 1 und 3600 Sekunden liegen",
+
+/* ---- updates.js: the beta channel ---- */
+"Also offer beta versions": "Auch Betaversionen anbieten",
+"A beta is published to try a change out before it becomes a release. It can still change, and a node on a beta takes the release when it comes. Updating the other nodes from here moves them to the same version, beta or not.": "Eine Beta wird veröffentlicht, um eine Änderung auszuprobieren, bevor sie zu einer Version wird. Sie kann sich noch ändern, und ein Knoten auf einer Beta übernimmt die Version, sobald sie erscheint. Werden die anderen Knoten von hier aus aktualisiert, landen sie auf derselben Version, Beta oder nicht.",
+"beta": "Beta",
+"Checked once a day against <span class=mono>{repo}</span> ({ref}, and {beta} for betas).": "Einmal täglich gegen <span class=mono>{repo}</span> ({ref}, und {beta} für Betas) geprüft.",
 };

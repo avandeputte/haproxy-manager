@@ -16,7 +16,7 @@ copying it across.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.94.1_all.deb
+sudo apt-get install -y ./haproxy-manager_1.94.2_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -958,6 +958,17 @@ and **HAProxy keeps serving traffic** — only the management UI restarts.
 
 One-click update applies to the installer-managed (systemd) install. In a
 container the button explains that you should pull a new image instead.
+
+**Betas.** A change worth trying before it is released goes out as a beta: the
+same code on the `beta` branch with a version like `1.95.0-beta.1`, its own
+packages and image, and a release marked *pre-release* on GitHub. No node
+offers it until *Also offer beta versions* is ticked under **Settings →
+Updates**; from then on the daily check reads both branches and offers
+whichever is newer, and a node on a beta takes the release when it comes
+(`1.95.0` is newer than `1.95.0-beta.1`). Untick it and the beta stops being
+offered at once. Updating the other nodes from a beta node moves them to the
+same beta — the update carries its branch — so a cluster stays on one version
+either way. `HAM_BETA_REF` names a different branch.
 
 To publish a new version: bump `VERSION`, push, and every node offers it within
 a day. The check asks the GitHub API rather than `raw.githubusercontent.com`,

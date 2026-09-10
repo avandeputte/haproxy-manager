@@ -133,6 +133,10 @@ DEFAULT_CONFIG = {
                   "iterations": 0, "updated": ""},
         "session_secret": "",      # HMAC key for session cookies; rotating it logs everyone out
         "session_hours": 12,
+        # Whether the daily version check also reads the beta branch. Per
+        # node: it is a choice about this node, and an update started here
+        # carries its branch to the other nodes anyway.
+        "updates": {"beta": False},
         "keepalived": {
             "enabled": False,
             "interface": "eth0",

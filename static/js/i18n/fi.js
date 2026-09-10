@@ -1169,4 +1169,10 @@ export default {
 "the rate limit must be at least 1, or empty for no limit": "rajan on oltava vähintään 1, tai tyhjä jos rajaa ei ole",
 "the rate window must be a whole number of seconds": "laskenta-ikkunan on oltava kokonaisluku sekunteja",
 "the rate window must be between 1 and 3600 seconds": "laskenta-ikkunan on oltava 1–3600 sekuntia",
+
+/* ---- updates.js: the beta channel ---- */
+"Also offer beta versions": "Tarjoa myös betaversioita",
+"A beta is published to try a change out before it becomes a release. It can still change, and a node on a beta takes the release when it comes. Updating the other nodes from here moves them to the same version, beta or not.": "Beta julkaistaan, jotta muutosta voi kokeilla ennen kuin siitä tulee julkaisu. Se voi vielä muuttua, ja betalla oleva solmu ottaa julkaisun, kun se tulee. Muiden solmujen päivittäminen täältä vie ne samaan versioon, beta tai ei.",
+"beta": "beta",
+"Checked once a day against <span class=mono>{repo}</span> ({ref}, and {beta} for betas).": "Tarkistetaan kerran päivässä lähteestä <span class=mono>{repo}</span> ({ref}, ja {beta} betoja varten).",
 };

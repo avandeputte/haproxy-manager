@@ -1169,4 +1169,10 @@ export default {
 "the rate limit must be at least 1, or empty for no limit": "de limiet moet minstens 1 zijn, of leeg voor geen limiet",
 "the rate window must be a whole number of seconds": "het telvenster moet een geheel aantal seconden zijn",
 "the rate window must be between 1 and 3600 seconds": "het telvenster moet tussen 1 en 3600 seconden liggen",
+
+/* ---- updates.js: the beta channel ---- */
+"Also offer beta versions": "Ook bètaversies aanbieden",
+"A beta is published to try a change out before it becomes a release. It can still change, and a node on a beta takes the release when it comes. Updating the other nodes from here moves them to the same version, beta or not.": "Een bèta wordt uitgebracht om een wijziging uit te proberen voordat ze een release wordt. Ze kan nog veranderen, en een node op een bèta neemt de release zodra die er is. De andere nodes van hieruit bijwerken brengt ze op dezelfde versie, bèta of niet.",
+"beta": "bèta",
+"Checked once a day against <span class=mono>{repo}</span> ({ref}, and {beta} for betas).": "Eén keer per dag gecontroleerd tegen <span class=mono>{repo}</span> ({ref}, en {beta} voor bèta's).",
 };

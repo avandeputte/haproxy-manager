@@ -169,6 +169,8 @@ def local_settings():
         for key in ("api_key", "node_url"):
             if key in body:
                 cfg["local"][key] = body[key].strip() if isinstance(body[key], str) else body[key]
+        if isinstance(body.get("updates"), dict) and "beta" in body["updates"]:
+            cfg["local"].setdefault("updates", {})["beta"] = bool(body["updates"]["beta"])
         save_config(cfg)
         return jsonify(cfg["local"])
 
