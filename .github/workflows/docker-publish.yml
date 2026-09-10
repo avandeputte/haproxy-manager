@@ -58,7 +58,11 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
+            # "latest" is the tip of main: a branch build there, or a release
+            # tag on a version without a prerelease mark. A beta's tag build
+            # must not move it -- it did once, and a pull of the plain image
+            # name got the beta.
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || (startsWith(github.ref, 'refs/tags/') && !contains(steps.version.outputs.value, '-')) }}
             # Always tag with VERSION, on a branch build and a tag build alike,
             # so `docker pull …:1.48.0` works whichever triggered it and the
             # image tag matches the file the app reports.
