@@ -479,8 +479,18 @@ def api_preview():
     return jsonify({"haproxy": haproxy.render_haproxy(cfg), "keepalived": ka})
 
 
+_APPLY_MIN_INTERVAL = 2.0  # seconds; do_apply is CPU-intensive, so blunt rapid repeat calls
+_last_apply = [0.0]
+
+
 @app.post("/api/apply")
 def api_apply():
+    with _lock:
+        now = time.time()
+        if now - _last_apply[0] < _APPLY_MIN_INTERVAL:
+            return jsonify({"ok": False,
+                            "error": "applying too frequently -- wait a moment and try again"}), 429
+        _last_apply[0] = now
     return jsonify(do_apply())
 
 
