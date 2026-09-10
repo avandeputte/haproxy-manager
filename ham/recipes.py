@@ -148,6 +148,8 @@ def api_wizard_publish():
                 oauth_opts=body.get("oauth") if isinstance(body.get("oauth"), dict) else None,
                 allow_src=body.get("allow_src") if isinstance(body.get("allow_src"), str) else None,
                 notify_mode=body.get("notify_mode") or None,
+                rate_limit=body.get("rate_limit") if "rate_limit" in body else None,
+                rate_window=body.get("rate_window") if "rate_window" in body else None,
             )
         except ValueError as e:                     # a rejected request, not a crash
             return jsonify({"ok": False, "error": str(e)}), 400

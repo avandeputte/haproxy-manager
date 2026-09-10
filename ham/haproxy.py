@@ -87,6 +87,23 @@ def _rule_line(rule, conds, backends):
 MAX_INLINE_CERTS = 20
 
 
+def _rate_limit(be):
+    """A pool's ceiling per client address: (requests, window in seconds).
+
+    (0, 0) when there is none. Anything that is not a positive whole number
+    is no limit rather than a broken one -- the form refuses such values, and
+    the renderer must never write a directive HAProxy would trip over."""
+    def num(key, default):
+        v = be.get(key)
+        s = "" if v is None else str(v).strip()
+        return int(s) if s else default
+    try:
+        rate, window = num("rate_limit", 0), num("rate_window", 10)
+    except ValueError:
+        return 0, 0
+    return (rate, window) if rate > 0 and window > 0 else (0, 0)
+
+
 def render_haproxy(cfg):
     """What this node serves: the shared configuration plus its own objects.
 
@@ -340,6 +357,21 @@ def render_haproxy(cfg):
             else:
                 A("    # every allowed network is malformed, so nobody is")
                 A("    " + deny)
+        # A ceiling per client address: one that asks more than `rate` times
+        # in `window` seconds is refused until it slows down -- a 429 in
+        # HTTP, a dropped connection in TCP. The counter lives in the pool's
+        # stick table, declared further down with the persistence settings,
+        # since a proxy has one table and both uses share it. Before the
+        # sign-in rules, deliberately: refusing is cheap, and a flood should
+        # not get to exercise the identity provider.
+        rate, window = _rate_limit(be)
+        if rate:
+            if mode == "http":
+                A("    http-request track-sc0 src")
+                A("    http-request deny deny_status 429 if { sc_http_req_rate(0) gt %d }" % rate)
+            else:
+                A("    tcp-request content track-sc0 src")
+                A("    tcp-request content reject if { sc_conn_rate(0) gt %d }" % rate)
         if sso_ready and mode == "http":
             # Identity headers are the proxy's word alone: whatever a client
             # sent under these names dies here, on every pool, whether or not
@@ -452,14 +484,28 @@ def render_haproxy(cfg):
         use_cookie = be.get("persistence") == "cookie" and mode == "http"
         if use_cookie:
             A("    cookie %s insert indirect nocache" % (be.get("cookie_name") or "SRVID"))
-        elif be.get("persistence") == "source":
+        # One stick table serves both source persistence and the rate limit:
+        # HAProxy allows a single table per proxy, and a key that is a client
+        # address is what both want. Persistence sets its shape; a rate limit
+        # on its own gets a small table keyed by ipv6, which holds IPv4
+        # clients too, kept three windows so a burst is still on record
+        # when its sender comes back.
+        table = None
+        if not use_cookie and be.get("persistence") == "source":
             # Pin a client to one server by source address -- the usual choice
             # for TCP services, where there is no cookie to work with.
             # HAProxy spells the IPv4 type "ip"; "ipv4" is rejected outright.
             stype = be.get("stick_type") if be.get("stick_type") in ("ip", "ipv6") else "ip"
-            A("    stick-table type %s size %s expire %s" % (
-                stype, _sec(be.get("stick_size") or "50k"), _sec(be.get("stick_expire") or "30m")))
-            A("    stick on src")
+            table = (stype, _sec(be.get("stick_size") or "50k"), _sec(be.get("stick_expire") or "30m"))
+        elif rate:
+            table = ("ipv6", "30k", "%ds" % (window * 3))
+        if table:
+            store = ""
+            if rate:
+                store = " store %s(%ds)" % ("http_req_rate" if mode == "http" else "conn_rate", window)
+            A("    stick-table type %s size %s expire %s%s" % (table + (store,)))
+            if not use_cookie and be.get("persistence") == "source":
+                A("    stick on src")
         for sid in be.get("servers") or []:
             sv = servers.get(sid)
             if not sv or not sv.get("enabled", True):

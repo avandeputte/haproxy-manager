@@ -16,7 +16,7 @@ copying it across.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.92.0_all.deb
+sudo apt-get install -y ./haproxy-manager_1.94.0_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -255,6 +255,19 @@ the servers behind it:
 Source-address controls compose with either: **Allowed networks** (a CIDR
 allow-list, which works for `tcp://` services too) and **Skip the sign-in
 from** (networks trusted without a password, typically the LAN).
+
+A **rate limit** rounds this off. *Requests per client* on the service (or
+the pool) refuses a client address that asks more than that many times in a
+sliding window — HTTP with a 429, TCP by dropping the connection — until it
+slows down. The counter lives in the pool's stick table, so it shares the one
+table with source persistence when both are on; alone, 100 requests per 10 s
+comes out as:
+
+```
+http-request track-sc0 src
+http-request deny deny_status 429 if { sc_http_req_rate(0) gt 100 }
+stick-table type ipv6 size 30k expire 30s store http_req_rate(10s)
+```
 
 The whole subject — the settings, the sign-in flow, provider setup, the
 trust model, and what to do when something refuses — lives in

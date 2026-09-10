@@ -46,3 +46,30 @@ def check_setting_types(sec, proposed):
 
 # --------------------------------------------------------------------------
 # generic CRUD
+
+
+# --------------------------------------------------------------------------
+# Backend Pools
+
+def check_pool(item):
+    """Refuse a pool whose rate limit would not render, before it is stored.
+
+    Raises ValueError with the reason. The renderer treats anything that is
+    not a positive whole number as no limit, so a typo accepted here would
+    save as a limit and serve as none -- the one outcome worse than an error.
+    """
+    rate, window = item.get("rate_limit"), item.get("rate_window")
+    if rate not in ("", None):
+        try:
+            r = int(str(rate).strip())
+        except (TypeError, ValueError):
+            raise ValueError("the rate limit must be a whole number of requests per client")
+        if r < 1:
+            raise ValueError("the rate limit must be at least 1, or empty for no limit")
+    if window not in ("", None):
+        try:
+            w = int(str(window).strip())
+        except (TypeError, ValueError):
+            raise ValueError("the rate window must be a whole number of seconds")
+        if not 1 <= w <= 3600:
+            raise ValueError("the rate window must be between 1 and 3600 seconds")

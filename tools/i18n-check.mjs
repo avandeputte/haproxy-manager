@@ -17,7 +17,8 @@
 //   * index.html: the text of every data-i18n element and the attribute of
 //     every data-i18n-<attr> one
 //   * ham/*.py: the fixed "error", "note" and "message" strings the API
-//     answers with, which core.js translates on the way in
+//     answers with, and the fixed reasons a ValueError refuses a request
+//     with, which core.js translates on the way in
 //   * the words the server sends as values and the pages show through t():
 //     roles, service states, what a wizard did
 import fs from "node:fs";
@@ -233,15 +234,17 @@ function keysOfHtml(file){
   return keys;
 }
 
-/* ham/*.py: the fixed phrases the API answers with. Anything with a %s, an
-   f-string or a value added on is assembled around a value and falls through
-   untranslated, so it is not a key. */
+/* ham/*.py: the fixed phrases the API answers with -- an "error", "note" or
+   "message" field, or the reason a ValueError refuses a request with, which
+   the endpoints return as the error. Anything with a %s, an f-string or a
+   value added on is assembled around a value and falls through untranslated,
+   so it is not a key. */
 function keysOfPython(){
   const keys = new Map();
   const files = fs.readdirSync(path.join(ROOT, "ham")).filter(f => f.endsWith(".py"));
   for (const f of files) {
     const { code, lits } = mask(fs.readFileSync(path.join(ROOT, "ham", f), "utf8"), true);
-    const re = /(?:"(\d+)"\s*:|(?<![\w])(error|note|message)\s*=)\s*(?=")/g;
+    const re = /(?:"(\d+)"\s*:|(?<![\w])(?:error|note|message)\s*=|\bValueError\()\s*(?=")/g;
     let m;
     while ((m = re.exec(code))) {
       if (m[1] !== undefined && !["error", "note", "message"].includes(lits[+m[1]].value)) continue;
