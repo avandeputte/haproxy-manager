@@ -10,7 +10,7 @@ import copy
 from .base import _lock, app
 from .config import VALID_COLLECTIONS, load_config, merged, save_config
 from .util import _by_id, _sec
-from .validate import check_setting_types
+from .validate import check_pool, check_setting_types
 from . import apply, haproxy, oauth
 
 # --------------------------------------------------------------------------
@@ -110,6 +110,7 @@ def collection(sec, col):
             cfg = load_config()
             if sec == "haproxy" and col == "backends":
                 try:
+                    check_pool(item)
                     oauth.validate_pool_oauth(cfg, item)
                 except ValueError as e:
                     return jsonify({"error": str(e)}), 400
@@ -141,6 +142,7 @@ def collection_item(sec, col, iid):
                 data = request.get_json(force=True) or {}
                 if sec == "haproxy" and col == "backends":
                     try:
+                        check_pool(data)
                         oauth.validate_pool_oauth(cfg, data)
                     except ValueError as e:
                         return jsonify({"error": str(e)}), 400

@@ -167,7 +167,7 @@ const FIX = {
   "history/s2/restore": { note: "" },
   "logs": { entries: [{ ts: 1, source: "haproxy", level: "INFO", text: "zz-line" }], failed: ["zz-failed"] },
   "services": [{ id: "svc-1", url: "https://app.zz.test", urls: ["https://app.zz.test"], targets: ["http://10.0.0.1:80"], pool: "be-zz", scheme: "https", enabled: true,
-                 auth: { enabled: true, group_names: [], exempt: "10.0.0.0/8" }, oauth: { enabled: true, allow: ["*"] }, allow_src: "10.0.0.0/8", certificate: "obj-1", certificate_match: "wildcard", health: { type: "http" } },
+                 auth: { enabled: true, group_names: [], exempt: "10.0.0.0/8" }, oauth: { enabled: true, allow: ["*"] }, allow_src: "10.0.0.0/8", rate_limit: 100, rate_window: 10, certificate: "obj-1", certificate_match: "wildcard", health: { type: "http" } },
                { id: "svc-2", url: "tcp://0.0.0.0:3306", urls: ["tcp://0.0.0.0:3306"], targets: [], pool: "", scheme: "tcp", enabled: false, maintenance: true, managed: "web-ui" }],
   "probes": { results: [{ url: "https://app.zz.test", state: "down", note: "zz-note" }] },
   "services/svc-1": { removed: [{ type: "zz", name: "obj" }], note: "zz-note" },

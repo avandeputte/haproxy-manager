@@ -13,7 +13,7 @@ import uuid
 from .base import ACME_HOME, ACME_SH, _lock, app
 from .config import load_config, save_config
 from .util import _by_id, _sec, cert_details, cert_path, parse_domains, run
-from . import access, acme, wizard, oauth
+from . import access, acme, validate, wizard, oauth
 
 # --------------------------------------------------------------------------
 
@@ -331,7 +331,8 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
                    balance=None, persistence=None, stick_size=None, stick_expire=None,
                    stick_type=None, log_health_checks=False, check_port=None,
                    timeout_connect=None, timeout_server=None, service_id=None,
-                   auth=None, oauth_opts=None, allow_src=None, notify_mode=None):
+                   auth=None, oauth_opts=None, allow_src=None, notify_mode=None,
+                   rate_limit=None, rate_window=None):
     """Create (or update) everything needed to serve `pub` from `tgts`.
 
     Re-running for the same public host updates that mapping instead of adding
@@ -440,6 +441,17 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
             raise ValueError("not a network: %s -- one address or CIDR per line, "
                              "e.g. 192.168.0.0/16" % ", ".join(bad[:3]))
         pool_opts["allow_src"] = "\n".join(good)
+    # A ceiling per client address. Silence leaves the pool as it is; an
+    # empty limit switches it off. Refused here, where the typo can be fixed,
+    # rather than saved and rendered as no limit at all.
+    if rate_limit is not None:
+        pool_opts["rate_limit"] = "" if str(rate_limit).strip() == "" else rate_limit
+    if rate_window is not None:
+        pool_opts["rate_window"] = "" if str(rate_window).strip() == "" else rate_window
+    validate.check_pool(pool_opts)
+    for k in ("rate_limit", "rate_window"):
+        if pool_opts.get(k) not in ("", None):
+            pool_opts[k] = int(str(pool_opts[k]).strip())
     # A sign-in in front of the service. Silence leaves whatever the pool has:
     # an edit that does not mention it must not switch it off.
     if auth is not None:

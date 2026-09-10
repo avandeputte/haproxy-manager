@@ -60,6 +60,7 @@ reloads. A configuration that does not validate is never written.
 | Balance | round robin, least connections, source |
 | Alert when | what losing a server means here: any server lost (default), only a full outage — for pools where one passing server is the design, like Patroni — or never |
 | Persistence | none, or source-IP stickiness with a table size and expiry |
+| Rate limit | requests per client address over a sliding window (10 s unless changed); a client over it gets a 429 (HTTP) or is dropped (TCP) until it slows down. Empty means no limit. |
 
 ### Recipes
 

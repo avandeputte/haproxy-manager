@@ -428,6 +428,8 @@ def api_services():
                      "exempt": pool.get("auth_exempt_src") or ""},
             "oauth": oauth.pool_summary(pool),
             "allow_src": pool.get("allow_src") or "",
+            "rate_limit": pool.get("rate_limit") or "",
+            "rate_window": pool.get("rate_window") or 10,
             "health": {"type": m.get("type") if m else "none",
                        "interval": (m or {}).get("interval") or "2s",
                        "uri": (m or {}).get("http_uri") or "/",
