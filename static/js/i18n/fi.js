@@ -165,7 +165,7 @@ export default {
 "Requests per client": "Pyyntöjä per asiakas",
 "Optional. A client address that asks more than this many times in the window below is refused until it slows down -- HTTP answers 429, TCP drops the connection. Counted in the pool's stick table. Empty means no limit.": "Valinnainen. Asiakasosoite, joka pyytää useammin kuin näin monta kertaa alla olevassa ikkunassa, hylätään kunnes se hidastaa – HTTP vastaa 429, TCP katkaisee yhteyden. Lasketaan poolin stick tablessa. Tyhjä tarkoittaa ei rajaa.",
 "Rate window (seconds)": "Laskenta-ikkuna (sekuntia)",
-"The sliding window the requests are counted over, e.g. 10": "Liukuva ikkuna, jonka yli pyynnöt lasketaan, esim. 10",
+"The sliding window the requests are counted over, e.g. 10. Only used when a limit is set.": "Liukuva ikkuna, jonka yli pyynnöt lasketaan, esim. 10. Käytössä vain, kun raja on asetettu.",
 "at most {n} connections per {s} s per client": "enintään {n} yhteyttä per {s} s per asiakas",
 "at most {n} requests per {s} s per client": "enintään {n} pyyntöä per {s} s per asiakas",
 "Require a sign-in": "Vaadi kirjautuminen",

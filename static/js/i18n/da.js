@@ -165,7 +165,7 @@ export default {
 "Requests per client": "Forespørgsler pr. klient",
 "Optional. A client address that asks more than this many times in the window below is refused until it slows down -- HTTP answers 429, TCP drops the connection. Counted in the pool's stick table. Empty means no limit.": "Valgfri. En klientadresse, der spørger flere gange end dette inden for vinduet nedenfor, afvises, indtil den sætter farten ned – HTTP svarer 429, TCP afbryder forbindelsen. Tælles i poolens stick table. Tomt betyder ingen grænse.",
 "Rate window (seconds)": "Tidsvindue (sekunder)",
-"The sliding window the requests are counted over, e.g. 10": "Det glidende vindue, forespørgslerne tælles over, f.eks. 10",
+"The sliding window the requests are counted over, e.g. 10. Only used when a limit is set.": "Det glidende vindue, forespørgslerne tælles over, f.eks. 10. Bruges kun, når der er sat en grænse.",
 "at most {n} connections per {s} s per client": "højst {n} forbindelser pr. {s} s pr. klient",
 "at most {n} requests per {s} s per client": "højst {n} forespørgsler pr. {s} s pr. klient",
 "Require a sign-in": "Kræv login",

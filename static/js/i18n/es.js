@@ -165,7 +165,7 @@ export default {
 "Requests per client": "Peticiones por cliente",
 "Optional. A client address that asks more than this many times in the window below is refused until it slows down -- HTTP answers 429, TCP drops the connection. Counted in the pool's stick table. Empty means no limit.": "Opcional. Una dirección de cliente que pida más de este número de veces en la ventana de abajo se rechaza hasta que baje el ritmo – HTTP responde 429, TCP corta la conexión. Se cuenta en la stick table del pool. Vacío significa sin límite.",
 "Rate window (seconds)": "Ventana de tasa (segundos)",
-"The sliding window the requests are counted over, e.g. 10": "La ventana deslizante en la que se cuentan las peticiones, p. ej. 10",
+"The sliding window the requests are counted over, e.g. 10. Only used when a limit is set.": "La ventana deslizante en la que se cuentan las peticiones, p. ej. 10. Solo se usa si hay un límite definido.",
 "at most {n} connections per {s} s per client": "como máximo {n} conexiones por {s} s por cliente",
 "at most {n} requests per {s} s per client": "como máximo {n} peticiones por {s} s por cliente",
 "Require a sign-in": "Exigir inicio de sesión",

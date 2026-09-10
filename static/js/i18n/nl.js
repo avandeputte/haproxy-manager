@@ -165,7 +165,7 @@ export default {
 "Requests per client": "Verzoeken per client",
 "Optional. A client address that asks more than this many times in the window below is refused until it slows down -- HTTP answers 429, TCP drops the connection. Counted in the pool's stick table. Empty means no limit.": "Optioneel. Een clientadres dat in het venster hieronder vaker dan dit aantal keer aanklopt, wordt geweigerd tot het rustiger aan doet – HTTP antwoordt met 429, TCP verbreekt de verbinding. Geteld in de stick table van de pool. Leeg betekent geen limiet.",
 "Rate window (seconds)": "Telvenster (seconden)",
-"The sliding window the requests are counted over, e.g. 10": "Het schuivende venster waarover de verzoeken worden geteld, bv. 10",
+"The sliding window the requests are counted over, e.g. 10. Only used when a limit is set.": "Het schuivende venster waarover de verzoeken worden geteld, bv. 10. Alleen van belang als er een limiet is ingesteld.",
 "at most {n} connections per {s} s per client": "hoogstens {n} verbindingen per {s} s per client",
 "at most {n} requests per {s} s per client": "hoogstens {n} verzoeken per {s} s per client",
 "Require a sign-in": "Aanmelding vereisen",

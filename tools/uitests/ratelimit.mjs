@@ -1,9 +1,11 @@
 /* A rate limit per client, from the wizard's side.
  *
  * The form carries two numbers -- how many, over how long -- and the second
- * means nothing without the first, so its row comes and goes with it. A
- * service that has a limit says so in the list and comes back into the edit
- * form with both numbers. None of that is visible from the API tests.
+ * sits right under the first, visible from the start: the limit's hint
+ * points at "the window below", and a row that only appeared once a number
+ * was typed left that hint pointing at nothing. A service that has a limit
+ * says so in the list and comes back into the edit form with both numbers.
+ * None of that is visible from the API tests.
  */
 let parseHTML;
 for (const where of ["linkedom", process.env.LINKEDOM]) {
@@ -85,18 +87,19 @@ ok(card.textContent.includes("at most 20 connections per 60 s per client"),
 ok(!card.textContent.includes("at most  ") && (card.textContent.match(/at most /g) || []).length === 2,
    "and a service without a limit says nothing about one");
 
-// -- publishing: the window only matters once there is a limit ---------------
+// -- publishing: the window is right there under the limit -------------------
 openWizard();
 const limit = document.querySelector("#f_rate_limit");
 ok(!!limit && limit.type === "number", "the wizard offers a limit, as a number");
 ok(document.querySelector("#f_rate_window").value === "10", "the window starts at 10 seconds");
-ok(rowHidden("rate_window"), "but its row is hidden while there is no limit");
+ok(!rowHidden("rate_window"), "and its row is visible before any limit is typed -- the hint says \"below\"");
+const rows = [...document.querySelectorAll("#dlgbody [data-field]")].map(e => e.getAttribute("data-field"));
+ok(rows.indexOf("rate_window") === rows.indexOf("rate_limit") + 1, "directly below it, nothing in between");
 
 document.querySelector("#f_url").value = "https://shop.example.com";
 document.querySelector("#f_target").value = "http://10.0.0.5:80";
 limit.value = "100";
 limit.dispatchEvent(new window.Event("input"));
-ok(!rowHidden("rate_window"), "typing a limit brings the window row out");
 document.querySelector("#f_rate_window").value = "30";
 
 sent = null;
@@ -107,7 +110,7 @@ ok(!!sent && sent.rate_limit === 100 && sent.rate_window === 30,
 // -- clearing it sends an empty string, which the server reads as no limit --
 limit.value = "";
 limit.dispatchEvent(new window.Event("input"));
-ok(rowHidden("rate_window"), "clearing the limit hides the window again");
+ok(!rowHidden("rate_window"), "clearing the limit leaves the window where it is");
 sent = null;
 await findButton(document.querySelector("#dlgfoot"), "Publish").onclick();
 ok(!!sent && sent.rate_limit === "" && "rate_limit" in sent,
@@ -121,7 +124,6 @@ edit.onclick();
 ok(document.querySelector("#f_rate_limit").value === "100" &&
    document.querySelector("#f_rate_window").value === "10",
    "editing shows the limit and window the service has");
-ok(!rowHidden("rate_window"), "with the window row visible from the start");
 
 console.log(fail ? `\n${fail} failed` : "\na pool's ceiling reaches the wizard and comes back");
 process.exit(fail ? 1 : 0);

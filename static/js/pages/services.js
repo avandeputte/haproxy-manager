@@ -47,7 +47,7 @@ export const WIZ_FIELDS=[
   h:"Optional. One address or CIDR per line, e.g. 192.168.0.0/16 -- requests from anywhere else are refused. Works for tcp:// services too. Empty allows all."},
  {k:"rate_limit",l:"Requests per client",t:"number",
   h:"Optional. A client address that asks more than this many times in the window below is refused until it slows down -- HTTP answers 429, TCP drops the connection. Counted in the pool's stick table. Empty means no limit."},
- {k:"rate_window",l:"Rate window (seconds)",t:"number",d:10,h:"The sliding window the requests are counted over, e.g. 10"},
+ {k:"rate_window",l:"Rate window (seconds)",t:"number",d:10,h:"The sliding window the requests are counted over, e.g. 10. Only used when a limit is set."},
  {k:"auth_enabled",l:"Require a sign-in",t:"bool",
   h:"Ask visitors for a user name and password before letting them through. HAProxy checks it, so an unauthenticated request never reaches the servers. Manage the accounts under Sign-in."},
  {k:"auth_groups",l:"Allowed groups",t:"refmulti",ref:"access/groups",
@@ -192,8 +192,6 @@ export function openWizard(prefill){
     setRow("oauth_allow",oauthOn);
     setRow("oauth_forward",oauthOn);
     ["stick_type","stick_size","stick_expire"].forEach(k=>setRow(k,val("persistence")==="source"));
-    /* the window means nothing without a limit to count against */
-    setRow("rate_window",String(val("rate_limit")).trim()!=="");
     /* A raw TCP port cannot answer an HTTP check -- unless the check is aimed at
        a different port, which is exactly how Patroni is fronted: traffic to
        PostgreSQL on 5432, the check to its REST API on 8008. */
@@ -260,7 +258,7 @@ export function openWizard(prefill){
      rows that should appear and disappear as the URL changes stayed as they
      were first drawn. */
   if(hsel)hsel.addEventListener("change",syncRows);
-  ["url","persistence","auth_enabled","rate_limit"].forEach(k=>{
+  ["url","persistence","auth_enabled"].forEach(k=>{
     const el=fieldEl(k);
     if(el){el.addEventListener("change",syncRows);el.addEventListener("input",syncRows);
            el.addEventListener("blur",syncRows);}
