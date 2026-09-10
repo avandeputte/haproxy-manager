@@ -49,18 +49,21 @@ reloads. A configuration that does not validate is never written.
 
 <img src="img/publish-wizard.png" alt="The publish wizard, started from a recipe" width="900">
 
-**Services → Publish a service.**
+**Services → Publish a service.** The form is in sections. The first four are
+always there; the other five each open with one checkbox and show their
+settings only once it is ticked — and an unticked section is off, whatever
+its fields still hold.
 
-| Field | Notes |
+| Section | Settings |
 | --- | --- |
-| Public URL | `https://shop.example.com`. Several are allowed, separated by commas — they must share a scheme and port. A path (`/api`) routes only that prefix. |
-| Target | `10.0.0.5:8080`, or `name=10.0.0.5:8080` to name the server. Several make a pool. |
-| Certificate | reuse an existing one, issue a new one, use a wildcard that already covers the name, or none |
-| Health check | none, TCP connect, HTTP request, PostgreSQL login, MySQL/MariaDB login |
-| Balance | round robin, least connections, source |
-| Alert when | what losing a server means here: any server lost (default), only a full outage — for pools where one passing server is the design, like Patroni — or never |
-| Persistence | none, or source-IP stickiness with a table size and expiry |
-| Rate limit | requests per client address over a sliding window (10 s unless changed); a client over it gets a 429 (HTTP) or is dropped (TCP) until it slows down. Empty means no limit. |
+| Service | Public URLs: `https://shop.example.com`, several one per line — they must share a scheme and port — a path (`/api`) routes only that prefix, and `tcp://0.0.0.0:3306` forwards a raw port. Forward to: `10.0.0.5:8080`, or `name=10.0.0.5:8080` to name the server; several make a pool. A name, and whether to apply at once. |
+| Certificate | HTTPS only. Reuse an existing one that covers the name (a wildcard included), always request a new one, or none; the ACME account and challenge for a new one; redirect HTTP to HTTPS. |
+| Health check | Ticked by default. TCP connect, HTTP request, SSL, PostgreSQL login or MySQL/MariaDB login, with its interval and the check's own settings; a separate check port; logging of up/down changes; *Alert when* — any server lost (default), only a full outage (for pools where one passing server is the design, like Patroni), or never. |
+| Balancing and timeouts | Round robin, least connections, source, static round robin or URI hash. Stickiness: none, source-IP (a stick table with its type, size and expiry) or cookie. Connect and server timeouts for this pool. |
+| Allowed networks | Off unless ticked. One address or CIDR per line; requests from anywhere else are refused, TCP services included. |
+| Rate limiting | Off unless ticked. Requests per client address over a sliding window (10 s unless changed); a client over it gets a 429 (HTTP) or is dropped (TCP) until it slows down. |
+| Sign-in | Off unless ticked, HTTPS only. Basic authentication: the groups admitted, the prompt, and the networks that skip it. |
+| Single sign-on (OIDC) | Off unless ticked, HTTPS only. The identities allowed, and whether the signed-in email is passed on to the servers. |
 
 ### Recipes
 

@@ -132,6 +132,11 @@ routing Rule, the HTTPS listener, an ACME certificate, and an HTTP listener that
 redirects to HTTPS — then applies. **Preview** shows exactly what it will create,
 and the resulting `haproxy.cfg`, before anything is written.
 
+The form is in sections — Service, Certificate, Health check, Balancing and
+timeouts, Allowed networks, Rate limiting, Sign-in, Single sign-on — and each
+optional section opens with a checkbox. Unticked, it is off, whatever its
+fields still hold, so a limit typed and then unticked is not published.
+
 - **Wildcard certificates are reused, not duplicated.** If a certificate already
   covers the host — `*.example.com` for `app.example.com`, or an exact name —
   the wizard attaches it instead of requesting another one, and says so before

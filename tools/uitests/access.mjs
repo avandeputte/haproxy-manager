@@ -93,6 +93,7 @@ const g2 = [...groupsBox.querySelectorAll("input")].find(c => c.value === "g2");
 g2.checked = true; g2.setAttribute("checked", "");
 document.querySelector("#f_auth_realm").value = "Admin only";
 document.querySelector("#f_auth_exempt").value = "192.168.1.0/24";
+document.querySelector("#f_allow_enabled").checked = true;   // the section's checkbox
 document.querySelector("#f_allow_src").value = "192.168.0.0/16";
 
 sent = null;

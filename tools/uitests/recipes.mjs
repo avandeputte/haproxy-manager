@@ -11,6 +11,8 @@ const RECIPES = [
   {id:"web", name:"Web application", category:"Web", summary:"HTTP with a check on /.",
    notes:"The default.", fields:{url:"https://app.example.com", balance:"roundrobin",
            health:"http", health_uri:"/", health_status:"200"}},
+  {id:"quiet", name:"Unchecked", category:"Web", summary:"No health check.", notes:"",
+   fields:{url:"https://q.example.com", balance:"leastconn", health:"none"}},
 ];
 globalThis.fetch = async (url) => {
   const path = String(url).replace(/^\/api\//,"").split("?")[0];
@@ -50,6 +52,19 @@ sel.value = "web";
 sel.onchange();
 ok(val("url") === "https://app.example.com" && val("health") === "http",
    "choosing another recipe replaces the values");
+
+/* The health check is a section with a checkbox; a recipe's "none" is that
+   checkbox off, and a recipe with a check ticks it back on. */
+sel.value = "quiet";
+sel.onchange();
+ok(val("health_enabled") === false, "a recipe without a check unticks the health section");
+ok(val("balance") === "leastconn", "while its other fields land as before");
+sel.value = "galera";
+sel.onchange();
+ok(val("health_enabled") === true && val("health") === "mysql",
+   "a recipe with a check ticks it and picks the type");
+sel.value = "web";
+sel.onchange();
 
 sel.value = "";
 sel.onchange();
