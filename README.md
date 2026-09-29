@@ -26,6 +26,9 @@ docker run -d --network host --cap-add NET_ADMIN --cap-add NET_BROADCAST --cap-a
   -v ham-data:/var/lib/haproxy-manager -v ham-acme:/var/lib/acme.sh \
   -v ham-haproxy:/etc/haproxy -v ham-keepalived:/etc/keepalived \
   ghcr.io/avandeputte/haproxy-manager:latest
+
+# or as a Proxmox VE LXC, from the Proxmox host (community-scripts engine)
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/proxmox/ct/haproxy-manager.sh)"
 ```
 
 Then open `http://<node>:8080`.
@@ -42,6 +45,7 @@ a three-node cluster holding made-up data — see
 | --- | --- |
 | [Installing on a server](docs/install-standalone.md) | requirements, what the installer does, options, updating, uninstalling, troubleshooting |
 | [Running in Docker](docs/install-docker.md) | images, compose, networking, volumes, capabilities, limitations |
+| [Proxmox VE LXC](proxmox/README.md) | the one-line container install, updating, and clustering in an unprivileged container |
 | [Configuration](docs/configuration.md) | every setting, what is shared between nodes, environment variables, ports |
 | [Authentication](docs/authentication.md) | the UI login and 2FA, basic auth for services, single sign-on (OIDC), the trust model |
 
