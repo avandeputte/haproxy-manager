@@ -586,6 +586,7 @@ is repeated every `repeat_hours` (6 by default) until it clears.
 | Setting | Meaning |
 | --- | --- |
 | Only at or above | `error` for breakage only; `warning` adds repairs; `info` adds recoveries and new versions |
+| Combine service alerts within | window (60s by default) in which service alerts are gathered into one message naming them all — a host with ten services on it is one event, down and back up. Alerts from the same check are always combined; 0 combines only those. |
 | Wait before alerting a service is down | grace period (30s by default) before a service losing servers is reported — a reboot or an update that takes it down for a few seconds is not paged at all. The clock starts when it first goes bad; 0 alerts on the first check. |
 | Categories | certificates, watchdog, apply, cluster, updates — each switchable |
 

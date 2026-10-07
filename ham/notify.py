@@ -121,6 +121,79 @@ def send_to(dest, subject, body, severity="warning", event=""):
                          "or webhook" % kind)
 
 
+def _gate(n, event, severity, force):
+    """The destinations a message would reach, or why none: switched off,
+    under the severity floor (unless forced), category off, nothing set up."""
+    if not n.get("enabled", True):
+        return [], "notifications are switched off"
+    if not force and \
+            SEVERITY.get(severity, 1) < SEVERITY.get(n.get("min_severity", "warning"), 1):
+        return [], "below the configured severity"
+    if event and not (n.get("events") or {}).get(event, True):
+        return [], "the %s category is switched off" % event
+    dests = [d for d in (n.get("destinations") or []) if d.get("enabled", True)]
+    if not dests:
+        return [], "no destinations are configured"
+    return dests, ""
+
+
+# -- batching ------------------------------------------------------------------
+# Ten services on one host go down together, and ten emails saying so arrive
+# together -- then ten more when it comes back. While a batch is open on a
+# thread, notify() collects instead of sending, and the batch goes out as one
+# message. It is held open a little for stragglers, since health checks with
+# different intervals can trip a round apart. The "active" flag is thread-local
+# on purpose: the renewal loop or the cluster watcher reporting mid-batch must
+# still send on their own, not be swallowed into the services message.
+_batch_tls = threading.local()
+_batch = {"items": [], "since": 0.0}
+
+
+def batch_begin():
+    _batch_tls.active = True
+
+
+def batch_end(cfg):
+    """Close the batch on this thread: send what it holds as one message,
+    unless the hold window is still open and more may yet arrive."""
+    _batch_tls.active = False
+    items = _batch["items"]
+    if not items:
+        return None
+    window = float((cfg.get("notify") or {}).get("service_batch_seconds") or 0)
+    if window and time.time() - _batch["since"] < window:
+        return None                       # held open for stragglers
+    _batch["items"], _batch["since"] = [], 0.0
+    if len(items) == 1:
+        event, subject, body, severity, force = items[0]
+        return notify(event, subject, body, severity, cfg, force=force)
+    return notify(items[0][0], *_combine(items), cfg,
+                  force=any(it[4] for it in items))
+
+
+def _combine(items):
+    """One subject and body for several alerts: what kind, how many, then
+    each one in full. Returns (subject, body, severity)."""
+    recovered = [it for it in items if it[4]]
+    down = [it for it in items if not it[4] and it[3] == "error"]
+    degraded = [it for it in items if not it[4] and it[3] != "error"]
+    n = len(items)
+    if len(recovered) == n:
+        subject = "%d services recovered" % n
+    elif len(down) == n:
+        subject = "%d services have no servers left" % n
+    elif len(degraded) == n:
+        subject = "%d services lost servers" % n
+    else:
+        parts = [(len(down), "down"), (len(degraded), "degraded"),
+                 (len(recovered), "recovered")]
+        subject = "%d service alerts: %s" % (
+            n, ", ".join("%d %s" % (c, w) for c, w in parts if c))
+    body = "\n\n".join("%d. %s\n%s" % (i, it[1], it[2]) for i, it in enumerate(items, 1))
+    severity = max((it[3] for it in items), key=lambda s: SEVERITY.get(s, 1))
+    return subject, body, severity
+
+
 def notify(event, subject, body, severity="warning", cfg=None, force=False):
     """Send to every enabled destination. Never raises: a failing mail server
     must not take down the thing that noticed the problem.
@@ -133,16 +206,17 @@ def notify(event, subject, body, severity="warning", cfg=None, force=False):
     """
     cfg = cfg or load_config()
     n = cfg.get("notify") or {}
-    if not n.get("enabled", True):
-        return {"sent": 0, "skipped": "notifications are switched off"}
-    if not force and \
-            SEVERITY.get(severity, 1) < SEVERITY.get(n.get("min_severity", "warning"), 1):
-        return {"sent": 0, "skipped": "below the configured severity"}
-    if event and not (n.get("events") or {}).get(event, True):
-        return {"sent": 0, "skipped": "the %s category is switched off" % event}
-    dests = [d for d in (n.get("destinations") or []) if d.get("enabled", True)]
-    if not dests:
-        return {"sent": 0, "skipped": "no destinations are configured"}
+    dests, skipped = _gate(n, event, severity, force)
+    if skipped:
+        return {"sent": 0, "skipped": skipped}
+    if getattr(_batch_tls, "active", False):
+        # A batch is open on this thread: collect rather than send, and report
+        # what WOULD go out, so the transition bookkeeping that decides whether
+        # a later recovery is owed stays right.
+        if not _batch["items"]:
+            _batch["since"] = time.time()
+        _batch["items"].append((event, subject, body, severity, force))
+        return {"sent": len(dests), "destinations": len(dests), "batched": True}
 
     host = socket.gethostname()
     full = "%s\n\n-- \nHAProxy Cluster Manager %s on %s" % (body, VERSION, host)
@@ -237,6 +311,12 @@ def api_notify_put():
                 n["repeat_hours"] = max(0.25, float(body["repeat_hours"]))
             except (TypeError, ValueError):
                 return jsonify({"ok": False, "error": "repeat_hours must be a number"}), 400
+        if "service_batch_seconds" in body:
+            try:
+                n["service_batch_seconds"] = max(0, min(3600, int(body["service_batch_seconds"])))
+            except (TypeError, ValueError):
+                return jsonify({"ok": False, "error":
+                                "the batching window must be a whole number of seconds"}), 400
         if "service_grace_seconds" in body:
             try:
                 n["service_grace_seconds"] = max(0, min(3600, int(body["service_grace_seconds"])))

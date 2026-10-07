@@ -16,7 +16,7 @@ copying it across.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.95.0_all.deb
+sudo apt-get install -y ./haproxy-manager_1.96.0_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
@@ -779,6 +779,14 @@ all: no down alert, so no recovery either. Set it to 0 to alert on the first
 check. (This is separate from the config-drift alert below, which has its own
 much longer wait.)
 
+**Several services at once are one message.** A host with ten services on it
+going down is one event to the reader, so service alerts that fire within a
+window of each other — 60 seconds by default, also on Notifications — are sent
+as a single message listing every one of them, and their recoveries likewise.
+Alerts from the same check round are always combined; the window just holds
+the message open for stragglers whose health checks trip a round later. Set
+it to 0 to combine only what one round found.
+
 One alert waits deliberately: **the nodes holding different configurations**.
 Saving a change makes the cluster disagree *by design* — the other nodes catch
 up when Apply pushes to them — so the moment of divergence is nearly always
@@ -969,12 +977,12 @@ One-click update applies to the installer-managed (systemd) install. In a
 container the button explains that you should pull a new image instead.
 
 **Betas.** A change worth trying before it is released goes out as a beta: the
-same code on the `beta` branch with a version like `1.95.0-beta.1`, its own
+same code on the `beta` branch with a version like `1.96.0-beta.1`, its own
 packages and image, and a release marked *pre-release* on GitHub. No node
 offers it until *Also offer beta versions* is ticked under **Settings →
 Updates**; from then on the daily check reads both branches and offers
 whichever is newer, and a node on a beta takes the release when it comes
-(`1.95.0` is newer than `1.95.0-beta.1`). Untick it and the beta stops being
+(`1.96.0` is newer than `1.96.0-beta.1`). Untick it and the beta stops being
 offered at once. Updating the other nodes from a beta node moves them to the
 same beta — the update carries its branch — so a cluster stays on one version
 either way. `HAM_BETA_REF` names a different branch.

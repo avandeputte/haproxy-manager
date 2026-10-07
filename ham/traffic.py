@@ -264,6 +264,9 @@ def check_services(cfg, data):
     grace = float((cfg.get("notify") or {}).get("service_grace_seconds") or 0)
     now = time.time()
     seen = set()
+    # Everything this round reports is sent as one message, not one each: a
+    # host with ten services on it going down is one event to the reader.
+    notify.batch_begin()
     for be in data.get("backends") or []:
         name = be.get("proxy") or ""
         if name in INTERNAL_POOLS:
@@ -328,6 +331,7 @@ def check_services(cfg, data):
     # A pool that vanished (deleted, renamed) leaves no grace timer behind.
     for gone in [n for n in _down_since if n not in seen]:
         _down_since.pop(gone, None)
+    notify.batch_end(cfg)
 
 
 def history(pool=None, minutes=None):

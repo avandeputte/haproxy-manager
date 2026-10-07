@@ -193,6 +193,83 @@ finally:
 cfg["haproxy"]["backends"] = []
 notify._notify_state.clear()
 
+# -- several services at once are one message ---------------------------------
+# A docker host with ten services on it goes down: ten alerts fire in the same
+# round. The reader should get one email naming all ten, and one more when
+# the host comes back -- not twenty.
+import threading                                           # noqa: E402
+_clock2 = {"t": 50000.0}
+_real_ntime, _real_ttime = notify.time, traffic.time
+notify.time = traffic.time = types.SimpleNamespace(time=lambda: _clock2["t"])
+
+
+def multi(*pools):
+    """One stats reading with several pools: (name, up, total) each."""
+    return {"ok": True, "backends": [stats_for(u, t, pool=n)["backends"][0]
+                                     for n, u, t in pools]}
+
+
+try:
+    cfg["notify"]["service_grace_seconds"] = 0
+    cfg["notify"]["service_batch_seconds"] = 0        # same-round combining only
+
+    sent.clear(); notify._notify_state.clear(); traffic._down_since.clear()
+    traffic.check_services(cfg, multi(("be_a", 0, 2), ("be_b", 0, 2), ("be_c", 0, 2)))
+    ok(len(sent) == 1, "three services lost in one round are one message, not three: %d" % len(sent))
+    ok(sent and "3 services have no servers left" in sent[0][0],
+       "and the subject counts them: %s" % sent[:1])
+    ok(sent and sent[0][1] == "error", "at the severity of the worst of them")
+
+    sent.clear()
+    traffic.check_services(cfg, multi(("be_a", 2, 2), ("be_b", 2, 2), ("be_c", 2, 2)))
+    ok(len(sent) == 1 and "3 services recovered" in sent[0][0],
+       "and all three coming back is one message too: %s" % sent[:1])
+    ok(sent and sent[0][1] == "info", "a recovery batch keeps its informational severity")
+
+    # one down while another recovers: still one message, saying both
+    sent.clear(); notify._notify_state.clear(); traffic._down_since.clear()
+    traffic.check_services(cfg, multi(("be_a", 0, 2), ("be_b", 2, 2)))
+    sent.clear()
+    traffic.check_services(cfg, multi(("be_a", 2, 2), ("be_b", 0, 2)))
+    ok(len(sent) == 1 and "2 service alerts: 1 down, 1 recovered" in sent[0][0],
+       "a mixed round says what happened to each: %s" % sent[:1])
+
+    # a lone alert reads exactly as it always did
+    sent.clear(); notify._notify_state.clear(); traffic._down_since.clear()
+    traffic.check_services(cfg, multi(("be_shop", 0, 2)))
+    ok(len(sent) == 1 and sent[0][0].endswith("shop has no servers left"),
+       "one service alone is not wrapped in a batch: %s" % sent[:1])
+
+    # the hold window: stragglers a round later join the same message
+    cfg["notify"]["service_batch_seconds"] = 60
+    sent.clear(); notify._notify_state.clear(); traffic._down_since.clear()
+    _clock2["t"] = 60000
+    traffic.check_services(cfg, multi(("be_a", 0, 2), ("be_b", 2, 2)))
+    ok(sent == [], "the first alert is held while the window is open")
+    _clock2["t"] = 60020
+    traffic.check_services(cfg, multi(("be_a", 0, 2), ("be_b", 0, 2)))
+    ok(sent == [], "a straggler a round later is added, still held")
+    _clock2["t"] = 60070
+    traffic.check_services(cfg, multi(("be_a", 0, 2), ("be_b", 0, 2)))
+    ok(len(sent) == 1 and "2 services have no servers left" in sent[0][0],
+       "once the window closes they go out together: %s" % sent[:1])
+
+    # a report from another thread mid-batch is not swallowed into it
+    sent.clear()
+    notify.batch_begin()
+    other = threading.Thread(target=lambda: notify.notify(
+        "certificates", "cert renewed elsewhere", "body", "warning", cfg))
+    other.start(); other.join()
+    ok(len(sent) == 1 and "cert renewed elsewhere" in sent[0][0]
+       and not notify._batch["items"],
+       "a notification from another thread sends on its own, not into the batch")
+    notify.batch_end(cfg)
+finally:
+    notify.time, traffic.time = _real_ntime, _real_ttime
+    traffic._down_since.clear(); notify._batch["items"] = []; notify._batch["since"] = 0.0
+    cfg["notify"].pop("service_grace_seconds", None); cfg["notify"].pop("service_batch_seconds", None)
+sent.clear(); notify._notify_state.clear()
+
 # -- our own requests are not traffic ----------------------------------------
 # The URL probes go through HAProxy on purpose, so HAProxy counts them like
 # anyone else's requests -- and a service nobody visits would show a steady

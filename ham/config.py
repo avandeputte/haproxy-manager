@@ -105,6 +105,10 @@ DEFAULT_CONFIG = {
         # reboot or an update that takes it down for a few seconds does not
         # page anyone. 0 disables the wait (alert on the first round).
         "service_grace_seconds": 30,
+        # Service alerts that fire within this window of each other go out as
+        # one message listing them all, instead of one email per service. 0
+        # still combines the alerts of a single check round.
+        "service_batch_seconds": 60,
         "events": {"certificates": True, "watchdog": True, "apply": True,
                    "cluster": True, "updates": True},
         # [{id, name, type, enabled, ...type-specific fields}]
