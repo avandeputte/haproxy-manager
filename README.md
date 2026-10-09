@@ -42,10 +42,12 @@ Then open `http://<node>:8080`.
 a three-node cluster holding made-up data — see
 [tools/screenshots](tools/screenshots/).</sub>
 
+<!-- docs-site:skip -->
 This README is the install guide. Everything else — publishing services, certificates,
 clustering, sign-in, notifications, Home Assistant, Prometheus, the watchdog, and how it
 all works — is at **[ham.iothing.net/docs](https://ham.iothing.net/docs/)**; the same text
 lives in [docs/](docs/) here, where it is checked against the code.
+<!-- /docs-site:skip -->
 
 ## Install
 
