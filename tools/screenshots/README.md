@@ -1,4 +1,4 @@
-# Regenerating the screenshots in `docs/img/`
+# Regenerating the screenshots in HAProxyManagerDocs/docs/img/
 
 They are photographs of the real application, driven by a real browser against
 a real three-node cluster holding made-up data. Nothing is mocked: a picture of
@@ -49,5 +49,5 @@ im = im.resize((1600, round(im.height * 1600 / im.width)), Image.LANCZOS)
 im.convert("P", palette=Image.ADAPTIVE, colors=256).save(out, optimize=True)
 ```
 
-`tools/check-docs.py` holds the guards: every committed screenshot is
+`tools/check-docs.py` (run from the docs repository's build, or here with the two repositories side by side) holds the guards: every committed screenshot is
 referenced, every referenced one is committed, and none is over 400 KB.

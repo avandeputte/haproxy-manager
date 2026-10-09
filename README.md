@@ -36,7 +36,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-mana
 
 Then open `http://<node>:8080`.
 
-<img src="docs/img/overview.png" alt="The Overview page: three nodes, their roles and versions, and every published service with a day of traffic" width="900">
+<img src="https://ham.iothing.net/docs/img/overview.png" alt="The Overview page: three nodes, their roles and versions, and every published service with a day of traffic" width="900">
 
 <sub>Every screenshot here is the real application, driven by a browser against
 a three-node cluster holding made-up data — see
@@ -45,8 +45,9 @@ a three-node cluster holding made-up data — see
 <!-- docs-site:skip -->
 This README is the install guide. Everything else — publishing services, certificates,
 clustering, sign-in, notifications, Home Assistant, Prometheus, the watchdog, and how it
-all works — is at **[ham.iothing.net/docs](https://ham.iothing.net/docs/)**; the same text
-lives in [docs/](docs/) here, where it is checked against the code.
+all works — is at **[ham.iothing.net/docs](https://ham.iothing.net/docs/)**, whose source is the
+[HAProxyManagerDocs](https://github.com/avandeputte/HAProxyManagerDocs) repository, where it is
+still checked against this code.
 <!-- /docs-site:skip -->
 
 ## Install
@@ -73,7 +74,7 @@ and installs the systemd unit.
 Nothing in HAProxy's configuration is touched until you press Apply. The first
 Apply overwrites `/etc/haproxy/haproxy.cfg`, keeping a `.bak`.
 
-**→ [Full installation guide](docs/install-standalone.md)** — every option, what
+**→ [Full installation guide](https://ham.iothing.net/docs/install-standalone/)** — every option, what
 happens in what order, where each file lives, updating, uninstalling and
 troubleshooting.
 
@@ -102,5 +103,5 @@ One thing a container cannot do: **restart a hung manager**. On a systemd host
 image's `HEALTHCHECK` reports it, but something has to act on that. For a
 production cluster, the native install is the better fit.
 
-**→ [Full Docker guide](docs/install-docker.md)** — images and tags, compose,
+**→ [Full Docker guide](https://ham.iothing.net/docs/install-docker/)** — images and tags, compose,
 networking modes, volumes, environment, health, logs, upgrading and limitations.

@@ -11,10 +11,21 @@ It only checks what can be checked mechanically -- counts, names, defaults,
 paths. Prose still needs reading.
 """
 import pathlib
+import os
 import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+# The documentation lives in the HAProxyManagerDocs repository -- the source of
+# https://ham.iothing.net/docs/ -- not here. This checker still holds it to the
+# code: point HAM_DOCS_DIR at that repository's docs/ directory, or keep the
+# two repositories side by side and it finds ../HAProxyManagerDocs/docs. The
+# docs site's own build runs it against a fresh clone of this repository.
+DOCS_DIR = pathlib.Path(os.environ.get("HAM_DOCS_DIR") or (ROOT.parent / "HAProxyManagerDocs" / "docs"))
+if not DOCS_DIR.is_dir():
+    sys.exit("the documentation is not in this repository: set HAM_DOCS_DIR to "
+             "HAProxyManagerDocs/docs, or clone HAProxyManagerDocs beside this checkout")
 # The application is app.py plus the ham package. Everything below asks
 # questions of "the code" rather than of a particular file, so they are read as
 # one -- which also means a module added to ham/ is covered without editing
@@ -25,7 +36,7 @@ INSTALL = (ROOT / "install.sh").read_text()
 # refactoring.md is a working note that is deliberately not published, so
 # it is excluded here too -- otherwise a claim would be satisfied locally
 # by a file that does not exist in a fresh checkout.
-DOCS = {p.name: p.read_text() for p in [ROOT / "README.md", *(ROOT / "docs").glob("*.md")]
+DOCS = {p.name: p.read_text() for p in [ROOT / "README.md", *DOCS_DIR.glob("*.md")]
         if p.name != "refactoring.md"}
 ALL_DOCS = "\n".join(DOCS.values())
 
@@ -177,7 +188,7 @@ for path in recipe_files:
     except ValueError:
         continue
     by_name[r.get("name", "")] = RANK.get(r.get("category", "Other"), 9)
-conf = (ROOT / "docs" / "configuration.md").read_text()
+conf = (DOCS_DIR / "configuration.md").read_text()
 table = conf[conf.index("**Web**\n\n| Recipe |"):conf.index("Every one carries example")]
 listed = [m for m in re.findall(r"^\| (.+?) \| .* \|$", table, re.M)
           if m not in ("Recipe", "---")]
@@ -192,7 +203,7 @@ check(listed == expected, "the documented recipes are not in the picker's order"
 # -- screenshots -----------------------------------------------------------
 # A screenshot referenced but missing is a broken image on the front page, and
 # one committed but never referenced is a megabyte nobody asked for.
-img_dir = ROOT / "docs" / "img"
+img_dir = DOCS_DIR / "img"
 on_disk = {p.name for p in img_dir.glob("*.png")} if img_dir.exists() else set()
 referenced = set()
 for name, text in DOCS.items():
@@ -257,7 +268,7 @@ for src in (ROOT / "static" / "js", ROOT / "ham"):
 # The section called System is called Settings now. The docs are scanned too:
 # this guard only watched the code, and "System > Backup & Export" sat in the
 # documentation for weeks after the menu stopped having a System group.
-_sysdocs = [ROOT / "README.md"] + sorted((ROOT / "docs").glob("*.md"))
+_sysdocs = [ROOT / "README.md"] + sorted(DOCS_DIR.glob("*.md"))
 for src in (ROOT / "static" / "js", ROOT / "ham"):
     _sysdocs += sorted(src.rglob("*.js")) + sorted(src.rglob("*.py"))
 for f in _sysdocs:

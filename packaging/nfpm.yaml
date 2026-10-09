@@ -94,8 +94,6 @@ contents:
     dst: /usr/lib/systemd/system/haproxy-manager.service
   - src: ./README.md
     dst: /usr/share/doc/haproxy-manager/README.md
-  - src: ./docs
-    dst: /usr/share/doc/haproxy-manager/docs
   # acme.sh travels inside the package, so installing needs no network and an
   # air-gapped node can still issue certificates once DNS credentials are set.
   - src: ./dist/acme.sh
