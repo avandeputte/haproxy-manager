@@ -136,6 +136,15 @@ def render_haproxy(cfg):
     A("    log /dev/log local0")
     A("    stats socket /run/haproxy/admin.sock mode 660 level admin expose-fd listeners")
     A("    stats timeout 30s")
+    # The workers drop to the haproxy user (every distribution's package
+    # creates it) once the ports are bound; the master stays root, so a reload
+    # can bind again. No real chroot: HAProxy logs through /dev/log, which a
+    # chroot would hide. 'chroot /' states that choice, where leaving it out
+    # has HAProxy 3.3+ warn about it on every start. A custom global line
+    # below overrides any of these.
+    A("    user haproxy")
+    A("    group haproxy")
+    A("    chroot /")
     A("    maxconn %s" % (st.get("maxconn") or 4000))
     if st.get("nbthread"):
         A("    nbthread %s" % st["nbthread"])

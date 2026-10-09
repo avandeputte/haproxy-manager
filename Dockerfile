@@ -4,9 +4,18 @@
 # ships those alongside it. There is no systemd in a container, so supervisord
 # runs the processes and a small `systemctl` shim (docker/systemctl) translates
 # the handful of calls app.py makes into supervisorctl commands.
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
-ARG ACME_VERSION=3.1.4
+# The versions this image carries. Both are checked against upstream weekly by
+# .github/workflows/upstream.yml, which opens a pull request when either moves.
+#
+# HAProxy comes from haproxy.debian.net, the Debian HAProxy maintainers' own
+# backports, rather than from Debian itself: a Debian release freezes HAProxy
+# at whatever branch it shipped with and backports only security fixes, so the
+# stock package is always an old LTS. That repository tracks one branch per
+# suite, for amd64 and arm64, and publishes each point release as it comes.
+ARG HAPROXY_BRANCH=3.4
+ARG ACME_VERSION=3.1.6
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -14,16 +23,25 @@ ENV DEBIAN_FRONTEND=noninteractive
 # once used it is now docker/syslogd.py.) supervisor runs the processes;
 # iproute2 lets the app report which addresses this node holds, and
 # iputils-arping lets it notice when another machine is using one of them.
+#
+# One layer, so a scheduled rebuild without the cache refreshes everything at
+# once -- the Debian security updates along with HAProxy's point releases.
 RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+    && curl -fsSL https://haproxy.debian.net/haproxy-archive-keyring.gpg \
+        --create-dirs --output /etc/apt/keyrings/haproxy-archive-keyring.gpg \
+    && . /etc/os-release \
+    && echo "deb [signed-by=/etc/apt/keyrings/haproxy-archive-keyring.gpg] https://haproxy.debian.net ${VERSION_CODENAME}-backports-${HAPROXY_BRANCH} main" \
+        > /etc/apt/sources.list.d/haproxy.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
         python3 \
         python3-flask \
         python3-requests \
         python3-waitress \
-        haproxy \
+        "haproxy=${HAPROXY_BRANCH}.*" \
         keepalived \
         openssl \
-        ca-certificates \
-        curl \
         socat \
         iproute2 \
         iputils-arping \

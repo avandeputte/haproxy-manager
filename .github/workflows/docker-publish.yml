@@ -9,6 +9,17 @@ name: Build and publish the container image
 # amd64 builds natively; arm64 builds under QEMU emulation, which is slower but
 # needs no self-hosted runner. Nothing here needs a secret: GITHUB_TOKEN can
 # write to the registry once `packages: write` is granted below.
+#
+# The image is also rebuilt once a week whether or not anything was pushed, and
+# that build ignores the layer cache. The image carries Debian, HAProxy,
+# Keepalived and acme.sh, and all but acme.sh are installed by one apt-get
+# layer whose text never changes -- so a cached build would keep serving the
+# packages of the day the cache was made, security updates included. The
+# weekly build publishes the same tags with fresh packages underneath, exactly
+# as the official library images do. Pull again to pick it up.
+#
+# A pull request that touches the image builds it for amd64 (without
+# publishing) and starts it, so a version bump is proven before it is merged.
 
 on:
   push:
@@ -17,7 +28,13 @@ on:
     # Documentation-only commits do not change the image.
     paths-ignore:
       - '**.md'
-      - 'docs/**'
+  pull_request:
+    paths:
+      - Dockerfile
+      - 'docker/**'
+      - .github/workflows/docker-publish.yml
+  schedule:
+    - cron: '23 5 * * 1'      # Mondays, 05:23 UTC: fresh Debian and HAProxy packages
   workflow_dispatch:
 
 env:
@@ -40,12 +57,14 @@ jobs:
         run: echo "value=$(tr -d ' \n' < VERSION)" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
+        if: github.event_name != 'pull_request'
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Sign in to the registry
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -58,10 +77,10 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            # "latest" is the tip of main: a branch build there, or a release
-            # tag on a version without a prerelease mark. A beta's tag build
-            # must not move it -- it did once, and a pull of the plain image
-            # name got the beta.
+            # "latest" is the tip of main: a branch build there, the weekly
+            # rebuild of it, or a release tag on a version without a
+            # prerelease mark. A beta's tag build must not move it -- it did
+            # once, and a pull of the plain image name got the beta.
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || (startsWith(github.ref, 'refs/tags/') && !contains(steps.version.outputs.value, '-')) }}
             # Always tag with VERSION, on a branch build and a tag build alike,
             # so `docker pull …:1.48.0` works whichever triggered it and the
@@ -74,23 +93,37 @@ jobs:
             org.opencontainers.image.description=Web UI for HAProxy, Keepalived and acme.sh
             org.opencontainers.image.version=${{ steps.version.outputs.value }}
 
+      # A pull request builds one architecture into the local daemon, so the
+      # check below can start it; everything else builds both and publishes.
+      # The scheduled build starts from nothing: no layer cache, and a fresh
+      # pull of the base image.
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
+          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
+          push: ${{ github.event_name != 'pull_request' }}
+          load: ${{ github.event_name == 'pull_request' }}
+          pull: true
+          no-cache: ${{ github.event_name == 'schedule' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Proof the published image runs on both architectures, rather than
-      # assuming a successful build means a working container.
+      # Proof the image runs on both architectures, rather than assuming a
+      # successful build means a working container -- and a record, in the
+      # run's summary, of what it carries.
       - name: Check both architectures start and answer
         run: |
           set -eu
-          for platform in linux/amd64 linux/arm64; do
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            platforms=linux/amd64
+          else
+            platforms="linux/amd64 linux/arm64"
+          fi
+          echo "## Image contents" >> "$GITHUB_STEP_SUMMARY"
+          for platform in $platforms; do
             echo "== $platform =="
             docker run -d --name check --platform "$platform" \
               -e HAM_ADMIN_PASSWORD=checkonly \
@@ -105,5 +138,16 @@ jobs:
               [ "$i" = 60 ] && { docker logs check; exit 1; }
               sleep 2
             done
+            {
+              echo "**$platform**"
+              echo
+              echo '```'
+              docker exec check sh -c '. /etc/os-release; echo "$PRETTY_NAME"'
+              docker exec check haproxy -v | head -1
+              docker exec check keepalived --version 2>&1 | head -1
+              docker exec check /opt/acme.sh/acme.sh --version | tail -1 | sed 's/^/acme.sh /'
+              docker exec check python3 --version
+              echo '```'
+            } | tee -a "$GITHUB_STEP_SUMMARY"
             docker rm -f check >/dev/null
           done

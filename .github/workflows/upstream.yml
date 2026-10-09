@@ -1,0 +1,88 @@
+name: Check upstream versions
+
+# The container image pins two things that move on their own schedule: the
+# HAProxy branch it installs from haproxy.debian.net (ARG HAPROXY_BRANCH) and
+# the acme.sh release it and install.sh carry (ARG ACME_VERSION). Debian's own
+# packages need no watching -- the weekly image rebuild picks them up -- but
+# a new HAProxy LTS or an acme.sh release would otherwise go unnoticed.
+#
+# Once a week this compares the pins with what is out there and, when either
+# is behind, edits them and opens a pull request (or refreshes the one it
+# already opened). The pull request builds and starts the image, so merging
+# it is the only step left for a person.
+
+on:
+  schedule:
+    - cron: '41 5 * * 1'      # Mondays, after the weekly image rebuild
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare the pins with upstream
+        id: upstream
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          have_haproxy=$(grep -oP '^ARG HAPROXY_BRANCH=\K[0-9.]+' Dockerfile)
+          have_acme=$(grep -oP '^ARG ACME_VERSION=\K[0-9.]+' Dockerfile)
+          codename=$(grep -oP '^FROM debian:\K[a-z]+' Dockerfile)
+
+          # the newest branch haproxy.debian.net publishes for this Debian
+          want_haproxy=$(curl -fsSL https://haproxy.debian.net/dists/ \
+            | grep -oE "${codename}-backports-[0-9]+\.[0-9]+" | sed 's/.*-//' | sort -V | tail -1)
+          # the newest acme.sh release (releases, not tags: a tag may be a draft)
+          want_acme=$(gh api repos/acmesh-official/acme.sh/releases/latest --jq .tag_name)
+
+          echo "HAProxy branch: pinned $have_haproxy, newest $want_haproxy"
+          echo "acme.sh:        pinned $have_acme, newest $want_acme"
+          test -n "$want_haproxy" && test -n "$want_acme"
+          {
+            echo "have_haproxy=$have_haproxy"; echo "want_haproxy=$want_haproxy"
+            echo "have_acme=$have_acme";       echo "want_acme=$want_acme"
+            if [ "$have_haproxy" != "$want_haproxy" ] || [ "$have_acme" != "$want_acme" ]; then
+              echo "behind=true"
+            else
+              echo "behind=false"
+            fi
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open or refresh the pull request
+        if: steps.upstream.outputs.behind == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HAVE_HAPROXY: ${{ steps.upstream.outputs.have_haproxy }}
+          WANT_HAPROXY: ${{ steps.upstream.outputs.want_haproxy }}
+          HAVE_ACME: ${{ steps.upstream.outputs.have_acme }}
+          WANT_ACME: ${{ steps.upstream.outputs.want_acme }}
+        run: |
+          set -eu
+          sed -i "s/^ARG HAPROXY_BRANCH=.*/ARG HAPROXY_BRANCH=$WANT_HAPROXY/" Dockerfile
+          sed -i "s/^ARG ACME_VERSION=.*/ARG ACME_VERSION=$WANT_ACME/" Dockerfile
+          sed -i "s/^ACME_VERSION=\"\${HAM_ACME_VERSION:-[0-9.]*}\"/ACME_VERSION=\"\${HAM_ACME_VERSION:-$WANT_ACME}\"/" install.sh
+          git diff --stat
+
+          lines=""
+          [ "$HAVE_HAPROXY" != "$WANT_HAPROXY" ] && lines="$lines- HAProxy branch $HAVE_HAPROXY -> $WANT_HAPROXY (haproxy.debian.net)\n"
+          [ "$HAVE_ACME" != "$WANT_ACME" ] && lines="$lines- acme.sh $HAVE_ACME -> $WANT_ACME, in the image and in install.sh\n"
+          title="Upstream: HAProxy $WANT_HAPROXY, acme.sh $WANT_ACME"
+          body=$(printf 'Opened by the weekly upstream check.\n\n%b\nThe pull request builds the image and starts it. After merging: bump VERSION, and update the acme.sh default on the install page of the documentation (HAProxyManagerDocs, install-standalone.md).\n' "$lines")
+
+          branch="upstream/haproxy-$WANT_HAPROXY-acme-$WANT_ACME"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git commit -am "$title"
+          git push -f origin "$branch"
+          if gh pr view "$branch" --json number >/dev/null 2>&1; then
+            echo "the pull request for $branch is already open; its branch was refreshed"
+          else
+            gh pr create --head "$branch" --base main --title "$title" --body "$body"
+          fi

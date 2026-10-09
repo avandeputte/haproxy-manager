@@ -10,7 +10,6 @@ on:
     tags: ['v*']
     paths-ignore:
       - '**.md'
-      - 'docs/**'
   workflow_dispatch:
 
 jobs:
@@ -106,6 +105,7 @@ jobs:
           # installing it again is what made the image build conflict.
           APT='apt-get update -q && apt-get install -y --no-install-recommends systemd systemd-sysv dbus curl ca-certificates && rm -rf /var/lib/apt/lists/*'
           test_one debian:bookworm deb "$APT"
+          test_one debian:trixie   deb "$APT"
           test_one ubuntu:24.04    deb "$APT"
           test_one rockylinux:9    rpm 'dnf -y install systemd systemd-sysv epel-release && dnf clean all'
           test_one fedora:41       rpm 'dnf -y install systemd && dnf clean all'

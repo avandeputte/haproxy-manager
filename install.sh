@@ -40,7 +40,9 @@ PORT="${HAM_PORT:-8080}"
 LISTEN="${HAM_LISTEN:-0.0.0.0}"
 TARBALL="${HAM_TARBALL:-}"
 SKIP_ACME="${HAM_SKIP_ACME:-0}"
-ACME_VERSION="${HAM_ACME_VERSION:-3.1.4}"
+# The same release the container image pins (ARG ACME_VERSION in Dockerfile);
+# tools/check-docs.py holds the two together.
+ACME_VERSION="${HAM_ACME_VERSION:-3.1.6}"
 UNIT=/etc/systemd/system/haproxy-manager.service
 
 SRC=""        # populated by fetch_source

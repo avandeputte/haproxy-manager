@@ -127,6 +127,23 @@ for name, text in (DOCS.items() if shape and not shape.group(2) else []):
         check(quoted == version, "%s names an old package file" % name,
               "says %s, VERSION is %s" % (quoted, version))
 
+# -- the acme.sh release ---------------------------------------------------
+# The image (ARG in the Dockerfile, which the package build also reads) and the
+# installer (the HAM_ACME_VERSION default) each name the release; they must be
+# the same one, and the install page quotes it as the default.
+dockerfile = (ROOT / "Dockerfile").read_text()
+image_acme = re.search(r"^ARG ACME_VERSION=([0-9.]+)$", dockerfile, re.M)
+script_acme = re.search(r'^ACME_VERSION="\$\{HAM_ACME_VERSION:-([0-9.]+)\}"$', INSTALL, re.M)
+check(image_acme is not None and script_acme is not None, "the acme.sh pin could not be read")
+if image_acme and script_acme:
+    check(image_acme.group(1) == script_acme.group(1), "the image and the installer pin different acme.sh releases",
+          "Dockerfile %s, install.sh %s" % (image_acme.group(1), script_acme.group(1)))
+    row = re.search(r'\| `HAM_ACME_VERSION` \| `([0-9.]+)`', ALL_DOCS)
+    check(row is not None, "the install page does not state the acme.sh default")
+    if row:
+        check(row.group(1) == script_acme.group(1), "the documented acme.sh default is wrong",
+              "docs say %s, install.sh uses %s" % (row.group(1), script_acme.group(1)))
+
 # -- recipes ---------------------------------------------------------------
 # Every recipe should be listed in the documentation, and every one should come
 # with example servers -- the shape of the answer is half of what they are for.
