@@ -11,6 +11,16 @@ mkdir -p "$DATA_DIR" "$CERT_DIR" "$ACME_HOME" /run/haproxy \
          "$(dirname "${HAM_KEEPALIVED_CFG:-/etc/keepalived/keepalived.conf}")"
 chmod 0700 "$DATA_DIR" "$ACME_HOME" "$CERT_DIR"
 
+# Keepalived (Debian 13's reproducible build) will not start without the
+# build-options file its package installs in /etc/keepalived -- a volume, so a
+# volume created by an older image hides it. Refresh it from the image copy on
+# every start so it always matches the binary. Keepalived reads this fixed
+# path regardless of HAM_KEEPALIVED_CFG.
+if [ -f /usr/sbin/keepalived.config-opts ]; then
+    mkdir -p /etc/keepalived
+    cp -f /usr/sbin/keepalived.config-opts /etc/keepalived/keepalived.config-opts
+fi
+
 # Refresh acme.sh's program files inside the (persisted) home on every start,
 # without touching account keys, issued certificates or account.conf.
 for item in acme.sh dnsapi deploy notify; do
