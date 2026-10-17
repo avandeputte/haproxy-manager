@@ -48,7 +48,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         procps \
         supervisor \
         tzdata \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && cp /etc/keepalived/keepalived.config-opts /usr/sbin/keepalived.config-opts
+
+# Debian 13 builds Keepalived reproducibly, which moves its build-options
+# string out of the binary into /etc/keepalived/keepalived.config-opts, and
+# Keepalived refuses to start without that file. /etc/keepalived is a volume,
+# so the copy above keeps an image-only version next to the binary (a
+# location Keepalived also accepts) and the entrypoint puts it back into the
+# volume on every start -- a volume created by an older image never had it.
 
 # acme.sh is installed into an image-only directory. The entrypoint seeds
 # $HAM_ACME_HOME (a volume) from it, so account keys and issued certificates
