@@ -332,7 +332,7 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
                    stick_type=None, log_health_checks=False, check_port=None,
                    timeout_connect=None, timeout_server=None, service_id=None,
                    auth=None, oauth_opts=None, allow_src=None, notify_mode=None,
-                   rate_limit=None, rate_window=None):
+                   rate_limit=None, rate_window=None, proxy_protocol=None):
     """Create (or update) everything needed to serve `pub` from `tgts`.
 
     Re-running for the same public host updates that mapping instead of adding
@@ -340,6 +340,10 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
     """
     hp, ac = cfg["haproxy"], cfg["acme"]
     acts, warns = [], []
+    # None leaves the servers' setting alone (a caller that does not know the
+    # field); "" turns it off.
+    if proxy_protocol is not None and proxy_protocol not in ("", "v1", "v2"):
+        raise ValueError("The PROXY protocol must be off, v1 or v2")
     # One service can answer for several host names. They share a listener, so
     # they must agree on scheme and port; the first one names things.
     pubs = pubs if isinstance(pubs, list) else [pubs]
@@ -413,6 +417,13 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
             act("created", "Real Server", srv["name"])
         if check_port:
             srv["check_port"] = check_port
+        # Whether a server expects the PROXY line belongs to the port it
+        # listens on, so a server shared with another service carries the same
+        # setting there -- which is what that port needs either way.
+        if proxy_protocol:
+            srv["proxy_protocol"] = proxy_protocol
+        elif proxy_protocol is not None:
+            srv.pop("proxy_protocol", None)
         if srv["id"] not in srv_ids:
             srv_ids.append(srv["id"])
 

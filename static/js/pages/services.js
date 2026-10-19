@@ -1,4 +1,4 @@
-import { $, HEALTH_LABEL, api, btn, closeDlg, esc, fieldEl, fieldRow, list, openDlg, readForm, selectOption, showText } from "../core.js";
+import { $, HEALTH_LABEL, PROXY_OPTIONS, api, btn, closeDlg, esc, fieldEl, fieldRow, list, openDlg, readForm, selectOption, showText } from "../core.js";
 import { t } from "../i18n.js";
 import { refreshStatus, route } from "../shell.js";
 import { CERT_STATUS } from "../pages/certificates.js";
@@ -60,6 +60,11 @@ export const WIZ_SECTIONS=[
   {k:"stick_expire",l:"Stick table expiry",t:"text",d:"30m"},
   {k:"timeout_connect",l:"Connect timeout",t:"text",h:"Optional, for this pool only, e.g. 5s"},
   {k:"timeout_server",l:"Server timeout",t:"text",h:"Optional, for this pool only, e.g. 30s. Long-lived connections such as databases usually need more than the default."},
+  {k:"proxy_protocol",l:"PROXY protocol",t:"select",o:PROXY_OPTIONS,d:"",
+   h:"Tells the servers the visitor's real address, the way X-Forwarded-For does for HTTP, "+
+     "and also works for tcp:// services. Set on every server behind this service. Only turn it on "+
+     "when the servers are set up to expect it (nginx proxy_protocol, Postfix, Dovecot, Traefik...): "+
+     "a server that is not refuses every connection."},
  ]},
  {title:"Allowed networks",toggle:"allow_enabled",fields:[
   {k:"allow_enabled",l:"Only allow certain networks",t:"bool",
@@ -412,6 +417,7 @@ export async function servicesCard(){
         balance:s.balance,persistence:s.persistence,stick_type:s.stick_type,
         stick_size:s.stick_size,stick_expire:s.stick_expire,
         log_health_checks:s.log_health_checks,check_port:s.check_port,
+        proxy_protocol:s.proxy_protocol,
         notify_mode:s.notify_mode,
         health:(s.health||{}).type,health_interval:(s.health||{}).interval,
         health_uri:(s.health||{}).uri,health_status:(s.health||{}).status,

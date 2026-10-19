@@ -104,6 +104,11 @@ def _rate_limit(be):
     return (rate, window) if rate > 0 and window > 0 else (0, 0)
 
 
+# A Real Server's proxy_protocol setting, and the server keyword each value
+# becomes. Anything else -- empty, missing, mistyped -- sends no PROXY line.
+PROXY_PROTOCOL = {"v1": "send-proxy", "v2": "send-proxy-v2"}
+
+
 def render_haproxy(cfg):
     """What this node serves: the shared configuration plus its own objects.
 
@@ -531,6 +536,15 @@ def render_haproxy(cfg):
             if sv.get("ssl"):
                 parts.append("ssl")
                 parts.append("verify required" if sv.get("ssl_verify") else "verify none")
+            # The PROXY protocol tells the server who the client really is, the
+            # way X-Forwarded-For does for HTTP -- and works for raw TCP, where
+            # there is no header to add. Only the two known values become a
+            # keyword: the field is stored as sent. HAProxy also sends it with
+            # health checks on the traffic port, and deliberately not to a
+            # separate check port, which is usually another service.
+            pp = PROXY_PROTOCOL.get(sv.get("proxy_protocol"))
+            if pp:
+                parts.append(pp)
             if sv.get("backup"):
                 parts.append("backup")
             if use_cookie:

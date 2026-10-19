@@ -1,4 +1,4 @@
-import { $, HEALTH_LABEL, api, btn, closeDlg, esc, fieldRow, list, lists, nameOf, openDlg, readForm, showText } from "./core.js";
+import { $, HEALTH_LABEL, PROXY_KEYWORD, PROXY_OPTIONS, api, btn, closeDlg, esc, fieldRow, list, lists, nameOf, openDlg, readForm, showText } from "./core.js";
 import { t } from "./i18n.js";
 import { refreshStatus, route } from "./shell.js";
 import { certificateNotices, certExpiryCell, certLastCell, certStatusCell, dnsApiByHook, dnsApiOptions, dnsCredentialHelp, issueCert, loadAcmeHealth, loadCertStatus, loadDnsApis, openCertWizard, showCertLog } from "./pages/certificates.js";
@@ -12,7 +12,8 @@ export const E={
  "haproxy/servers":{title:"Real Servers",one:"Real Server",add:"Add server",
   intro:"The upstream hosts traffic is forwarded to. Attach them to Backend Pools.",
   cols:[["name","Name"],["address","Address",r=>esc(r.address)+":"+esc(r.port)],
-        ["opts","Options",r=>[r.ssl?"ssl":"",r.backup?"backup":""].filter(Boolean).join(", ")||"—"],
+        ["opts","Options",r=>[r.ssl?"ssl":"",PROXY_KEYWORD[r.proxy_protocol]||"",
+                              r.backup?"backup":""].filter(Boolean).join(", ")||"—"],
         ["enabled","Enabled",r=>r.enabled!==false?t("yes"):t("no")]],
   fields:[
    {k:"name",l:"Name",t:"text"},
@@ -23,6 +24,11 @@ export const E={
    {k:"check_port",l:"Health check port",t:"text",h:"Optional. Leave empty to check the port traffic goes to."},
    {k:"ssl",l:"Encrypt to server (SSL)",t:"bool"},
    {k:"ssl_verify",l:"Verify server certificate",t:"bool"},
+   {k:"proxy_protocol",l:"PROXY protocol",t:"select",o:PROXY_OPTIONS,d:"",
+    h:"Tells this server the visitor's real address, the way X-Forwarded-For does for HTTP, "+
+     "and also works for tcp:// services. Only turn it on when the server is set up to expect it "+
+     "(nginx proxy_protocol, Postfix, Dovecot, Traefik...): a server that is not refuses every "+
+     "connection. Health checks to a separate check port are sent without it."},
    {k:"backup",l:"Backup server",t:"bool",h:"Only receives traffic when all non-backup servers are down"},
    {k:"description",l:"Description",t:"text"}]},
 
