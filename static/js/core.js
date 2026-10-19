@@ -85,6 +85,14 @@ export function localTime(iso){
          p(d.getHours())+":"+p(d.getMinutes())+":"+p(d.getSeconds());
 }
 
+/* The PROXY protocol on a Real Server: off, or the version the server
+   expects -- on the Real Server form, and on the publish form, which sets it
+   on every server behind the service. The keywords are what haproxy.cfg says,
+   shown in the server list as they are. */
+export const PROXY_OPTIONS=[{value:"",label:"Off"},
+  {value:"v1",label:"Version 1 (text)"},{value:"v2",label:"Version 2 (binary)"}];
+export const PROXY_KEYWORD={v1:"send-proxy",v2:"send-proxy-v2"};
+
 /* health check kinds, shared by the wizard and the Health Monitors page --
    English here, translated by whoever shows them */
 export const HEALTH_LABEL={

@@ -418,6 +418,7 @@ def api_services():
             "notify_mode": pool.get("notify_mode") or "servers",
             "maintenance": bool(pool.get("maintenance")),
             "check_port": first.get("check_port") or "",
+            "proxy_protocol": first.get("proxy_protocol") or "",
             "timeout_connect": pool.get("timeout_connect") or "",
             "timeout_server": pool.get("timeout_server") or "",
             # Whether visitors are asked to sign in, and who is let through.
