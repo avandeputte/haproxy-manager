@@ -356,7 +356,7 @@ export async function clusterCard(fresh){
        mine:esc(n.config_leak.mine),theirs:esc(n.config_leak.theirs)});
     bd.appendChild(el);
   });
-  if(!s.config_agreed)bd.appendChild(configDiff(cl.nodes));
+  if(!s.config_agreed)bd.appendChild(configDiff(cl.nodes, s));
   card.appendChild(bd);return card;
 }
 
@@ -366,7 +366,7 @@ export async function clusterCard(fresh){
    leaves someone comparing two configurations by hand. This names the object:
    what is on one node and missing from another, and what exists everywhere
    under the same identity but with different contents. */
-function configDiff(nodes){
+function configDiff(nodes, s){
   const wrap=document.createElement("div");wrap.style.padding="0 16px 12px";
   const have=nodes.filter(n=>n.reachable&&n.config_objects&&Object.keys(n.config_objects).length);
   if(have.length<2){
@@ -419,8 +419,31 @@ function configDiff(nodes){
     "<table><thead><tr><th>"+t("Where")+"</th><th>"+t("Object")+"</th><th>"+t("Problem")+"</th><th>"+t("Nodes")+"</th></tr></thead><tbody>"+
     rows.map(r=>"<tr><td class=mono>"+esc(r[0])+"</td><td>"+esc(r[1])+"</td><td>"+esc(r[2])+
                 "</td><td class=sub>"+esc(r[3])+"</td></tr>").join("")+
-    "</tbody></table><div class=sub style='margin-top:6px'>"+t("Apply from the node that is right, "+
-    "or use Overwrite under Nodes to replace what is on the others.")+"</div>";
+    "</tbody></table>";
+  const acts=document.createElement("div");acts.style.marginTop="12px";
+  const self=nodes.find(n=>n.self);
+  if(self&&s){
+    const isRight=s.config_behind&&s.config_behind.length>0&&self.config_rev===s.config_rev;
+    const msg=document.createElement("span");msg.className="hint";msg.style.marginLeft="10px";
+    acts.appendChild(btn(isRight?t("Push this configuration to the others"):t("Overwrite the others with this node"),isRight?"sm pri":"sm warn",async()=>{
+      if(!isRight&&!confirm(t("Replace the configuration on every other node with this one's?\n\n"+
+                              "A node that was edited holds a newer configuration and normally refuses "+
+                              "this push. Overwriting discards those changes.")))return;
+      msg.textContent=isRight?t("pushing..."):t("overwriting...");
+      const btnEl = acts.querySelector("button");
+      if(btnEl) btnEl.disabled=true;
+      try{
+        const r=await api("sync/push","POST",{include_peers:true,overwrite:!isRight});
+        msg.textContent=r.ok?t("done"):t("failed: {error}",{error:r.error||""});
+        if(r.ok)setTimeout(route,900);
+      }catch(e){msg.textContent=e.message;}
+    }));
+    acts.appendChild(msg);
+  }else{
+    acts.className="sub";
+    acts.textContent=t("Apply from the node that is right, or use Overwrite under Nodes to replace what is on the others.");
+  }
+  wrap.appendChild(acts);
   return wrap;
 }
 

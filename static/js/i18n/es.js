@@ -1200,4 +1200,7 @@ export default {
 "Requests from anywhere else are refused. Works for tcp:// services too.": "Las peticiones desde cualquier otro lugar se rechazan. Funciona también para servicios tcp://.",
 "Sign-in": "Inicio de sesión",
 "The sliding window the requests are counted over, e.g. 10": "La ventana deslizante en la que se cuentan las peticiones, p. ej. 10",
+
+"Push this configuration to the others": "Push this configuration to the others",
+"Overwrite the others with this node": "Overwrite the others with this node"
 };

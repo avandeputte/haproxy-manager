@@ -1200,4 +1200,7 @@ export default {
 "Requests from anywhere else are refused. Works for tcp:// services too.": "Verzoeken van elders worden geweigerd. Werkt ook voor tcp://-diensten.",
 "Sign-in": "Aanmelding",
 "The sliding window the requests are counted over, e.g. 10": "Het schuivende venster waarover de verzoeken worden geteld, bv. 10",
+
+"Push this configuration to the others": "Push this configuration to the others",
+"Overwrite the others with this node": "Overwrite the others with this node"
 };

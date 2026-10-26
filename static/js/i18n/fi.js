@@ -1200,4 +1200,7 @@ export default {
 "Requests from anywhere else are refused. Works for tcp:// services too.": "Pyynnöt muualta hylätään. Toimii myös tcp://-palveluille.",
 "Sign-in": "Kirjautuminen",
 "The sliding window the requests are counted over, e.g. 10": "Liukuva ikkuna, jonka yli pyynnöt lasketaan, esim. 10",
+
+"Push this configuration to the others": "Push this configuration to the others",
+"Overwrite the others with this node": "Overwrite the others with this node"
 };
