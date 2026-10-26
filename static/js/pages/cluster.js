@@ -356,7 +356,7 @@ export async function clusterCard(fresh){
        mine:esc(n.config_leak.mine),theirs:esc(n.config_leak.theirs)});
     bd.appendChild(el);
   });
-  if(!s.config_agreed)bd.appendChild(configDiff(cl.nodes));
+  if(!s.config_agreed)bd.appendChild(configDiff(cl.nodes,s));
   card.appendChild(bd);return card;
 }
 
@@ -366,7 +366,7 @@ export async function clusterCard(fresh){
    leaves someone comparing two configurations by hand. This names the object:
    what is on one node and missing from another, and what exists everywhere
    under the same identity but with different contents. */
-function configDiff(nodes){
+function configDiff(nodes,s){
   const wrap=document.createElement("div");wrap.style.padding="0 16px 12px";
   const have=nodes.filter(n=>n.reachable&&n.config_objects&&Object.keys(n.config_objects).length);
   if(have.length<2){
@@ -419,9 +419,46 @@ function configDiff(nodes){
     "<table><thead><tr><th>"+t("Where")+"</th><th>"+t("Object")+"</th><th>"+t("Problem")+"</th><th>"+t("Nodes")+"</th></tr></thead><tbody>"+
     rows.map(r=>"<tr><td class=mono>"+esc(r[0])+"</td><td>"+esc(r[1])+"</td><td>"+esc(r[2])+
                 "</td><td class=sub>"+esc(r[3])+"</td></tr>").join("")+
-    "</tbody></table><div class=sub style='margin-top:6px'>"+t("Apply from the node that is right, "+
-    "or use Overwrite under Nodes to replace what is on the others.")+"</div>";
+    "</tbody></table>";
+  wrap.appendChild(nextStep(nodes,s));
   return wrap;
+}
+
+/* What to do about a difference, from where the reader is standing. The
+   controls are on the Cluster page and stay there: a plain sync is refused by
+   a node holding something newer, and Overwrite is a separate, red, confirmed
+   step, so neither can discard the newest configuration by accident. What this
+   adds is the answer to "from which node?". From the node with the newest
+   configuration, a sync brings the others up. From any other node the answer
+   is to go there -- pushing from here would be refused, and overwriting from
+   here would throw the newest changes away. Nodes at the same revision with
+   different contents were changed apart, and only the reader can say which
+   is right. */
+function nextStep(nodes,s){
+  const el=document.createElement("div");el.className="sub";el.style.marginTop="6px";
+  const label=n=>n.hostname||n.name;
+  const here='<a href="#/p:cluster">'+esc(t("Cluster"))+"</a>";
+  const sync="<b>"+esc(t("Sync to all nodes now"))+"</b>";
+  const me=nodes.find(n=>n.self);
+  const behind=s.config_behind||[];
+  const newest=nodes.filter(n=>!n.self&&n.reachable&&n.config_fp&&n.config_rev===s.config_rev);
+  /* to that node's own Cluster page; only a web address becomes a link */
+  const link=n=>/^https?:\/\//i.test(n.url||"")
+    ?'<a href="'+esc(n.url.replace(/\/+$/,""))+'/#/p:cluster" target=_blank rel=noopener>'+esc(label(n))+"</a>"
+    :"<b>"+esc(label(n))+"</b>";
+  if(behind.length&&me&&me.config_fp&&me.config_rev===s.config_rev){
+    el.innerHTML=t("This node holds the newest configuration. Use {sync} on the {cluster} page to bring {nodes} up to date.",
+                   {sync,cluster:here,nodes:esc(behind.join(", "))});
+  }else if(behind.length&&newest.length){
+    el.innerHTML=(me&&me.config_fp&&me.config_rev<s.config_rev?t("This node holds an older configuration.")+" ":"")+
+      t("The newest one is on {nodes}. Open the Cluster page there and use {sync} to bring the others up to date.",
+        {nodes:newest.map(link).join(", "),sync});
+  }else{
+    el.innerHTML=t("The nodes were changed separately, so nothing here can tell which configuration is right. "+
+      "On the node that holds the right one, use {overwrite} on its {cluster} page.",
+      {overwrite:"<b>"+esc(t("Overwrite every node"))+"</b>",cluster:here});
+  }
+  return el;
 }
 
 /* ---- keepalived diagnostics ---- */

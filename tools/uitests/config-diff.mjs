@@ -112,5 +112,60 @@ text = await render([
 ok(!/What differs/.test(text) && !/Every shared object matches/.test(text),
    "nothing is shown at all when the nodes agree");
 
+// -- under the table: from which node to fix it -------------------------------
+// The controls stay on the Cluster page. What the table adds is "from where":
+// the node with the newest configuration syncs the others; any other node is
+// told to go there, never offered a push from here; and nodes changed apart
+// at the same revision leave the choice to the reader.
+const at = (name, rev, objs, extra) => Object.assign(node(name, objs), { config_rev: rev }, extra || {});
+const OLD = { "haproxy.backends": [["b1", "shop", "old"]] };
+const NEW = { "haproxy.backends": [["b1", "shop", "new"]] };
+const guide = async (nodes, behind) => {
+  const newest = Math.max(...nodes.map(n => n.config_rev));
+  snapshot = { ok: true, nodes, live: true, age_seconds: 0,
+               summary: { total: nodes.length, reachable: nodes.length, active: 1, warnings: [],
+                          config_rev: newest, config_agreed: false, config_behind: behind,
+                          config_differs_in: "" } };
+  const card = await clusterCard();
+  const table = [...card.querySelectorAll("table")].pop();
+  return { card, text: card.textContent, after: table ? table.nextElementSibling : null };
+};
+
+// this node is behind; proxy2 has the newest
+let g = await guide([at("proxy1", 3, OLD, { self: true, url: "" }),
+                     at("proxy2", 4, NEW, { url: "http://10.0.0.2:8080/" })], ["proxy1"]);
+ok(!!g.after && /This node holds an older configuration/.test(g.after.textContent),
+   "a node that is behind says so under the table");
+const there = g.after && g.after.querySelector('a[href="http://10.0.0.2:8080/#/p:cluster"]');
+ok(!!there && there.textContent === "proxy2" && there.getAttribute("target") === "_blank",
+   "and links to the Cluster page of the node with the newest configuration, in a new tab");
+ok(!/Overwrite/.test(g.after.textContent),
+   "without suggesting an overwrite from the node that is out of date");
+ok(![...g.card.querySelectorAll("button")].some(b => /Push|Overwrite|Sync/.test(b.textContent)),
+   "and the card offers no push or overwrite button of its own");
+
+// a peer whose address is not a web address is named, not linked
+g = await guide([at("proxy1", 3, OLD, { self: true, url: "" }),
+                 at("proxy2", 4, NEW, { url: "javascript:alert(1)" })], ["proxy1"]);
+ok(!!g.after && !g.after.querySelector("a[href^='javascript']") && /proxy2/.test(g.after.textContent),
+   "an address that is not http(s) is shown as a name, never as a link");
+
+// this node has the newest; proxy2 is behind
+g = await guide([at("proxy1", 4, NEW, { self: true, url: "" }),
+                 at("proxy2", 3, OLD, { url: "http://10.0.0.2:8080" })], ["proxy2"]);
+ok(!!g.after && /This node holds the newest configuration/.test(g.after.textContent)
+   && /Sync to all nodes now/.test(g.after.textContent) && /proxy2 up to date/.test(g.after.textContent),
+   "the node with the newest configuration is told to sync, naming the node that is behind");
+ok(!!g.after && !!g.after.querySelector('a[href="#/p:cluster"]'),
+   "with a link to this node's Cluster page");
+
+// the same revision, different contents
+g = await guide([at("proxy1", 4, OLD, { self: true, url: "" }),
+                 at("proxy2", 4, NEW, { url: "http://10.0.0.2:8080" })], []);
+ok(!!g.after && /changed separately/.test(g.after.textContent)
+   && /Overwrite every node/.test(g.after.textContent) && !!g.after.querySelector('a[href="#/p:cluster"]'),
+   "nodes changed apart are left to the reader, pointing at Overwrite on the Cluster page");
+ok(!/Apply from the node that is right/.test(g.text), "the old sentence is gone");
+
 console.log(fail ? `\n${fail} failed` : "\nthe page names what differs and who has it");
 process.exit(fail ? 1 : 0);
