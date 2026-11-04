@@ -1,6 +1,6 @@
 import { setUnauthorisedHandler } from "./core.js";
 import { $, api, btn, closeDlg, esc, fieldEl, fieldRow, openDlg } from "./core.js";
-import { t, tn } from "./i18n.js";
+import { LANGUAGES, chosenLanguage, currentLanguage, detectLanguage, rememberLanguage, resolveLanguage, t, tn } from "./i18n.js";
 import { boot } from "./shell.js";
 import { maybeSetupWizard } from "./pages/setup.js";
 import { state } from "./state.js";
@@ -111,6 +111,13 @@ export function openAccount(){
      o:[{value:"system",label:"system"},{value:"light",label:"light"},{value:"dark",label:"dark"}],
      h:"system follows what this machine is set to. Kept with your account, so it "+
        "follows you to another browser."},
+    /* Each language in its own name, so it can be found by someone who cannot
+       read the one the page is in. Automatic names what it comes to here. */
+    {k:"language",l:"Language",t:"select",d:"",
+     o:[{value:"",label:t("Automatic ({language})",{language:LANGUAGES[detectLanguage()]})}]
+       .concat(Object.keys(LANGUAGES).map(code=>({value:code,label:LANGUAGES[code]}))),
+     h:"Automatic follows the language list of this browser. Kept with your account, so it "+
+       "follows you to another browser."},
     {k:"current",l:"Current password",t:"password",h:"Only needed to change the password"},
     {k:"new",l:"New password",t:"password",h:"At least 8 characters. Leave empty to keep the current one."},
     {k:"new2",l:"Repeat new password",t:"password"},
@@ -126,6 +133,7 @@ export function openAccount(){
   fields.forEach(f=>fieldRow(f,f.k==="username"?(state.who.username||state.who.admin_username)
                              :f.k==="email"?(state.who.email||"")
                              :f.k==="theme"?currentTheme()
+                             :f.k==="language"?(typeof state.who.language==="string"?state.who.language:chosenLanguage())
                              :f.k==="propagate"?true:"")
                  .forEach(el=>body.appendChild(el)));
   const err=document.createElement("div");err.className="err";
@@ -165,7 +173,7 @@ export function openAccount(){
       try{
         const r=await api("password","POST",{username:val("username").trim(),email:val("email").trim(),
                                      current:val("current"),new:nw,
-                                     theme:val("theme"),
+                                     theme:val("theme"),language:val("language"),
                                      propagate:!!(box&&box.checked)});
         const failed=(r.nodes||[]).filter(n=>!n.ok);
         if(failed.length){
@@ -182,11 +190,22 @@ export function openAccount(){
   wireTheme();
 }
 
+/* The account's language. Unlike colours, words cannot be swapped under a page
+   that is already drawn, so a different one means drawing it again: a reload,
+   which keeps the page you are on. Only once the choice has been remembered --
+   otherwise the reload would come back in the old language and reload again,
+   forever -- so a browser that stores nothing stays in its own language. */
+function useLanguage(choice){
+  if(resolveLanguage(choice)===currentLanguage()){rememberLanguage(choice);return;}
+  if(rememberLanguage(choice))location.reload();
+}
+
 export async function refreshWho(){
   try{state.who=await api("whoami");}catch(e){/* whoami is public; ignore */}
   /* The account's choice is the real one; localStorage only carries it far
      enough to paint the first frame. */
   if(state.who.theme&&state.who.theme!==currentTheme())applyTheme(state.who.theme);
+  if(state.who.authenticated&&typeof state.who.language==="string")useLanguage(state.who.language);
   const f=$("#whofoot");f.innerHTML="";
   if(state.who.authenticated){
     const d=document.createElement("div");d.className="who";

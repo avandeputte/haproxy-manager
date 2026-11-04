@@ -12,7 +12,7 @@ import re
 import socket
 import time
 
-from .base import PORT, VERSION, _lock, app, log
+from .base import PORT, STATIC_DIR, VERSION, _lock, app, log
 from .config import load_config, save_config
 from .util import run
 from . import sync, twofactor, vrrp
@@ -316,6 +316,7 @@ def api_whoami():
         "username": user,
         "email": (cfg["local"].get("admin") or {}).get("email", ""),
         "theme": (cfg["local"].get("admin") or {}).get("theme", "system"),
+        "language": (cfg["local"].get("admin") or {}).get("language", ""),
         "totp_enabled": twofactor.enabled(cfg["local"].get("admin") or {}),
         "version": VERSION,
         "hostname": socket.gethostname(),
@@ -518,6 +519,14 @@ def api_admin_receive():
                     "username": cfg["local"]["admin"]["username"]})
 
 
+def _language_known(code):
+    """"" (the browser's), English, or a code with a dictionary."""
+    if code in ("", "en"):
+        return True
+    return (isinstance(code, str) and re.fullmatch(r"[a-z]{2,3}", code) is not None
+            and (STATIC_DIR / "js" / "i18n" / (code + ".js")).is_file())
+
+
 @app.post("/api/password")
 def api_password():
     """Change the administrator username and/or password (session required)."""
@@ -544,6 +553,12 @@ def api_password():
     theme = body.get("theme")
     if theme is not None and theme not in ("system", "light", "dark"):
         return jsonify({"ok": False, "error": "unknown appearance %r" % theme}), 400
+    # The language likewise: empty for the browser's, or one the UI has a
+    # dictionary for -- which is the file being there, so a language added to
+    # static/js/i18n is accepted without anyone remembering to list it here.
+    language = body.get("language")
+    if language is not None and not _language_known(language):
+        return jsonify({"ok": False, "error": "unknown language %r" % language}), 400
     # The email can be changed on its own; a password only when one is given.
     email = body.get("email")
     if email is not None:
@@ -566,6 +581,8 @@ def api_password():
             cfg["local"]["admin"]["email"] = email
         if theme is not None:
             cfg["local"]["admin"]["theme"] = theme
+        if language is not None:
+            cfg["local"]["admin"]["language"] = language
         save_config(cfg)
     # Offered rather than automatic: the login is node-local, and wanting a
     # different administrator on one node is legitimate.
@@ -576,7 +593,8 @@ def api_password():
             r.get("name"), "" if r.get("ok") else ": " + r.get("error", ""))
     out = {"ok": True, "username": username,
            "email": cfg["local"]["admin"].get("email", ""),
-           "theme": cfg["local"]["admin"].get("theme", "system")}
+           "theme": cfg["local"]["admin"].get("theme", "system"),
+           "language": cfg["local"]["admin"].get("language", "")}
     if pushed is not None:
         out["nodes"] = pushed
     if new or wants_name:

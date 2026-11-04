@@ -2,8 +2,11 @@
 
    Chosen from the browser's own preference list, the way the browser chooses
    for every other site: the first language on it that this UI has is the one
-   used, and English is what remains when none matches. Nothing is stored and
-   nothing is asked -- the browser was already asked, once, when it was set up.
+   used, and English is what remains when none matches. That is the default,
+   and for most people the end of it -- but the browser's list is not always
+   the person's: an iPad takes it from the system language, and someone who
+   reads the documentation in English wants the field names it uses. So the
+   account dialog can pin a language, and that choice wins over the browser.
 
    The dictionaries live in ./i18n/<code>.js, one per language, keyed by the
    English string exactly as it appears in the source. That is what makes the
@@ -34,6 +37,32 @@ const ONE = { fr: n => n <= 1 };
 let dict = {};
 let lang = "en";
 
+/* A language pinned on the account dialog, or "" for the browser's. The
+   account holds the real choice; it is mirrored here because the dictionary
+   has to be loaded before the first frame, before the API could be asked --
+   the same reason the theme is. */
+const STORE = "ham_lang";
+export function chosenLanguage(){
+  try{
+    const code = localStorage.getItem(STORE) || "";
+    return LANGUAGES[code] ? code : "";
+  }catch(e){ return ""; }
+}
+/* Remember a choice, "" for the browser's. True when it was remembered: a
+   browser that refuses to store anything says so here. */
+export function rememberLanguage(code){
+  const want = LANGUAGES[code] ? code : "";
+  try{
+    if(want)localStorage.setItem(STORE, want);
+    else localStorage.removeItem(STORE);
+    return chosenLanguage() === want;
+  }catch(e){ return false; }
+}
+/* The language a choice comes to: itself, or the browser's when it is "". */
+export function resolveLanguage(choice){
+  return LANGUAGES[choice] ? choice : detectLanguage();
+}
+
 /* The first entry on the browser's list that has a dictionary, or English.
    "pt-BR" finds pt, "no" finds nb; "en-GB" finds nothing and that is right. */
 export function pickLanguage(wanted){
@@ -57,7 +86,7 @@ export function detectLanguage(){
    load -- a broken deploy, a network that dropped the request -- costs the
    translation, not the page. */
 export async function initLanguage(code){
-  lang = code || detectLanguage();
+  lang = code || chosenLanguage() || detectLanguage();
   dict = {};
   if(lang !== "en"){
     try{
