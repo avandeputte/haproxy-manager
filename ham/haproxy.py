@@ -25,10 +25,20 @@ def _line_safe(value):
     return re.sub(r"[\x00-\x1f\x7f]", "", str(value or "")).strip()
 
 
+# A browser puts the port in the Host header whenever it is not the scheme's
+# default -- "app.example.com:3456" -- so a host compared as sent never matches
+# a service on any other port. The port is cut off first: only a trailing
+# ":digits", which leaves an IPv6 literal ("[2001:db8::1]") whole where
+# field(1,:) would cut it at its first colon. Single quotes, because HAProxy
+# expands $ inside double ones. regsub is as old as 1.6, so this holds on every
+# HAProxy a distribution still ships. A prefix is not affected by what follows
+# it, so starts-with needs none of this.
+HOST = "hdr(host),regsub(':[0-9]+$','')"
+
 COND_MAP = {
-    "host_matches":     lambda c: "hdr(host) -i %s" % c.get("value", ""),
+    "host_matches":     lambda c: "%s -i %s" % (HOST, c.get("value", "")),
     "host_starts_with": lambda c: "hdr_beg(host) -i %s" % c.get("value", ""),
-    "host_ends_with":   lambda c: "hdr_end(host) -i %s" % c.get("value", ""),
+    "host_ends_with":   lambda c: "%s -m end -i %s" % (HOST, c.get("value", "")),
     "path_matches":     lambda c: "path %s" % c.get("value", ""),
     "path_starts_with": lambda c: "path_beg %s" % c.get("value", ""),
     "path_ends_with":   lambda c: "path_end %s" % c.get("value", ""),
