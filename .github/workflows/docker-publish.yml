@@ -76,6 +76,12 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # The action adds "latest" by itself to any type=ref,event=tag build
+          # (flavor latest=auto), prerelease or not, so the rule below was
+          # never the only say: 1.100.0-beta.1's tag build moved latest anyway.
+          # Off here, so that rule is the only thing that sets it.
+          flavor: |
+            latest=false
           tags: |
             # "latest" is the tip of main: a branch build there, the weekly
             # rebuild of it, or a release tag on a version without a
