@@ -15,8 +15,9 @@ export const WIZ_SECTIONS=[
  {title:"Service",fields:[
   {k:"url",l:"Public URLs",t:"textarea",
    h:"One per line. Several names are alternatives that all reach the same servers, e.g. "+
-     "https://app.example.com and https://www.example.com. A path like /api is allowed on a single "+
-     "URL, and tcp://0.0.0.0:3306 forwards a raw TCP port."},
+     "https://app.example.com and https://www.example.com. Ports may differ: "+
+     "https://app.example.com:3456 beside it adds a listener on 3456, and every name answers on every port. "+
+     "A path like /api is allowed on a single URL, and tcp://0.0.0.0:3306 forwards a raw TCP port."},
   {k:"target",l:"Forward to",t:"text",
    h:"e.g. http://192.168.1.100:1781. Several (comma separated) are load balanced, and each may be named: galera1=192.168.1.81:3306"},
   {k:"name",l:"Name",t:"text",h:"Optional -- derived from the host name or port when left empty"},

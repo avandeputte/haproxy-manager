@@ -344,11 +344,18 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
     # field); "" turns it off.
     if proxy_protocol is not None and proxy_protocol not in ("", "v1", "v2"):
         raise ValueError("The PROXY protocol must be off, v1 or v2")
-    # One service can answer for several host names. They share a listener, so
-    # they must agree on scheme and port; the first one names things.
+    # One service can answer for several host names and on several ports. The
+    # names become one rule, and that rule goes into a listener for each port,
+    # so every name answers on every port. The scheme is shared; the first URL
+    # names things.
     pubs = pubs if isinstance(pubs, list) else [pubs]
     pub = pubs[0]
-    hosts = [p["host"] for p in pubs]
+    hosts, ports = [], []
+    for p in pubs:
+        if p["host"].lower() not in {h.lower() for h in hosts}:
+            hosts.append(p["host"])
+        if p["port"] not in ports:
+            ports.append(p["port"])
 
     def act(action, kind, nm):
         acts.append({"action": action, "type": kind, "name": nm})
@@ -758,27 +765,48 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
                              % (" and ".join([x for x in ["ACME account" if not acc_id else "",
                                                           "challenge type" if not ch_id else ""] if x])))
 
-    # -- Public Service (frontend) ---------------------------------------
+    # -- Public Services (frontends), one per port -----------------------
     want_ssl = pub["scheme"] == "https"
-    fe = wizard._find(hp["frontends"], lambda f: pub["port"] in wizard._bind_ports(f)
-               and bool(f.get("ssl_enabled")) == want_ssl)
-    if fe:
-        act("updated", "Public Service", fe["name"])
-    else:
-        fe = {"id": str(uuid.uuid4()),
-              "name": wizard._uniq_name({f["name"] for f in hp["frontends"]},
-                                 ("https" if want_ssl else "http") + "-" + str(pub["port"])),
-              "enabled": True, "mode": "http", "binds": "0.0.0.0:%d" % pub["port"],
-              "ssl_enabled": want_ssl, "http2": want_ssl, "forwardfor": True,
-              "certificates": [], "rules": [], "custom": ""}
-        hp["frontends"].append(fe)
-        act("created", "Public Service", fe["name"])
-    fe["rules"] = _place_rule(hp, fe.get("rules") or [], rule)
-    if cert and cert["id"] not in (fe.get("certificates") or []):
-        fe.setdefault("certificates", []).append(cert["id"])
-    if not fe.get("default_backend"):
-        warns.append("Public Service \"%s\" has no default Backend Pool, so requests for any other host "
-                     "get a 503. That is usually what you want." % fe["name"])
+    typed = {(p["host"].lower(), p["port"]) for p in pubs}
+    also = [wizard.url_label(dict(pub, host=h, port=pt)) for pt in ports for h in hosts
+            if (h.lower(), pt) not in typed]
+    if also:
+        warns.append("Every name on a service answers on each of its ports, so this also "
+                     "serves %s." % ", ".join(also))
+    serving = []
+    for port in ports:
+        fe = wizard._find(hp["frontends"], lambda f: port in wizard._bind_ports(f)
+                   and f.get("mode") != "tcp" and bool(f.get("ssl_enabled")) == want_ssl)
+        if fe:
+            act("updated", "Public Service", fe["name"])
+        else:
+            clash = wizard._find(hp["frontends"], lambda f: port in wizard._bind_ports(f))
+            if clash:
+                raise ValueError("port %d is already used by \"%s\"" % (port, clash["name"]))
+            fe = {"id": str(uuid.uuid4()),
+                  "name": wizard._uniq_name({f["name"] for f in hp["frontends"]},
+                                     ("https" if want_ssl else "http") + "-" + str(port)),
+                  "enabled": True, "mode": "http", "binds": "0.0.0.0:%d" % port,
+                  "ssl_enabled": want_ssl, "http2": want_ssl, "forwardfor": True,
+                  "certificates": [], "rules": [], "custom": ""}
+            hp["frontends"].append(fe)
+            act("created", "Public Service", fe["name"])
+        serving.append(fe["id"])
+        fe["rules"] = _place_rule(hp, fe.get("rules") or [], rule)
+        if cert and cert["id"] not in (fe.get("certificates") or []):
+            fe.setdefault("certificates", []).append(cert["id"])
+        if not fe.get("default_backend"):
+            warns.append("Public Service \"%s\" has no default Backend Pool, so requests for any other host "
+                         "get a 503. That is usually what you want." % fe["name"])
+    # Editing a service: the URLs on the form are all of them, so a port that
+    # is no longer listed stops serving it. Without an edit (a publish that
+    # happens to match an existing service's names) nothing is taken away --
+    # that caller may not know the other ports, and they are live.
+    if existing_rule is not None and existing_rule is rule:
+        for f in hp["frontends"]:
+            if f["id"] not in serving and rule["id"] in (f.get("rules") or []):
+                f["rules"] = [x for x in f["rules"] if x != rule["id"]]
+                act("updated", "Public Service", f["name"])
 
     # -- Optional :80 service that redirects to https ---------------------
     if want_ssl and http_redirect:

@@ -43,6 +43,13 @@ def _split_url(raw, what, default_scheme="http", allow=("http", "https", "tcp"))
             "path": path, "label": label}, None
 
 
+def url_label(pub):
+    """A parsed URL written back out, the scheme's own port left unsaid."""
+    default = {"https": 443, "http": 80}.get(pub["scheme"])
+    port = "" if pub["port"] == default else ":%d" % pub["port"]
+    return "%s://%s%s%s" % (pub["scheme"], pub["host"], port, pub.get("path") or "")
+
+
 def _uniq_name(existing, base):
     base = _sec(base)
     if base not in existing:
