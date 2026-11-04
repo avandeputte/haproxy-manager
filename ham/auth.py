@@ -12,7 +12,7 @@ import re
 import socket
 import time
 
-from .base import PORT, VERSION, _lock, app, log
+from .base import PORT, STATIC_DIR, VERSION, _lock, app, log
 from .config import load_config, save_config
 from .util import run
 from . import sync, twofactor, vrrp
@@ -316,6 +316,7 @@ def api_whoami():
         "username": user,
         "email": (cfg["local"].get("admin") or {}).get("email", ""),
         "theme": (cfg["local"].get("admin") or {}).get("theme", "system"),
+        "language": (cfg["local"].get("admin") or {}).get("language", ""),
         "totp_enabled": twofactor.enabled(cfg["local"].get("admin") or {}),
         "version": VERSION,
         "hostname": socket.gethostname(),
@@ -489,6 +490,7 @@ def api_admin_receive():
         return jsonify({"ok": False, "error": "that is not an administrator record"}), 400
     with _lock:
         cfg = load_config()
+        old = cfg["local"].get("admin") or {}
         cfg["local"]["admin"] = {
             "username": str(rec["username"]).strip() or "admin",
             "salt": str(rec["salt"]), "hash": str(rec["hash"]),
@@ -506,16 +508,43 @@ def api_admin_receive():
                 "totp_recovery": [str(h) for h in rec.get("totp_recovery") or []],
                 "totp_last": int(rec.get("totp_last") or 0),
             })
-        # Rotate the session secret, which is what signs the cookies: every
-        # session on this node is now invalid. That is correct -- the
-        # credential changed, and anyone signed in here was signed in with the
-        # old one. Without this a stolen cookie would outlive the password
-        # change that was meant to shut it out.
-        cfg["local"]["session_secret"] = os.urandom(32).hex()
+        # The person's preferences travel with the login: whoever signs in is
+        # the same person on every node. One this node cannot use -- a
+        # language an older node has no dictionary for -- is left out, and
+        # one the sender does not carry (an older node again) keeps what is
+        # here rather than being wiped.
+        for key, usable in (("theme", lambda v: v in ("system", "light", "dark")),
+                            ("language", _language_known)):
+            if key in rec and usable(rec[key]):
+                cfg["local"]["admin"][key] = rec[key]
+            elif key in old:
+                cfg["local"]["admin"][key] = old[key]
+        # Rotate the session secret, which is what signs the cookies, when the
+        # credential changed: everyone signed in here was signed in with the
+        # old one, and a stolen cookie must not outlive the password change
+        # that was meant to shut it out. A record that only carries a new
+        # email, theme or language changes nothing anyone signs in with, and
+        # signing every other node out for it would be a punishment.
+        if _credential(old) != _credential(cfg["local"]["admin"]):
+            cfg["local"]["session_secret"] = os.urandom(32).hex()
         save_config(cfg)
     log.info("administrator record accepted from %s", request.remote_addr)
     return jsonify({"ok": True, "hostname": socket.gethostname(),
                     "username": cfg["local"]["admin"]["username"]})
+
+
+def _credential(admin):
+    """What signing in to a node checks; a change to any of it ends sessions."""
+    return tuple(str(admin.get(k) or "") for k in
+                 ("username", "salt", "hash", "iterations", "totp_enabled", "totp_secret"))
+
+
+def _language_known(code):
+    """"" (the browser's), English, or a code with a dictionary."""
+    if code in ("", "en"):
+        return True
+    return (isinstance(code, str) and re.fullmatch(r"[a-z]{2,3}", code) is not None
+            and (STATIC_DIR / "js" / "i18n" / (code + ".js")).is_file())
 
 
 @app.post("/api/password")
@@ -544,6 +573,12 @@ def api_password():
     theme = body.get("theme")
     if theme is not None and theme not in ("system", "light", "dark"):
         return jsonify({"ok": False, "error": "unknown appearance %r" % theme}), 400
+    # The language likewise: empty for the browser's, or one the UI has a
+    # dictionary for -- which is the file being there, so a language added to
+    # static/js/i18n is accepted without anyone remembering to list it here.
+    language = body.get("language")
+    if language is not None and not _language_known(language):
+        return jsonify({"ok": False, "error": "unknown language %r" % language}), 400
     # The email can be changed on its own; a password only when one is given.
     email = body.get("email")
     if email is not None:
@@ -566,6 +601,8 @@ def api_password():
             cfg["local"]["admin"]["email"] = email
         if theme is not None:
             cfg["local"]["admin"]["theme"] = theme
+        if language is not None:
+            cfg["local"]["admin"]["language"] = language
         save_config(cfg)
     # Offered rather than automatic: the login is node-local, and wanting a
     # different administrator on one node is legitimate.
@@ -576,7 +613,8 @@ def api_password():
             r.get("name"), "" if r.get("ok") else ": " + r.get("error", ""))
     out = {"ok": True, "username": username,
            "email": cfg["local"]["admin"].get("email", ""),
-           "theme": cfg["local"]["admin"].get("theme", "system")}
+           "theme": cfg["local"]["admin"].get("theme", "system"),
+           "language": cfg["local"]["admin"].get("language", "")}
     if pushed is not None:
         out["nodes"] = pushed
     if new or wants_name:
