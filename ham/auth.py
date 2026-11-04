@@ -490,6 +490,7 @@ def api_admin_receive():
         return jsonify({"ok": False, "error": "that is not an administrator record"}), 400
     with _lock:
         cfg = load_config()
+        old = cfg["local"].get("admin") or {}
         cfg["local"]["admin"] = {
             "username": str(rec["username"]).strip() or "admin",
             "salt": str(rec["salt"]), "hash": str(rec["hash"]),
@@ -507,16 +508,35 @@ def api_admin_receive():
                 "totp_recovery": [str(h) for h in rec.get("totp_recovery") or []],
                 "totp_last": int(rec.get("totp_last") or 0),
             })
-        # Rotate the session secret, which is what signs the cookies: every
-        # session on this node is now invalid. That is correct -- the
-        # credential changed, and anyone signed in here was signed in with the
-        # old one. Without this a stolen cookie would outlive the password
-        # change that was meant to shut it out.
-        cfg["local"]["session_secret"] = os.urandom(32).hex()
+        # The person's preferences travel with the login: whoever signs in is
+        # the same person on every node. One this node cannot use -- a
+        # language an older node has no dictionary for -- is left out, and
+        # one the sender does not carry (an older node again) keeps what is
+        # here rather than being wiped.
+        for key, usable in (("theme", lambda v: v in ("system", "light", "dark")),
+                            ("language", _language_known)):
+            if key in rec and usable(rec[key]):
+                cfg["local"]["admin"][key] = rec[key]
+            elif key in old:
+                cfg["local"]["admin"][key] = old[key]
+        # Rotate the session secret, which is what signs the cookies, when the
+        # credential changed: everyone signed in here was signed in with the
+        # old one, and a stolen cookie must not outlive the password change
+        # that was meant to shut it out. A record that only carries a new
+        # email, theme or language changes nothing anyone signs in with, and
+        # signing every other node out for it would be a punishment.
+        if _credential(old) != _credential(cfg["local"]["admin"]):
+            cfg["local"]["session_secret"] = os.urandom(32).hex()
         save_config(cfg)
     log.info("administrator record accepted from %s", request.remote_addr)
     return jsonify({"ok": True, "hostname": socket.gethostname(),
                     "username": cfg["local"]["admin"]["username"]})
+
+
+def _credential(admin):
+    """What signing in to a node checks; a change to any of it ends sessions."""
+    return tuple(str(admin.get(k) or "") for k in
+                 ("username", "salt", "hash", "iterations", "totp_enabled", "totp_secret"))
 
 
 def _language_known(code):

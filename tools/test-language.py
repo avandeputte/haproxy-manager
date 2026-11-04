@@ -19,7 +19,7 @@ os.environ.setdefault("HAM_DATA_DIR", tempfile.mkdtemp(prefix="ham-lang-"))
 os.environ["HAM_DRY_RUN"] = "1"
 
 import ham; ham   # noqa: E402  (route registration)
-from ham.config import load_config   # noqa: E402
+from ham.config import load_config, save_config   # noqa: E402
 
 fails = []
 
@@ -65,6 +65,43 @@ ok(r.status_code == 200 and load_config()["local"]["admin"].get("language") == "
 r = save("")
 ok(r.status_code == 200 and client.get("/api/whoami").get_json().get("language") == "",
    "empty goes back to the browser's")
+
+# ---- the login pushed from another node carries the preferences --------------
+cfg = load_config()
+cfg["local"]["api_key"] = "lang-key"
+save_config(cfg)
+K = {"X-API-Key": "lang-key"}
+
+
+def receive(**changes):
+    rec = dict(load_config()["local"]["admin"], **changes)
+    for k in [k for k, v in changes.items() if v is DROP]:
+        rec.pop(k)
+    return client.post("/api/admin/receive", headers=K, json={"admin": rec})
+
+
+DROP = object()
+r = receive(theme="dark", language="de")
+admin = load_config()["local"]["admin"]
+ok(r.status_code == 200 and admin.get("theme") == "dark" and admin.get("language") == "de",
+   "a pushed login brings its appearance and language: %r %r"
+   % (admin.get("theme"), admin.get("language")))
+ok(client.get("/api/whoami").get_json().get("authenticated"),
+   "and, the password being the same, nobody here is signed out for it")
+
+receive(language="zz", theme="neon")
+admin = load_config()["local"]["admin"]
+ok(admin.get("language") == "de" and admin.get("theme") == "dark",
+   "one this node cannot use is left out, keeping what is here")
+receive(language=DROP, theme=DROP)
+admin = load_config()["local"]["admin"]
+ok(admin.get("language") == "de" and admin.get("theme") == "dark",
+   "and a sender that carries none (an older node) does not wipe them")
+
+receive(hash="0" * 64)
+ok(not client.get("/api/whoami").get_json().get("authenticated"),
+   "a pushed record with a different credential still signs everyone here out")
+ok(load_config()["local"]["admin"].get("language") == "de", "keeping the language through it")
 
 client.post("/api/logout", json={})
 who = client.get("/api/whoami").get_json()

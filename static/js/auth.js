@@ -128,8 +128,8 @@ export function openAccount(){
      somewhere to send it. */
   const peers=state.who.peers||0;
   if(peers)fields.push({k:"propagate",l:"Apply to the other nodes",t:"bool",d:true,
-    h:tn(peers,"Sends the new login to the {n} other node. Only the stored hash travels, never the password.",
-               "Sends the new login to the {n} other nodes. Only the stored hash travels, never the password.")});
+    h:tn(peers,"Sends the new login, with the appearance and language, to the {n} other node. Only the stored hash travels, never the password.",
+               "Sends the new login, with the appearance and language, to the {n} other nodes. Only the stored hash travels, never the password.")});
   fields.forEach(f=>fieldRow(f,f.k==="username"?(state.who.username||state.who.admin_username)
                              :f.k==="email"?(state.who.email||"")
                              :f.k==="theme"?currentTheme()
