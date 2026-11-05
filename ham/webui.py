@@ -451,6 +451,7 @@ def api_services():
         return out
 
     out = []
+    by_rule = {}
     for fe in hp["frontends"]:
         ports = sorted(wizard._bind_ports(fe))
         scheme = "https" if fe.get("ssl_enabled") else "http"
@@ -491,21 +492,30 @@ def api_services():
                 continue
             host = all_hosts[0]
 
-            pool = backends.get(rule.get("backend"))
-            targets = pool_targets(pool)
             default_port = 443 if scheme == "https" else 80
             shown_port = "" if (not ports or ports[0] == default_port) else ":%d" % ports[0]
+            urls = ["%s://%s%s%s" % (scheme, h, shown_port, path) for h in all_hosts]
+            # One rule in several listeners is one service on several ports:
+            # its names, answered on each. Listed once, with every URL, so it
+            # is edited, paused and removed as the one thing it is.
+            if rule["id"] in by_rule:
+                seen = by_rule[rule["id"]]
+                seen["urls"] += [u for u in urls if u not in seen["urls"]]
+                continue
+
+            pool = backends.get(rule.get("backend"))
+            targets = pool_targets(pool)
 
             attached = [certs[cid] for cid in (fe.get("certificates") or []) if cid in certs]
             cert, match = wizard.cert_for_host(attached, host)
             uncovered = [h for h in all_hosts if not wizard.cert_for_host(attached, h)[0]]
             info = cert_details(cert_path(cert)) if cert else None
 
-            out.append(dict(pool_settings(pool), **{
+            by_rule[rule["id"]] = dict(pool_settings(pool), **{
                 "id": rule["id"],
                 "managed": "web-ui" if rule.get("id") in local_ids else "",
-                "url": "%s://%s%s%s" % (scheme, host, shown_port, path),
-                "urls": ["%s://%s%s%s" % (scheme, h, shown_port, path) for h in all_hosts],
+                "url": urls[0],
+                "urls": urls,
                 "hosts": all_hosts,
                 "certificate_uncovered": uncovered,
                 "host": host, "path": path, "scheme": scheme,
@@ -520,7 +530,8 @@ def api_services():
                 "certificate_status": info["status"] if info else None,
                 "expires_iso": info["expires_iso"] if info else None,
                 "days_left": info["days_left"] if info else None,
-            }))
+            })
+            out.append(by_rule[rule["id"]])
     return jsonify(out)
 
 

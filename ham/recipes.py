@@ -90,9 +90,8 @@ def api_wizard_publish():
         if any(p["scheme"] != pub["scheme"] for p in pubs):
             return jsonify({"ok": False, "error":
                             "every URL on one service must use the same scheme"}), 400
-        if any(p["port"] != pub["port"] for p in pubs):
-            return jsonify({"ok": False, "error":
-                            "every URL on one service must use the same port"}), 400
+        # Ports may differ: each gets a listener, and every name answers on
+        # each of them.
         if pub["scheme"] == "tcp":
             return jsonify({"ok": False, "error":
                             "a tcp:// service is one listening port, so it takes one URL"}), 400
@@ -103,9 +102,10 @@ def api_wizard_publish():
                             "the path as its own service."}), 400
         seen = set()
         for p in pubs:
-            if p["host"].lower() in seen:
-                return jsonify({"ok": False, "error": "%s is listed twice" % p["host"]}), 400
-            seen.add(p["host"].lower())
+            if (p["host"].lower(), p["port"]) in seen:
+                return jsonify({"ok": False, "error": "%s is listed twice"
+                                % wizard.url_label(p)}), 400
+            seen.add((p["host"].lower(), p["port"]))
 
     raw_targets = [t for t in re.split(r"[\s,]+", body.get("target") or "") if t]
     if not raw_targets:
