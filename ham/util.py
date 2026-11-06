@@ -45,6 +45,52 @@ def cert_path(cert):
 # Certificates count as "expiring" this many days before notAfter.
 EXPIRY_WARN_DAYS = 15
 
+# What openssl said about each file, by path, with the stamp it was read at.
+# The Services page asks once per service -- 62 services sharing one wildcard
+# certificate were 124 openssl runs, 5.7 seconds on a small machine (#16) --
+# and a certificate file only changes when it is issued again, which changes
+# its stamp. The days left are worked out on every call, not kept.
+_CERT_READS = {}
+
+
+def _read_cert(p):
+    """Issuer, subject, notAfter and the names a PEM covers; None if unreadable."""
+    try:
+        st = p.stat()
+    except OSError:
+        return None
+    stamp = (st.st_mtime_ns, st.st_size, st.st_ino)
+    hit = _CERT_READS.get(str(p))
+    if hit and hit[0] == stamp:
+        return hit[1]
+
+    rc, out = run(["openssl", "x509", "-noout", "-enddate", "-issuer", "-subject",
+                   "-ext", "subjectAltName", "-in", str(p)])
+    if rc != 0:
+        return None
+
+    def _grab(field):
+        m = re.search(r"^%s=(.+)$" % field, out, re.M)
+        return m.group(1).strip() if m else None
+
+    read = {"issuer": _grab("issuer"), "subject": _grab("subject"),
+            "expires": _grab("notAfter")}
+    # The names the file actually covers, which is not the same thing as the
+    # names the certificate record lists. Adding a name to the record does not
+    # change what was issued: until it is issued again, the file covers what it
+    # covered before, and a browser asking for the new name is told the
+    # certificate is for something else.
+    san = out.split("Subject Alternative Name", 1)[1] if "Subject Alternative Name" in out else ""
+    names = sorted({m.strip().lower() for m in re.findall(r"DNS:([^,\s]+)", san)})
+    if not names:
+        cn = re.search(r"CN\s*=\s*([^,/]+)", read["subject"] or "")
+        if cn:
+            names = [cn.group(1).strip().lower()]
+    read["names"] = names
+    read["self_signed"] = bool(read["issuer"]) and read["issuer"] == read["subject"]
+    _CERT_READS[str(p)] = (stamp, read)
+    return read
+
 
 def cert_details(p):
     """Inspect a deployed PEM.
@@ -60,32 +106,11 @@ def cert_details(p):
         return info
     info["deployed"] = True
 
-    rc, out = run(["openssl", "x509", "-noout", "-enddate", "-issuer", "-subject", "-in", str(p)])
-    if rc != 0:
+    read = _read_cert(p)
+    if read is None:
         info["status"] = "unreadable"
         return info
-
-    def _grab(field):
-        m = re.search(r"^%s=(.+)$" % field, out, re.M)
-        return m.group(1).strip() if m else None
-
-    info["issuer"] = _grab("issuer")
-    info["subject"] = _grab("subject")
-    # The names the file actually covers, which is not the same thing as the
-    # names the certificate record lists. Adding a name to the record does not
-    # change what was issued: until it is issued again, the file covers what it
-    # covered before, and a browser asking for the new name is told the
-    # certificate is for something else.
-    rc2, ext = run(["openssl", "x509", "-noout", "-ext", "subjectAltName", "-in", str(p)])
-    if rc2 == 0:
-        info["names"] = sorted({m.strip().lower()
-                                for m in re.findall(r"DNS:([^,\s]+)", ext)})
-    if not info["names"]:
-        cn = re.search(r"CN\s*=\s*([^,/]+)", info["subject"] or "")
-        if cn:
-            info["names"] = [cn.group(1).strip().lower()]
-    info["self_signed"] = bool(info["issuer"]) and info["issuer"] == info["subject"]
-    info["expires"] = _grab("notAfter")
+    info.update(read, names=list(read["names"]))
 
     if info["expires"]:
         try:
