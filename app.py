@@ -202,9 +202,9 @@ if __name__ == "__main__":
     # listener coming up: a node that is catching up should still be reachable
     # while it does.
     threading.Thread(target=_catch_up_at_start, daemon=True).start()
-    # A node that boots with CrowdSec on brings its bouncer up: in a
-    # container nothing else would.
-    threading.Thread(target=crowdsec.start_if_wanted, daemon=True).start()
+    # The CrowdSec bouncer: put on this node if it is missing (a package
+    # install cannot fetch it), and brought up when CrowdSec is on.
+    threading.Thread(target=crowdsec.startup, daemon=True).start()
     # The traffic history is written every ten minutes, so stopping must write
     # the rest. systemd and supervisord stop with SIGTERM, which by default
     # ends Python without running anything registered here; made an ordinary

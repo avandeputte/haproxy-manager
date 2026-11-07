@@ -699,7 +699,14 @@ main() {
     [ "$MODE" = "uninstall" ] && do_uninstall
     [ "$MODE" = "update" ] && log "Updating the existing installation"
     install_packages
-    [ "${SKIP_CROWDSEC:-0}" = 1 ] || install_crowdsec
+    if [ "${SKIP_CROWDSEC:-0}" = 1 ]; then
+        # The app installs the bouncer at startup when it is missing; this
+        # marker tells it not to, on a node that must not carry it.
+        mkdir -p /var/lib/haproxy-manager && touch /var/lib/haproxy-manager/crowdsec-not-wanted
+    else
+        rm -f /var/lib/haproxy-manager/crowdsec-not-wanted
+        install_crowdsec
+    fi
     fetch_source
     install_acme
     install_app

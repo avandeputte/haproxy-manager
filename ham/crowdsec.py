@@ -23,8 +23,8 @@ import secrets
 import shutil
 import subprocess
 
-from .base import (CROWDSEC_BIN, CROWDSEC_BOUNCER_CFG, CROWDSEC_HTML, CROWDSEC_SPOE, _lock,
-                   _requests, app, log)
+from .base import (CROWDSEC_BIN, CROWDSEC_BOUNCER_CFG, CROWDSEC_HTML, CROWDSEC_SPOE, DATA_DIR,
+                   _lock, _requests, app, log)
 from .config import DEFAULT_CONFIG, load_config, save_config
 from .util import run
 from . import access, errorpages
@@ -215,16 +215,32 @@ def ensure_service(cfg, changed=False):
     return "", ""
 
 
-def start_if_wanted():
-    """At startup: a node that boots with CrowdSec on brings the bouncer up
-    with it, since in a container nothing else would."""
+# A node that must not carry the bouncer: install.sh --without-crowdsec
+# leaves this behind, and the startup install below honours it.
+NOT_WANTED = DATA_DIR / "crowdsec-not-wanted"
+
+
+def startup():
+    """At startup: the bouncer is put on this node if it is not here, and a
+    node that boots with CrowdSec on brings it up, since in a container
+    nothing else would.
+
+    The install is what makes the package path whole: a .deb or .rpm cannot
+    run apt from inside dpkg, and the repository the bouncer comes from is
+    not the distribution's, so a node installed or upgraded from a package
+    would otherwise lack it until someone pressed the button. Once, when
+    missing, never fatal: a node that cannot fetch it serves everything else.
+    """
     try:
+        if not installed() and not NOT_WANTED.exists():
+            ok, out = install()
+            log.info("CrowdSec SPOA bouncer: %s", "installed" if ok else "not installed: " + out.strip()[-300:])
         cfg = load_config()
         if active(cfg):
             write_files(cfg)
             ensure_service(cfg)
     except Exception:
-        log.exception("starting the CrowdSec bouncer at startup failed")
+        log.exception("the CrowdSec bouncer at startup failed")
 
 
 # --------------------------------------------------------------------------
@@ -401,21 +417,13 @@ def api_crowdsec_test():
 # The repository the package comes from. Its Debian 13 suite is empty at the
 # time of writing; the bookworm build is a static Go binary with one trivial
 # dependency and installs on anything newer, which is what the image does too.
+# RPM systems take CrowdSec's own repository script, which knows their suites.
 REPO_KEY_URL = "https://packagecloud.io/crowdsec/crowdsec/gpgkey"
 REPO_LINE = ("deb [signed-by=/etc/apt/keyrings/crowdsec.gpg] "
              "https://packagecloud.io/crowdsec/crowdsec/debian/ bookworm main\n")
-
-
-@app.post("/api/crowdsec/install")
-def api_crowdsec_install():
-    """Install the bouncer on this node, from CrowdSec's repository."""
-    if installed():
-        return jsonify({"ok": True, "message": "the bouncer is already installed", "status": status(load_config())})
-    if not shutil.which("apt-get"):
-        return jsonify({"ok": False, "message": "this node has no apt-get; install crowdsec-haproxy-spoa-bouncer "
-                                                "from CrowdSec's repository by hand"}), 400
-    script = """set -e
+APT_INSTALL = """set -e
 export DEBIAN_FRONTEND=noninteractive
+command -v gpg >/dev/null || apt-get install -y --no-install-recommends gnupg
 mkdir -p /etc/apt/keyrings
 curl -fsSL %s | gpg --dearmor --yes -o /etc/apt/keyrings/crowdsec.gpg
 printf '%%s' '%s' > /etc/apt/sources.list.d/crowdsec.list
@@ -423,9 +431,35 @@ apt-get update -q
 apt-get install -y --no-install-recommends crowdsec-haproxy-spoa-bouncer
 systemctl disable --now crowdsec-spoa-bouncer >/dev/null 2>&1 || true
 """ % (REPO_KEY_URL, REPO_LINE)
-    rc, out = run(["sh", "-c", script], timeout=600)
+RPM_INSTALL = """set -e
+curl -fsS https://packagecloud.io/install/repositories/crowdsec/crowdsec/script.rpm.sh | bash
+(command -v dnf >/dev/null && dnf install -y crowdsec-haproxy-spoa-bouncer) || yum install -y crowdsec-haproxy-spoa-bouncer
+systemctl disable --now crowdsec-spoa-bouncer >/dev/null 2>&1 || true
+"""
+
+
+def install():
+    """Put the bouncer on this node from CrowdSec's repository: (ok, output)."""
+    if installed():
+        return True, "the bouncer is already installed"
+    if shutil.which("apt-get"):
+        script = APT_INSTALL
+    elif shutil.which("dnf") or shutil.which("yum"):
+        script = RPM_INSTALL
+    else:
+        return False, ("this node has neither apt-get nor dnf; install crowdsec-haproxy-spoa-bouncer "
+                       "from CrowdSec's repository by hand")
+    rc, out = run(["sh", "-c", script], timeout=900)
     if rc != 0 or not installed():
-        return jsonify({"ok": False, "message": "the install did not finish:\n" + (out or "").strip()[-1500:]}), 500
+        return False, "the install did not finish:\n" + (out or "").strip()[-1500:]
     log.info("installed the CrowdSec SPOA bouncer")
-    return jsonify({"ok": True, "message": "installed; it starts when CrowdSec is on and Apply runs",
-                    "status": status(load_config())})
+    return True, "installed; it starts when CrowdSec is on and Apply runs"
+
+
+@app.post("/api/crowdsec/install")
+def api_crowdsec_install():
+    """Install the bouncer on this node, from CrowdSec's repository."""
+    ok, message = install()
+    if ok and NOT_WANTED.exists():
+        NOT_WANTED.unlink()             # asked for by hand: wanted after all
+    return jsonify({"ok": ok, "message": message, "status": status(load_config())}), (200 if ok else 500)

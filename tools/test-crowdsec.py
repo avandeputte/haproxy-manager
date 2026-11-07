@@ -173,6 +173,32 @@ ok("tune.bufsize 65536" in text and "lf-file %s/captcha.html if cs_captcha" % CR
 s = client.get("/api/crowdsec/settings", headers=H).get_json()
 ok(s["has_captcha_secret"] and "captcha_secret_key" not in s and "captcha_signing_key" not in s, "the captcha secrets are never read back")
 
+# ---- the install at startup, and the node that does not want it ----------------------------
+bouncer_present(False)
+crowdsec.NOT_WANTED.parent.mkdir(parents=True, exist_ok=True)
+crowdsec.NOT_WANTED.write_text("")
+real_install = crowdsec.install
+asked = []
+crowdsec.install = lambda: (asked.append(1), (True, "installed"))[1]
+crowdsec.startup()
+ok(not asked, "a node marked as not wanting the bouncer is not given one at startup")
+crowdsec.NOT_WANTED.unlink()
+crowdsec.startup()
+ok(asked == [1], "a node without the marker and without the bouncer gets it at startup")
+bouncer_present(True)
+asked.clear()
+crowdsec.startup()
+ok(not asked, "a node that has it is left alone")
+crowdsec.install = real_install
+bouncer_present(False)
+crowdsec.NOT_WANTED.write_text("")
+r = client.post("/api/crowdsec/install", headers=H, json={}).get_json()
+ok(r["ok"] is False and "did not finish" in r["message"] or "by hand" in r["message"],
+   "asked for by hand on a node that cannot fetch it, the button says why: %s" % r["message"].splitlines()[0][:60])
+bouncer_present(True)
+r = client.post("/api/crowdsec/install", headers=H, json={}).get_json()
+ok(r["ok"] is True and not crowdsec.NOT_WANTED.exists(), "asked for by hand, the node is wanted after all")
+
 # ---- the LAPI test ----------------------------------------------------------------------
 r = client.post("/api/crowdsec/test", headers=H, json={"api_url": "http://127.0.0.1:1", "api_key": "x"}).get_json()
 ok(r["ok"] is False and "did not answer" in r["message"], "a LAPI that is not there is reported as such")
