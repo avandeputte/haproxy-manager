@@ -22,11 +22,14 @@ msg_info "Adding CrowdSec's repository and its SPOA bouncer"
 # static Go binary and runs on this release unchanged. Installed and left
 # stopped. Not fatal: a container without it serves everything else.
 mkdir -p /etc/apt/keyrings
-if curl -fsSL https://packagecloud.io/crowdsec/crowdsec/gpgkey | gpg --dearmor --yes -o /etc/apt/keyrings/crowdsec.gpg 2>/dev/null; then
+if curl -fsSL --max-time 60 https://packagecloud.io/crowdsec/crowdsec/gpgkey | gpg --dearmor --yes -o /etc/apt/keyrings/crowdsec.gpg 2>/dev/null \
+   && gpg --show-keys --with-colons /etc/apt/keyrings/crowdsec.gpg 2>/dev/null | grep -q "^fpr:::::::::6A89E3C2303A901A889971D3376ED5326E93CD0C:"; then
   echo "deb [signed-by=/etc/apt/keyrings/crowdsec.gpg] https://packagecloud.io/crowdsec/crowdsec/debian/ bookworm main" >/etc/apt/sources.list.d/crowdsec.list
-  $STD apt-get update
+  $STD apt-get update || true
   $STD apt-get install -y --no-install-recommends crowdsec-haproxy-spoa-bouncer || true
   systemctl disable --now crowdsec-spoa-bouncer >/dev/null 2>&1 || true
+else
+  rm -f /etc/apt/keyrings/crowdsec.gpg
 fi
 msg_ok "CrowdSec SPOA bouncer installed (stopped until CrowdSec is switched on)"
 

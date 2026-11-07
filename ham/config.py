@@ -527,7 +527,9 @@ def shared_parts(cfg):
     view = shared_view(cfg)
     out = {}
     for section, body in view.items():
-        if not isinstance(body, dict):
+        # A section of plain settings is one part: tagging each key would
+        # send a tag per secret around the cluster for no reader's benefit.
+        if not isinstance(body, dict) or not any(isinstance(v, (list, dict)) for v in body.values()):
             out[section] = _fp(body)
             continue
         for coll, items in sorted(body.items()):

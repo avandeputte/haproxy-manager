@@ -13,7 +13,7 @@ from .config import (DEFAULT_CONFIG, _history_files, _merge_defaults, load_confi
     save_config, shared_fingerprint, shared_objects, shared_view)
 
 # The sections a snapshot holds, and the order they are shown in.
-SECTIONS = ("haproxy", "acme", "access", "cluster", "notify")
+SECTIONS = ("haproxy", "acme", "access", "cluster", "notify", "crowdsec")
 
 
 def _read(name):

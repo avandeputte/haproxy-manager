@@ -108,6 +108,9 @@ r = post("wizard/rule", body)
 rule = rule_named("deny-host-tv")
 ok(rule is not None and len(rule["any_of"]) == 2 and len(rule["conditions"]) == 1 and rule["test"] == "unless",
    "saved: the rule holds its two lists and its test")
+r = client.delete("/api/haproxy/conditions/" + rule["any_of"][0], headers=H)
+ok(r.status_code == 409 and "still tested by" in (r.get_json() or {}).get("error", ""),
+   "a condition a rule tests cannot be deleted from under it")
 ok(rule["id"] in fe()["rules"], "and sits on the listener picked")
 conds = _by_id(load_config()["haproxy"]["conditions"])
 made = [conds[c] for c in rule["any_of"] + rule["conditions"]]
@@ -166,7 +169,14 @@ r = post("wizard/rule", {"id": old["id"], "listeners": [fe()["id"]],
                          "any_of": [{"id": c} for c in old["conditions"]],
                          "action": {"type": "use_backend", "backend": pools["shop"]}})
 old = next(x for x in load_config()["haproxy"]["rules"] if x["id"] == old["id"])
-ok(old["operator"] == "and" and old["any_of"] and not old["conditions"], "it is stored in the two-list shape")
+ok(old["operator"] == "or" and not old["any_of"] and len(old["conditions"]) == 2,
+   "alternatives alone keep the one-list shape every version renders the same")
+r = post("wizard/rule", {"id": old["id"], "listeners": [fe()["id"]],
+                         "any_of": [{"id": c} for c in old["conditions"] if c != by_hand["id"]], "all_of": [{"id": by_hand["id"]}],
+                         "action": {"type": "use_backend", "backend": pools["shop"]}})
+old = next(x for x in load_config()["haproxy"]["rules"] if x["id"] == old["id"])
+ok(old["operator"] == "and" and len(old["any_of"]) == 1 and old["conditions"] == [by_hand["id"]],
+   "with something that must hold for each, the two-list shape")
 
 # ---- a rule a service holds for itself ---------------------------------------------------
 deny = post("wizard/rule", {"listeners": [], "all_of": [{"type": "path_starts_with", "value": "/admin"},

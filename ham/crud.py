@@ -9,7 +9,7 @@ import copy
 
 from .base import _lock, app, log
 from .config import VALID_COLLECTIONS, load_config, merged, save_config
-from .util import _by_id, _sec
+from .util import _by_id, _sec, rule_cond_ids
 from .validate import check_pool, check_setting_types
 from . import access, apply, errorpages, haproxy, oauth
 
@@ -172,6 +172,15 @@ def collection_item(sec, col, iid):
                 save_config(cfg)
                 _after_save(sec, col, cfg)
                 return jsonify(data)
+            # A condition a rule still tests cannot go: the rule would render
+            # without it -- a deny for everyone, a route for everything.
+            if sec == "haproxy" and col == "conditions":
+                users = [r.get("name") or "?" for r in merged(cfg)["haproxy"]["rules"]
+                         if iid in rule_cond_ids(r)]
+                if users:
+                    return jsonify({"error": "\"%s\" is still tested by %s. Take it off the rule "
+                                             "first, or delete the rule."
+                                             % (x.get("name", iid), ", ".join(users))}), 409
             items.pop(i)
             save_config(cfg)
             _after_save(sec, col, cfg)

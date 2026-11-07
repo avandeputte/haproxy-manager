@@ -179,6 +179,7 @@ LOCAL_WRITE_PREFIXES = (
     "/api/admin",          # the administrator record, pushed from another node
     "/api/webui",          # this node's own UI address, not shared
     "/api/unlock",         # lifting the lock cannot itself be blocked by it
+    "/api/crowdsec/install",   # this node's own bouncer package
 )
 
 

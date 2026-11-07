@@ -44,6 +44,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # (read after the image's own exclude, which is why the name sorts last).
     && echo "path-include /usr/share/doc/crowdsec-haproxy-spoa-bouncer/*" > /etc/dpkg/dpkg.cfg.d/zz-crowdsec \
     && curl -fsSL https://packagecloud.io/crowdsec/crowdsec/gpgkey | gpg --dearmor -o /etc/apt/keyrings/crowdsec.gpg \
+    && gpg --show-keys --with-colons /etc/apt/keyrings/crowdsec.gpg | grep -q '^fpr:::::::::6A89E3C2303A901A889971D3376ED5326E93CD0C:' \
     && echo "deb [signed-by=/etc/apt/keyrings/crowdsec.gpg] https://packagecloud.io/crowdsec/crowdsec/debian/ bookworm main" \
         > /etc/apt/sources.list.d/crowdsec.list \
     && apt-get update && apt-get install -y --no-install-recommends \

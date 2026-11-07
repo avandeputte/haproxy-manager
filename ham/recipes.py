@@ -169,6 +169,9 @@ def api_wizard_publish():
         except Exception as e:
             return jsonify({"ok": False, "error": "the resulting configuration is not renderable: %s" % e}), 400
         if dry_run:
+            # The verdict the other wizards show: would HAProxy load it.
+            ok, message = apply.check_rendered(draft)
+            summary["validation"] = {"ok": ok, "message": message}
             return jsonify(summary)
         save_config(draft)
 

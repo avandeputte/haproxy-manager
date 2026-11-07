@@ -20,6 +20,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 os.environ.setdefault("HAM_DATA_DIR", tempfile.mkdtemp(prefix="ham-pages-"))
 os.environ["HAM_ERROR_DIR"] = os.path.join(os.environ["HAM_DATA_DIR"], "error-pages")
 os.environ["HAM_CERT_DIR"] = os.path.join(os.environ["HAM_DATA_DIR"], "certs")
+os.environ["HAM_HAPROXY_CFG"] = os.path.join(os.environ["HAM_DATA_DIR"], "haproxy.cfg")
 os.environ["HAM_DRY_RUN"] = "1"
 
 import ham; ham   # noqa: E402  (route registration)
@@ -167,9 +168,11 @@ for p in list(ERROR_DIR.iterdir()):
 CERT_DIR.mkdir(parents=True, exist_ok=True)
 apply._selfsigned_placeholder(CERT_DIR / "stand-in.pem", ["stand-in"])
 good, msg = apply.check_rendered(load_config())
-ok(on_disk() == ["closed-503.html", "closed-503.http"],
-   "a settings check writes the files first, since haproxy -c reads them")
+ok(on_disk() == [], "a settings check writes nothing for real: haproxy -c reads staged copies")
 ok(good, "and the check passes: " + msg.splitlines()[0])
+res = apply.do_apply(load_config(), allow_push=False)
+ok(res.get("ok") and on_disk() == ["closed-503.html", "closed-503.http"],
+   "Apply writes them, after the check: %s" % ", ".join(res.get("steps", [])))
 r = client.delete("/api/haproxy/errorpages/" + own["id"], headers=H)
 ok(r.status_code == 200 and on_disk() == [], "deleting the last page leaves nothing on disk")
 ok("errorfile" not in haproxy.render_haproxy(load_config()), "and nothing in the file")

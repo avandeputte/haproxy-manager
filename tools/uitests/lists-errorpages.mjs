@@ -80,7 +80,7 @@ ok(NAV.some(x => x[0] === "haproxy/addresslists") && NAV.some(x => x[0] === "hap
    "and both are in the menu");
 ok(E["haproxy/backends"].refs.includes("haproxy/addresslists") && E["haproxy/backends"].refs.includes("haproxy/errorpages"),
    "the pool editor loads the lists and pages it offers");
-ok(E["haproxy/conditions"].fields.some(f => f.k === "type" && f.o.includes("source_list"))
+ok(E["haproxy/conditions"].fields.some(f => f.k === "type" && f.o.some(o => (o.value || o) === "source_list"))
    && E["haproxy/conditions"].fields.some(f => f.k === "list" && f.ref === "haproxy/addresslists"),
    "a condition can name a list");
 
@@ -164,11 +164,11 @@ ok((await servicesCard()).textContent.includes("rules deny-admin"), "and the tab
 // -- the Rules page: two lists, and the old shape read as them ------------------
 lists["haproxy/conditions"] = CONDS;
 const col = E["haproxy/rules"].cols.find(c => c[0] === "cond")[2];
-ok(col({ any_of: ["c1", "c2"], conditions: ["c3"] }) === "host-tv | host-films + lan",
-   "the table shows any-of as alternatives and all-of after a plus");
-ok(col({ conditions: ["c1", "c2"], operator: "or" }) === "host-tv | host-films",
+ok(col({ any_of: ["c1", "c2"], conditions: ["c3"] }) === "(host-tv or host-films) and lan",
+   "the table says the test in words: any-of in brackets, all-of after");
+ok(col({ conditions: ["c1", "c2"], operator: "or" }) === "host-tv or host-films",
    "a rule from before 2.0 with \"or\" reads as alternatives");
-ok(col({ conditions: ["c1", "c3"] }) === "host-tv, lan", "and one with \"and\" as it always did");
+ok(col({ conditions: ["c1", "c3"] }) === "host-tv and lan", "and one with \"and\" as it always did");
 ok(col({}) === "always", "no conditions is always");
 const shown = E["haproxy/rules"].prepare({ id: "r", operator: "or", conditions: ["c1", "c2"] });
 ok(JSON.stringify(shown.any_of) === '["c1","c2"]' && shown.conditions.length === 0,

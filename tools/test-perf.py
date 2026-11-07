@@ -174,6 +174,8 @@ fps.update(p2=my_fp, p3=my_fp)
 snap = cluster.cluster_snapshot()
 ok(calls == [("p2", True), ("p3", True)] and snap["summary"]["config_agreed"],
    "nodes that agree are asked once each, briefly: %r" % calls)
+ok(any("still run 1.x" in w for w in snap["summary"]["warnings"]),
+   "peers on 1.x are named, with what a 2.0 rule would do there")
 calls.clear()
 fps.update(p3="0000000000000000")
 snap = cluster.cluster_snapshot()

@@ -191,8 +191,15 @@ def build_rule(cfg, body):
             name = verb + ("-" + first if first else "")
         if rule is None or rule.get("name") != name:
             name = wizard._uniq_name({r["name"] for r in hp["rules"] if r is not rule}, _sec(name))
-    fields = {"name": name, "type": atype, "test": test, "any_of": any_of, "conditions": all_of,
-              "operator": "and", "backend": backend, "param1": p1, "param2": p2}
+    # Alternatives alone keep the shape every version renders the same: a
+    # node still on 1.x reads only `conditions`, and a rule with its
+    # alternatives under any_of would apply there without any of them.
+    if any_of and not all_of:
+        shape = {"any_of": [], "conditions": any_of, "operator": "or"}
+    else:
+        shape = {"any_of": any_of, "conditions": all_of, "operator": "and"}
+    fields = dict({"name": name, "type": atype, "test": test, "backend": backend,
+                   "param1": p1, "param2": p2}, **shape)
     if rule:
         rule.update(fields)
         acts.append({"action": "updated", "type": "Rule", "name": rule["name"]})

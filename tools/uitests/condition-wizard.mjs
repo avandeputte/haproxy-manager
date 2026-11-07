@@ -65,8 +65,10 @@ const cell = id => $(id).parentNode;
 const setSelect = (sel, v) => { sel.value = v; sel.dispatchEvent(new window.Event("change")); };
 
 await renderEntity("haproxy/conditions");
-ok(!!findButton($("#content").querySelector(".hd"), "Condition wizard"), "the Conditions page offers the wizard");
-ok(E["haproxy/conditions"].rowActions.some(a => a.label === "Wizard"), "and every condition can be opened in it");
+const head = $("#content").querySelector(".hd");
+ok(!!findButton(head, "New condition") && !!findButton(head, "Raw fields"), "the Conditions page offers the wizard first, the raw fields beside it");
+ok(typeof E["haproxy/conditions"].wizard === "function" && !E["haproxy/conditions"].rowActions,
+   "Edit opens the wizard: there is no second button for it");
 
 openConditionWizard();
 ok(cell("#f_cw_value").style.display === "" && cell("#f_cw_param").style.display === "none" && cell("#f_cw_list").style.display === "none",

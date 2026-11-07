@@ -23,6 +23,16 @@ state() {
 
 case "$action" in
     is-active)
+        # The bouncer runs through a loop that keeps trying while the LAPI is
+        # unreachable, so supervisor's RUNNING says the loop lives, not the
+        # bouncer. Ask for the bouncer itself.
+        if [ "$unit" = "crowdsec-spoa-bouncer" ] && [ "$(state "$unit")" = "RUNNING" ]; then
+            if pgrep -x crowdsec-spoa-bouncer >/dev/null 2>&1; then
+                echo active; exit 0
+            else
+                echo failed; exit 3
+            fi
+        fi
         case "$(state "$unit")" in
             RUNNING)  echo active;      exit 0 ;;
             STARTING) echo activating;  exit 3 ;;

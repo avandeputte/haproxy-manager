@@ -315,8 +315,18 @@ install_crowdsec() {
     export DEBIAN_FRONTEND=noninteractive
     apt-get install -y --no-install-recommends gnupg >/dev/null 2>&1 || true
     mkdir -p /etc/apt/keyrings
-    if ! curl -fsSL https://packagecloud.io/crowdsec/crowdsec/gpgkey | gpg --dearmor --yes -o /etc/apt/keyrings/crowdsec.gpg 2>/dev/null; then
-        warn "could not fetch CrowdSec's repository key; the bouncer can be installed later from Sign-in > CrowdSec"
+    if [ -f /var/lib/haproxy-manager/crowdsec-not-wanted ]; then
+        log "CrowdSec's bouncer is not wanted on this node (--without-crowdsec); leaving it out"
+        return 0
+    fi
+    if ! curl -fsSL --max-time 60 https://packagecloud.io/crowdsec/crowdsec/gpgkey | gpg --dearmor --yes -o /etc/apt/keyrings/crowdsec.gpg 2>/dev/null; then
+        warn "could not fetch CrowdSec's repository key; the bouncer can be installed later from Access > CrowdSec"
+        return 0
+    fi
+    # Held to the key's fingerprint: a wrong key installs nothing.
+    if ! gpg --show-keys --with-colons /etc/apt/keyrings/crowdsec.gpg 2>/dev/null | grep -q "^fpr:::::::::6A89E3C2303A901A889971D3376ED5326E93CD0C:"; then
+        rm -f /etc/apt/keyrings/crowdsec.gpg
+        warn "CrowdSec's repository key does not match the expected fingerprint; the bouncer was not installed"
         return 0
     fi
     . /etc/os-release
@@ -331,7 +341,7 @@ install_crowdsec() {
         systemctl disable --now crowdsec-spoa-bouncer >/dev/null 2>&1 || true
         log "CrowdSec SPOA bouncer installed (stopped until CrowdSec is switched on)"
     else
-        warn "the CrowdSec bouncer could not be installed; it can be installed later from Sign-in > CrowdSec"
+        warn "the CrowdSec bouncer could not be installed; it can be installed later from Access > CrowdSec"
     fi
 }
 
@@ -699,14 +709,17 @@ main() {
     [ "$MODE" = "uninstall" ] && do_uninstall
     [ "$MODE" = "update" ] && log "Updating the existing installation"
     install_packages
+    # The app installs the bouncer when CrowdSec is switched on and it is
+    # missing; the marker tells it not to, on a node that must not carry it.
+    # Set by --without-crowdsec on any run; cleared only by a fresh install
+    # without the flag, never by an update, which the one-click updater runs
+    # without any flags.
     if [ "${SKIP_CROWDSEC:-0}" = 1 ]; then
-        # The app installs the bouncer at startup when it is missing; this
-        # marker tells it not to, on a node that must not carry it.
         mkdir -p /var/lib/haproxy-manager && touch /var/lib/haproxy-manager/crowdsec-not-wanted
-    else
+    elif [ "$MODE" != "update" ]; then
         rm -f /var/lib/haproxy-manager/crowdsec-not-wanted
-        install_crowdsec
     fi
+    install_crowdsec
     fetch_source
     install_acme
     install_app

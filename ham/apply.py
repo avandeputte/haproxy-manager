@@ -11,8 +11,8 @@ import socket
 import tempfile
 import time
 
-from .base import (ACME_SH, CERT_DIR, HAPROXY_CFG, KEEPALIVED_CFG, VERSION, _lock, 
-    _requests, app, log)
+from .base import (ACME_SH, CERT_DIR, CROWDSEC_SPOE, ERROR_DIR, HAPROXY_CFG, KEEPALIVED_CFG,
+    VERSION, _lock, _requests, app, log)
 from .config import CLUSTER_KEYS, config_hash, load_config, merged, save_config, shared_objects, shared_parts
 from .util import _by_id, cert_details, cert_path, parse_domains, run
 from .validate import check_setting_types
@@ -257,28 +257,52 @@ def api_keepalived_status():
     })
 
 
+def _staged(cfg, text, stage):
+    """The rendered text, pointed at copies of the files it names, in `stage`.
+
+    haproxy -c reads every errorfile and the SPOE engine, so a check of a
+    draft needs them on disk -- but written for real they would outlive a
+    draft that is refused, and a stale-page sweep would take files the live
+    haproxy.cfg still names. So the check gets its own copies, and only
+    do_apply writes the real ones, after the check has passed.
+    """
+    pages = os.path.join(stage, "error-pages")
+    os.mkdir(pages)
+    for path, content in errorpages.files(cfg).items():
+        with open(os.path.join(pages, path.name), "wb") as f:
+            f.write(content)
+    spoe = os.path.join(stage, "crowdsec.cfg")
+    with open(spoe, "w") as f:
+        f.write(crowdsec.SPOE)
+    return text.replace(str(ERROR_DIR) + "/", pages + "/").replace(str(CROWDSEC_SPOE), spoe)
+
+
+def _haproxy_check(cfg, text=None):
+    """haproxy -c over this configuration, against staged copies of its files:
+    (rc, output, text). 127 means no haproxy here."""
+    text = haproxy.render_haproxy(cfg) if text is None else text
+    with tempfile.TemporaryDirectory(prefix="ham-check-") as stage:
+        path = os.path.join(stage, "haproxy.cfg")
+        with open(path, "w") as f:
+            f.write(_staged(cfg, text, stage))
+        rc, out = run(["haproxy", "-c", "-f", path], timeout=30)
+    return rc, out, text
+
+
 def check_rendered(cfg):
     """Run haproxy -c and keepalived -t over what this configuration renders to.
 
     Returns (ok, message). Used before saving settings, so a directive that
     cannot work is refused at the point it is typed rather than being stored
-    and then blocking every Apply.
+    and then blocking every Apply. Nothing is written for real here.
     """
     problems = []
-    fd, staging = tempfile.mkstemp(suffix=".cfg")
     try:
-        errorpages.write_files(cfg)      # named by the rendered file; -c reads them
-        crowdsec.write_files(cfg)        # the SPOE engine too
-        with os.fdopen(fd, "w") as f:
-            f.write(haproxy.render_haproxy(cfg))
-        rc, out = run(["haproxy", "-c", "-f", staging], timeout=30)
+        rc, out, _text = _haproxy_check(cfg)
         if rc not in (0, 127):
             problems.append("HAProxy rejected it:\n" + out.strip())
     except Exception as e:
         problems.append("could not render haproxy.cfg: %s" % e)
-    finally:
-        if os.path.exists(staging):
-            os.unlink(staging)
 
     if vrrp.keepalived_wanted(cfg):
         keepalived.write_track_script()
@@ -341,28 +365,14 @@ def do_apply(cfg=None, allow_push=True):
         placeholders = ensure_cert_files(cfg)
         if placeholders:
             result["steps"].append("created placeholder certificates: " + ", ".join(placeholders))
-        pages = errorpages.write_files(cfg)
-        if pages:
-            result["steps"].append("error pages: " + ", ".join(pages))
-        # The bouncer before HAProxy, so the first request after the reload
-        # finds someone to ask. Fail-open either way.
-        cs_files = crowdsec.write_files(cfg)
-        step, warning = crowdsec.ensure_service(cfg, changed=bool(cs_files))
-        if step:
-            result["steps"].append(step)
-        if warning:
-            result.setdefault("warnings", []).append(warning)
 
-        text = haproxy.render_haproxy(cfg)
-        fd, staging = tempfile.mkstemp(suffix=".cfg")
-        with os.fdopen(fd, "w") as f:
-            f.write(text)
-        rc, out = run(["haproxy", "-c", "-f", staging])
+        # Checked against staged copies of the files it names, so a refused
+        # configuration leaves nothing behind on disk.
+        rc, out, text = _haproxy_check(cfg)
         result["haproxy_check"] = out
         if rc == 127:
             result["steps"].append("haproxy binary not found -- validation skipped")
         elif rc != 0:
-            os.unlink(staging)
             result["error"] = ("HAProxy configuration failed validation. Nothing was "
                                "changed." + _haproxy_hint(out))
             log.error("apply refused: haproxy -c rejected the rendered configuration: %s",
@@ -372,6 +382,23 @@ def do_apply(cfg=None, allow_push=True):
                    "changed and the running configuration is untouched.\n\n%s"
                    % watchdog._why_rejected(out), "error", cfg)
             return result
+
+        # It passed: now the real files, then the services. The pages and the
+        # engine first, since the file about to be installed names them; the
+        # bouncer before HAProxy, so the first request after the reload finds
+        # someone to ask. Fail-open either way.
+        pages = errorpages.write_files(cfg)
+        if pages:
+            result["steps"].append("error pages: " + ", ".join(pages))
+        cs_files = crowdsec.write_files(cfg)
+        step, warning = crowdsec.ensure_service(cfg, changed=bool(cs_files))
+        if step:
+            result["steps"].append(step)
+        if warning:
+            result.setdefault("warnings", []).append(warning)
+        fd, staging = tempfile.mkstemp(suffix=".cfg")
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
 
         HAPROXY_CFG.parent.mkdir(parents=True, exist_ok=True)
         if HAPROXY_CFG.exists():

@@ -76,6 +76,17 @@ def bouncer_present(yes):
 
 
 bouncer_present(False)
+# The real install runs apt-get; here it is a stub whose answer the checks set.
+installs = []
+
+
+def fake_install():
+    installs.append(1)
+    return fake_install.result
+
+
+fake_install.result = (False, "no network")
+crowdsec.install = fake_install
 
 # ---- off: nothing of it anywhere ------------------------------------------------------
 s = client.get("/api/crowdsec/settings", headers=H).get_json()
@@ -101,7 +112,8 @@ cfg = load_config()
 ok(crowdsec.configured(cfg) and not crowdsec.active(cfg), "configured, but not active here: no bouncer")
 ok("spoe" not in haproxy.render_haproxy(cfg), "a node without the bouncer renders no trace, so its Apply still works")
 step, warning = crowdsec.ensure_service(cfg)
-ok(step == "" and "not installed" in warning, "and Apply warns that this node asks nobody")
+ok(step == "" and "not installed" in warning and installs == [1], "and Apply tries to fetch it, and warns when it cannot")
+crowdsec.TRIED.unlink()
 st = client.get("/api/status?brief=1", headers=H).get_json()
 ok(st["crowdsec"] == {"on": True, "installed": False, "bouncer": "missing"}, "the status says on, and that the bouncer is missing here")
 put({"enabled": False})
@@ -115,8 +127,12 @@ s = client.get("/api/crowdsec/settings", headers=H).get_json()
 ok(s["has_api_key"] and "api_key" not in s, "the key is stored and never read back")
 cfg = load_config()
 ok(crowdsec.active(cfg), "on, with a URL, a key and a bouncer: active")
-ok(CROWDSEC_SPOE.exists() and CROWDSEC_BOUNCER_CFG.exists(),
-   "saving the settings wrote the SPOE engine and the bouncer's configuration, since the check reads them")
+ok(not CROWDSEC_SPOE.exists() and not CROWDSEC_BOUNCER_CFG.exists(),
+   "saving the settings writes nothing for real: the check reads staged copies")
+written = crowdsec.write_files(cfg)
+ok(sorted(written) == ["crowdsec-spoa-bouncer.yaml", "crowdsec.cfg"],
+   "Apply writes the SPOE engine and the bouncer's configuration: %s" % written)
+ok(oct(CROWDSEC_BOUNCER_CFG.stat().st_mode & 0o777) == "0o640", "the bouncer's file is never world-readable")
 yml = CROWDSEC_BOUNCER_CFG.read_text()
 ok('api_url: "http://192.168.1.5:8080/"' in yml and 'api_key: "abc123"' in yml and "listen_tcp: 127.0.0.1:9000" in yml
    and "log_mode: stdout" in yml and "hosts:" not in yml,
@@ -173,31 +189,43 @@ ok("tune.bufsize 65536" in text and "lf-file %s/captcha.html if cs_captcha" % CR
 s = client.get("/api/crowdsec/settings", headers=H).get_json()
 ok(s["has_captcha_secret"] and "captcha_secret_key" not in s and "captcha_signing_key" not in s, "the captcha secrets are never read back")
 
-# ---- the install at startup, and the node that does not want it ----------------------------
+# ---- the install: only when wanted, only when missing, not again and again ---------------
 bouncer_present(False)
+installs.clear()
+fake_install.result = (True, "installed")
+put({"enabled": False})
+crowdsec.startup()
+ok(not installs, "a node with CrowdSec off is never given a third-party repository")
+put({"enabled": True})
 crowdsec.NOT_WANTED.parent.mkdir(parents=True, exist_ok=True)
 crowdsec.NOT_WANTED.write_text("")
-real_install = crowdsec.install
-asked = []
-crowdsec.install = lambda: (asked.append(1), (True, "installed"))[1]
 crowdsec.startup()
-ok(not asked, "a node marked as not wanting the bouncer is not given one at startup")
+ok(not installs, "nor a node marked as not wanting the bouncer")
 crowdsec.NOT_WANTED.unlink()
 crowdsec.startup()
-ok(asked == [1], "a node without the marker and without the bouncer gets it at startup")
-bouncer_present(True)
-asked.clear()
+ok(installs == [1], "a node with CrowdSec on and no bouncer gets it at startup")
+fake_install.result = (False, "no network")
 crowdsec.startup()
-ok(not asked, "a node that has it is left alone")
-crowdsec.install = real_install
+ok(installs == [1, 1] and crowdsec.TRIED.exists(), "a failed install is remembered")
+crowdsec.startup()
+ok(installs == [1, 1], "and not retried at the next start")
+crowdsec.TRIED.unlink()
+bouncer_present(True)
+crowdsec.startup()
+ok(installs == [1, 1], "a node that has it is left alone")
 bouncer_present(False)
+step, warning = crowdsec.ensure_service(load_config())
+ok(installs == [1, 1, 1] and "not installed" in warning, "Apply tries once more, and says so when it fails")
 crowdsec.NOT_WANTED.write_text("")
 r = client.post("/api/crowdsec/install", headers=H, json={}).get_json()
-ok(r["ok"] is False and "did not finish" in r["message"] or "by hand" in r["message"],
-   "asked for by hand on a node that cannot fetch it, the button says why: %s" % r["message"].splitlines()[0][:60])
+ok(r["ok"] is False and "no network" in r["message"], "asked for by hand, the button says why it failed")
+fake_install.result = (True, "installed")
 bouncer_present(True)
 r = client.post("/api/crowdsec/install", headers=H, json={}).get_json()
-ok(r["ok"] is True and not crowdsec.NOT_WANTED.exists(), "asked for by hand, the node is wanted after all")
+ok(r["ok"] is True and not crowdsec.NOT_WANTED.exists() and not crowdsec.TRIED.exists(),
+   "asked for by hand, the node is wanted after all")
+r = client.post("/api/crowdsec/test", headers=H, json={"api_url": "http://127.0.0.1:1/"}).get_json()
+ok(r["ok"] is False and "needed first" in r["message"], "the stored key is not sent to an address that is not the stored one")
 
 # ---- the LAPI test ----------------------------------------------------------------------
 r = client.post("/api/crowdsec/test", headers=H, json={"api_url": "http://127.0.0.1:1", "api_key": "x"}).get_json()

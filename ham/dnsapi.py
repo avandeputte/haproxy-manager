@@ -490,7 +490,7 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
         want = bool(auth.get("enabled")) and not is_tcp
         if want and not access.users_with_passwords(cfg):
             raise ValueError("there is nobody to sign in yet -- add a user under "
-                             "Sign-in > Users first")
+                             "Access > Users first")
         known = {g["id"] for g in access.section(cfg)["groups"] if g.get("id")}
         missing = [g for g in (auth.get("groups") or []) if g not in known]
         if missing:
@@ -519,7 +519,7 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
         pool_opts["oauth_forward"] = bool(oauth_opts.get("forward")) and want
         if want and not oauth.ready(oauth.settings_of(cfg)):
             raise ValueError("single sign-on is not configured yet -- fill in the "
-                             "provider under Sign-in > Single sign-on first")
+                             "provider under Access > Single sign-on first")
         if bool(oauth_opts.get("enabled")) and is_tcp:
             warns.append("A tcp:// service forwards a raw port, which carries no place "
                          "for a sign-in redirect, so OIDC was not applied.")

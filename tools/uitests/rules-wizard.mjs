@@ -85,9 +85,10 @@ const cell = id => $(id).parentNode;
 // -- reachable from the Rules page ---------------------------------------------
 await renderEntity("haproxy/rules");
 const head = $("#content").querySelector(".hd");
-ok(!!findButton(head, "Rule wizard"), "the Rules page offers the wizard first");
-ok(!!findButton(head, "Add rule"), "and the plain editor beside it");
-ok(E["haproxy/rules"].rowActions.some(a => a.label === "Wizard"), "every rule can be opened in it");
+ok(!!findButton(head, "New rule"), "the Rules page offers the wizard first");
+ok(!!findButton(head, "Raw fields"), "and the raw fields beside it");
+ok(typeof E["haproxy/rules"].wizard === "function" && !E["haproxy/rules"].rowActions, "Edit opens the wizard");
+ok(!!findButton(head, "Conditions"), "and the Conditions page is reached from here");
 ok(E["haproxy/rules"].refs.includes("haproxy/frontends"), "the page loads the listeners the wizard offers");
 
 // -- a new rule ------------------------------------------------------------------

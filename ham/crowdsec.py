@@ -21,7 +21,10 @@ import os
 import re
 import secrets
 import shutil
+import signal
 import subprocess
+import tempfile
+import time
 
 from .base import (CROWDSEC_BIN, CROWDSEC_BOUNCER_CFG, CROWDSEC_HTML, CROWDSEC_SPOE, DATA_DIR,
                    _lock, _requests, app, log)
@@ -118,7 +121,11 @@ def check(settings, cfg):
 # what is written
 
 def _yaml_str(s):
-    return '"' + str(s).replace("\\", "\\\\").replace('"', '\\"') + '"'
+    """A double-quoted YAML scalar: backslashes, quotes and control characters
+    escaped, so a value is a value whatever it holds."""
+    out = str(s).replace("\\", "\\\\").replace('"', '\\"')
+    out = re.sub(r"[\x00-\x1f\x7f]", lambda m: "\\x%02x" % ord(m.group()), out)
+    return '"' + out + '"'
 
 
 def bouncer_yaml(cfg):
@@ -169,14 +176,20 @@ def write_files(cfg):
         except OSError:
             pass
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text)
-        os.chmod(path, mode)
+        # Written beside and moved into place with its final mode: a key must
+        # not be world-readable for even a moment.
+        fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix="." + path.name)
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
         changed.append(path.name)
     # The bouncer runs as its own user under systemd, and has to read its key.
     try:
         shutil.chown(CROWDSEC_BOUNCER_CFG, group="crowdsec-spoa")
-    except (LookupError, OSError, PermissionError):
-        pass
+    except (LookupError, OSError, PermissionError) as e:
+        log.warning("the bouncer's configuration could not be given to the crowdsec-spoa "
+                    "group (%s); under systemd the bouncer may not be able to read it", e)
     return changed
 
 
@@ -193,13 +206,18 @@ def ensure_service(cfg, changed=False):
     """
     if configured(cfg):
         if not installed():
-            return ("", "CrowdSec is on, but the SPOA bouncer is not installed on this node, so "
-                        "HAProxy here asks nobody. Install it under Sign-in > CrowdSec.")
+            # Apply is the moment to get it: a node that just had CrowdSec
+            # switched on fetches the bouncer now, and asks from the next Apply.
+            ok, _out = ensure_installed(cfg)
+            if not ok:
+                return ("", "CrowdSec is on, but the SPOA bouncer is not installed on this node, so "
+                            "HAProxy here asks nobody. Install it under Access > CrowdSec.")
+            return ("crowdsec bouncer installed; HAProxy asks it from the next Apply", "")
         state = service_state()
-        if changed and state == "active":
+        if changed and state in ("active", "activating"):
             rc, out = run(["systemctl", "restart", UNIT])
             step = "crowdsec bouncer restarted with its new configuration"
-        elif state != "active":
+        elif state not in ("active", "activating"):
             run(["systemctl", "enable", "--quiet", UNIT])
             rc, out = run(["systemctl", "start", UNIT])
             step = "crowdsec bouncer started"
@@ -216,26 +234,57 @@ def ensure_service(cfg, changed=False):
 
 
 # A node that must not carry the bouncer: install.sh --without-crowdsec
-# leaves this behind, and the startup install below honours it.
+# leaves this behind, and the install below honours it.
 NOT_WANTED = DATA_DIR / "crowdsec-not-wanted"
+# When an install last failed, so a node that cannot reach the repository
+# is not made to try at every start.
+TRIED = DATA_DIR / "crowdsec-install-tried"
+RETRY_AFTER = 6 * 3600
+
+
+def _tried_recently():
+    try:
+        return time.time() - float(TRIED.read_text().strip()) < RETRY_AFTER
+    except (OSError, ValueError):
+        return False
+
+
+def ensure_installed(cfg):
+    """Put the bouncer on a node that wants it and lacks it: (ok, message).
+
+    Wanted means CrowdSec is switched on: a node that never enabled it is
+    never given a third-party repository. A .deb or .rpm cannot run apt from
+    inside dpkg, and the repository is not the distribution's, so a node
+    installed or upgraded from a package would otherwise lack the bouncer
+    until someone pressed the button. Never fatal, and a failure is not
+    retried for a while: the node serves everything else meanwhile.
+    """
+    if installed():
+        return True, "installed"
+    if not configured(cfg):
+        return False, "CrowdSec is off"
+    if NOT_WANTED.exists():
+        return False, "this node is marked as not wanting the bouncer"
+    if _tried_recently():
+        return False, "an install failed recently; not retried yet"
+    ok, out = install()
+    if ok:
+        TRIED.unlink(missing_ok=True)
+        log.info("installed the CrowdSec SPOA bouncer")
+    else:
+        TRIED.parent.mkdir(parents=True, exist_ok=True)
+        TRIED.write_text(str(time.time()))
+        log.warning("the CrowdSec SPOA bouncer could not be installed: %s", out.strip()[-300:])
+    return ok, out
 
 
 def startup():
-    """At startup: the bouncer is put on this node if it is not here, and a
-    node that boots with CrowdSec on brings it up, since in a container
-    nothing else would.
-
-    The install is what makes the package path whole: a .deb or .rpm cannot
-    run apt from inside dpkg, and the repository the bouncer comes from is
-    not the distribution's, so a node installed or upgraded from a package
-    would otherwise lack it until someone pressed the button. Once, when
-    missing, never fatal: a node that cannot fetch it serves everything else.
-    """
+    """At startup: a node that boots with CrowdSec on gets its bouncer if it
+    lacks one and brings it up, since in a container nothing else would."""
     try:
-        if not installed() and not NOT_WANTED.exists():
-            ok, out = install()
-            log.info("CrowdSec SPOA bouncer: %s", "installed" if ok else "not installed: " + out.strip()[-300:])
         cfg = load_config()
+        if configured(cfg):
+            ensure_installed(cfg)
         if active(cfg):
             write_files(cfg)
             ensure_service(cfg)
@@ -395,8 +444,11 @@ def api_crowdsec_test():
     """Ask the LAPI one question with these credentials, and say what came back."""
     body = request.get_json(force=True, silent=True) or {}
     cfg = load_config()
-    url = (body.get("api_url") or settings_of(cfg).get("api_url") or "").strip().rstrip("/")
-    key = (body.get("api_key") or "").strip() or api_key_of(cfg)
+    stored_url = (settings_of(cfg).get("api_url") or "").strip().rstrip("/")
+    url = (body.get("api_url") or stored_url).strip().rstrip("/")
+    # The stored key goes only to the stored address: typed elsewhere, it
+    # would hand the key to whoever answers there.
+    key = (body.get("api_key") or "").strip() or (api_key_of(cfg) if url == stored_url else "")
     if not url or not key:
         return jsonify({"ok": False, "message": "a LAPI URL and an API key are needed first"})
     if _requests is None:
@@ -417,25 +469,58 @@ def api_crowdsec_test():
 # The repository the package comes from. Its Debian 13 suite is empty at the
 # time of writing; the bookworm build is a static Go binary with one trivial
 # dependency and installs on anything newer, which is what the image does too.
-# RPM systems take CrowdSec's own repository script, which knows their suites.
+# The signing key is fetched over HTTPS and then held to this fingerprint,
+# so a wrong key -- a changed one, a redirected fetch -- installs nothing.
 REPO_KEY_URL = "https://packagecloud.io/crowdsec/crowdsec/gpgkey"
+REPO_KEY_FPR = "6A89E3C2303A901A889971D3376ED5326E93CD0C"
 REPO_LINE = ("deb [signed-by=/etc/apt/keyrings/crowdsec.gpg] "
              "https://packagecloud.io/crowdsec/crowdsec/debian/ bookworm main\n")
 APT_INSTALL = """set -e
 export DEBIAN_FRONTEND=noninteractive
-command -v gpg >/dev/null || apt-get install -y --no-install-recommends gnupg
+command -v gpg >/dev/null || apt-get -o DPkg::Lock::Timeout=120 install -y --no-install-recommends gnupg
 mkdir -p /etc/apt/keyrings
-curl -fsSL %s | gpg --dearmor --yes -o /etc/apt/keyrings/crowdsec.gpg
-printf '%%s' '%s' > /etc/apt/sources.list.d/crowdsec.list
-apt-get update -q
-apt-get install -y --no-install-recommends crowdsec-haproxy-spoa-bouncer
+curl -fsSL --max-time 60 %(key)s | gpg --dearmor --yes -o /etc/apt/keyrings/crowdsec.gpg
+gpg --show-keys --with-colons /etc/apt/keyrings/crowdsec.gpg | grep -q '^fpr:::::::::%(fpr)s:' || { echo "CrowdSec's key does not match the expected fingerprint"; rm -f /etc/apt/keyrings/crowdsec.gpg; exit 1; }
+printf '%%s' '%(line)s' > /etc/apt/sources.list.d/crowdsec.list
+apt-get -o DPkg::Lock::Timeout=120 -o Acquire::http::Timeout=30 -o Acquire::Retries=2 update -q
+apt-get -o DPkg::Lock::Timeout=120 -o Acquire::http::Timeout=30 -o Acquire::Retries=2 install -y --no-install-recommends crowdsec-haproxy-spoa-bouncer
 systemctl disable --now crowdsec-spoa-bouncer >/dev/null 2>&1 || true
-""" % (REPO_KEY_URL, REPO_LINE)
+""" % {"key": REPO_KEY_URL, "fpr": REPO_KEY_FPR, "line": REPO_LINE}
+# RPM systems get a repository file written here rather than CrowdSec's
+# install script run from the network: el/<major> for the Enterprise Linux
+# family, fedora/<version> for Fedora, and the same key check.
 RPM_INSTALL = """set -e
-curl -fsS https://packagecloud.io/install/repositories/crowdsec/crowdsec/script.rpm.sh | bash
-(command -v dnf >/dev/null && dnf install -y crowdsec-haproxy-spoa-bouncer) || yum install -y crowdsec-haproxy-spoa-bouncer
+. /etc/os-release
+case "$ID" in
+  fedora) suite="fedora/${VERSION_ID%%%%.*}" ;;
+  *)      suite="el/${VERSION_ID%%%%.*}" ;;
+esac
+curl -fsSL --max-time 60 %(key)s -o /tmp/crowdsec.gpgkey
+gpg --show-keys --with-colons /tmp/crowdsec.gpgkey | grep -q '^fpr:::::::::%(fpr)s:' || { echo "CrowdSec's key does not match the expected fingerprint"; rm -f /tmp/crowdsec.gpgkey; exit 1; }
+rpm --import /tmp/crowdsec.gpgkey && rm -f /tmp/crowdsec.gpgkey
+printf '%%s\\n' '[crowdsec_crowdsec]' 'name=crowdsec_crowdsec' "baseurl=https://packagecloud.io/crowdsec/crowdsec/$suite/\\$basearch" 'repo_gpgcheck=1' 'gpgcheck=0' 'enabled=1' 'gpgkey=%(key)s' 'sslverify=1' 'metadata_expire=300' > /etc/yum.repos.d/crowdsec_crowdsec.repo
+if command -v dnf >/dev/null; then dnf install -y crowdsec-haproxy-spoa-bouncer; else yum install -y crowdsec-haproxy-spoa-bouncer; fi
 systemctl disable --now crowdsec-spoa-bouncer >/dev/null 2>&1 || true
-"""
+""" % {"key": REPO_KEY_URL, "fpr": REPO_KEY_FPR}
+
+
+def _run_script(script, timeout):
+    """Run a shell script in its own process group, and on timeout kill the
+    group -- the shell alone dying would leave apt or dnf running, mid-transaction."""
+    env = dict(os.environ)
+    env.pop("NOTIFY_SOCKET", None)
+    p = subprocess.Popen(["sh", "-c", script], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         text=True, env=env, start_new_session=True)
+    try:
+        out, _ = p.communicate(timeout=timeout)
+        return p.returncode, out or ""
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(p.pid, signal.SIGTERM)
+        except OSError:
+            pass
+        out, _ = p.communicate()
+        return 124, (out or "") + "\n[stopped after %ds]" % timeout
 
 
 def install():
@@ -449,10 +534,9 @@ def install():
     else:
         return False, ("this node has neither apt-get nor dnf; install crowdsec-haproxy-spoa-bouncer "
                        "from CrowdSec's repository by hand")
-    rc, out = run(["sh", "-c", script], timeout=900)
+    rc, out = _run_script(script, timeout=900)
     if rc != 0 or not installed():
         return False, "the install did not finish:\n" + (out or "").strip()[-1500:]
-    log.info("installed the CrowdSec SPOA bouncer")
     return True, "installed; it starts when CrowdSec is on and Apply runs"
 
 
@@ -460,6 +544,7 @@ def install():
 def api_crowdsec_install():
     """Install the bouncer on this node, from CrowdSec's repository."""
     ok, message = install()
-    if ok and NOT_WANTED.exists():
-        NOT_WANTED.unlink()             # asked for by hand: wanted after all
+    if ok:
+        NOT_WANTED.unlink(missing_ok=True)     # asked for by hand: wanted after all
+        TRIED.unlink(missing_ok=True)
     return jsonify({"ok": ok, "message": message, "status": status(load_config())}), (200 if ok else 500)
