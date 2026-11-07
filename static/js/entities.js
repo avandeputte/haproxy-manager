@@ -38,7 +38,7 @@ export const E={
   cols:[["name","Name"],["mode","Mode"],["balance","Balance",r=>r.balance||"roundrobin"],
         ["servers","Servers",r=>(r.servers||[]).map(id=>esc(nameOf("haproxy/servers",id))).join(", ")||"—"],
         ["hc","Check",r=>r.healthcheck_enabled?esc(nameOf("haproxy/healthchecks",r.healthcheck)):t("off")]],
-  refs:["haproxy/servers","haproxy/healthchecks","access/groups","haproxy/addresslists","haproxy/errorpages"],
+  refs:["haproxy/servers","haproxy/healthchecks","access/groups","haproxy/addresslists","haproxy/errorpages","haproxy/rules"],
   fields:[
    {k:"name",l:"Name",t:"text"},
    {k:"enabled",l:"Enabled",t:"bool",d:true},
@@ -76,6 +76,8 @@ export const E={
    {k:"oauth_forward",l:"Pass the signed-in email to the servers",t:"bool",
     h:"X-Auth-Request-Email and Remote-User, set from the verified session; client-sent copies are stripped everywhere."},
    {k:"error_pages",l:"Error pages",t:"refmulti",ref:"haproxy/errorpages",h:"Pages for this pool alone, over the ones that stand for every service. HTTP mode only."},
+   {k:"rules",l:"Rules",t:"refmulti",ref:"haproxy/rules",filter:r=>r.type!=="use_backend",
+    h:"Rules acted on inside this pool, so they reach this service alone: deny, headers, redirects, raw lines. Routing rules belong on the listener and are not offered."},
    {k:"custom",l:"Extra directives",t:"textarea",h:"Advanced. Raw lines added inside this backend, for anything the fields above do not cover -- for example \"http-reuse safe\". One per line. See the HAProxy configuration manual: https://docs.haproxy.org/2.6/configuration.html"}]},
 
  "haproxy/frontends":{title:"Public Services",one:"Public Service",add:"Add service",

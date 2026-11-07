@@ -8,6 +8,7 @@ base.py
 cluster.py
 config.py
 crud.py
+crowdsec.py
 dnsapi.py
 errorpages.py
 haproxy.py

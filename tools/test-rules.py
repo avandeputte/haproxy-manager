@@ -168,6 +168,29 @@ r = post("wizard/rule", {"id": old["id"], "listeners": [fe()["id"]],
 old = next(x for x in load_config()["haproxy"]["rules"] if x["id"] == old["id"])
 ok(old["operator"] == "and" and old["any_of"] and not old["conditions"], "it is stored in the two-list shape")
 
+# ---- a rule a service holds for itself ---------------------------------------------------
+deny = post("wizard/rule", {"listeners": [], "all_of": [{"type": "path_starts_with", "value": "/admin"},
+                                                        {"type": "source_ip", "value": "203.0.113.0/24", "negate": True}],
+                            "action": {"type": "http_request_deny"}})
+route = post("wizard/rule", {"listeners": [], "any_of": [{"type": "host_matches", "value": "x.example.com"}],
+                             "action": {"type": "use_backend", "backend": pools["shop"]}})
+r = post("wizard/publish", {"url": "http://shop.example.com", "target": "10.0.0.5:80", "certificate": False,
+                            "http_redirect": False, "dry_run": False,
+                            "service_id": next(s for s in client.get("/api/services", headers=H).get_json() if s["pool"] == "shop")["id"],
+                            "rules": [deny["rule"]["id"], route["rule"]["id"], "gone"]})
+shop = next(b for b in load_config()["haproxy"]["backends"] if b["name"] == "shop")
+ok(shop.get("rules") == [deny["rule"]["id"]], "the wizard stores the rules picked, less routing ones and ones that are gone")
+text = haproxy.render_haproxy(load_config())
+be = text[text.index("backend be_shop\n"):text.index("\n\n", text.index("backend be_shop\n"))]
+ok("acl acl_path-admin path_beg /admin" in be and "acl acl_not-from-203.0.113.0 src 203.0.113.0/24" in be,
+   "its conditions are declared inside the pool")
+ok("http-request deny if acl_path-admin !acl_not-from-203.0.113.0" in be, "and the rule acts there, reaching this service alone")
+other = text[text.index("backend be_admin\n"):].split("\n\n")[0]
+ok("acl_path-admin" not in other, "not its neighbour")
+ok("use_backend" not in be, "a routing rule would mean nothing in a pool and is not written")
+svc = next(s for s in client.get("/api/services", headers=H).get_json() if s["pool"] == "shop")
+ok(svc["rules"] == [deny["rule"]["id"]] and svc["rule_names"] == [deny["rule"]["name"]], "the Services API reports them by name")
+
 # ---- what HAProxy refuses is refused, with its reason ---------------------------------------
 if have_haproxy():
     r = post("wizard/rule", {"listeners": [fe()["id"]], "all_of": [{"type": "custom", "value": "this is not an acl"}],

@@ -8,7 +8,7 @@ import re
 from .base import CERT_DIR, PORT
 from .config import merged
 from .util import _by_id, _sec, cert_path, rule_cond_ids
-from . import access, errorpages, oauth
+from . import access, crowdsec, errorpages, oauth
 
 # --------------------------------------------------------------------------
 
@@ -219,6 +219,8 @@ def render_haproxy(cfg):
         A("    ssl-default-bind-options ssl-min-ver %s" % st["ssl_min_ver"])
     if st.get("ssl_ciphers"):
         A("    ssl-default-bind-ciphers %s" % st["ssl_ciphers"])
+    for ln in crowdsec.global_lines(cfg):
+        A("    " + ln)
     for ln in (st.get("custom_global") or "").splitlines():
         if ln.strip():
             A("    " + ln.strip())
@@ -293,6 +295,13 @@ def render_haproxy(cfg):
         # say so. Group them the way it will actually evaluate them: ACLs, then
         # request rules, then routing.
         acls, requests, routes = [], [], []
+
+        # CrowdSec first: a banned address is answered before anything else
+        # is done for it. HTTP only -- the answer is a page.
+        if mode == "http":
+            decl, asks = crowdsec.frontend_lines(cfg, _src_acl)
+            acls.extend(decl)
+            requests.extend(asks)
 
         if mode == "http" and fe.get("ssl_enabled"):
             requests.append("http-request set-header X-Forwarded-Proto https if { ssl_fc }")
@@ -642,11 +651,38 @@ def render_haproxy(cfg):
             if use_cookie:
                 parts.append("cookie %s" % _sec(sv["name"]))
             A("    " + " ".join(parts))
+        # Rules this pool holds for itself, picked on the Services page: acted
+        # on inside the backend, so they reach this service alone and never
+        # its neighbours on the same port. A routing rule means nothing here
+        # and is left out.
+        own = [rules[r] for r in (be.get("rules") or [])
+               if r in rules and rules[r].get("type") != "use_backend"]
+        if own:
+            declared = []
+            for r in own:
+                for cid in rule_cond_ids(r):
+                    if cid in conds and cid not in declared:
+                        declared.append(cid)
+            for cid in declared:
+                c = conds[cid]
+                if c.get("type") == "source_list":
+                    nets, _bad = access.list_networks(cfg, [c.get("list")])
+                    for ln in _src_acl("acl_" + _sec(c["name"]), nets):
+                        A("    " + ln)
+                else:
+                    expr = _line_safe(COND_MAP.get(c.get("type", "custom"), COND_MAP["custom"])(c))
+                    A("    acl acl_%s %s" % (_sec(c["name"]), expr))
+            for r in own:
+                ln = _rule_line(r, conds, backends)
+                if ln:
+                    A("    " + ln)
         for ln in (be.get("custom") or "").splitlines():
             if ln.strip():
                 A("    " + ln.strip())
         A("")
 
+    for ln in crowdsec.backend_lines(cfg):
+        A(ln)
     return "\n".join(L).rstrip() + "\n"
 
 

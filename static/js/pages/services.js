@@ -101,6 +101,13 @@ export const WIZ_SECTIONS=[
   {k:"error_pages",l:"Error pages",t:"refmulti",ref:"haproxy/errorpages",
    h:"Pages for this service alone, over the ones that stand for every service. Made under Advanced > HAProxy > Error Pages."},
  ]},
+ /* Rules acted on inside the service's pool, so they reach this service
+    alone. Routing rules belong on the listener, where the rule wizard puts
+    them, and are not offered. */
+ {title:"Rules",fields:[
+  {k:"rules",l:"Rules",t:"refmulti",ref:"haproxy/rules",filter:r=>r.type!=="use_backend",
+   h:"Rules for this service alone: deny, headers, redirects, raw lines, with their conditions. Made under Advanced > HAProxy > Rules."},
+ ]},
  {title:"Single sign-on (OIDC)",toggle:"oauth_enabled",http:true,fields:[
   {k:"oauth_enabled",l:"Require single sign-on (OIDC)",t:"bool",
    h:"Send visitors to the identity provider before letting them through. HAProxy verifies the session and this service's allow-list on every request. Configure the provider under Sign-in > Single sign-on."},
@@ -367,7 +374,7 @@ export async function servicesCard(){
     api("probes").catch(()=>({results:[]})),
     list("acme/accounts",true),list("acme/challenges",true),
     /* the wizard's group and address-list pickers read this cache */
-    list("access/groups",true),list("haproxy/addresslists",true),list("haproxy/errorpages",true)]);
+    list("access/groups",true),list("haproxy/addresslists",true),list("haproxy/errorpages",true),list("haproxy/rules",true)]);
   /* keyed by URL, kept only when something is wrong: a page dotted with green
      "fine" pills says less than one red pill on the row that is not */
   const probeBad={};
@@ -410,6 +417,7 @@ export async function servicesCard(){
              ?t("at most {n} connections per {s} s per client",{n:esc(s.rate_limit),s:esc(s.rate_window||10)})
              :t("at most {n} requests per {s} s per client",{n:esc(s.rate_limit),s:esc(s.rate_window||10)}))+"</div>":"")+
           ((s.error_page_names||[]).length?'<div class=sub>'+t("error pages {names}",{names:esc(s.error_page_names.join(", "))})+"</div>":"")+
+          ((s.rule_names||[]).length?'<div class=sub>'+t("rules {names}",{names:esc(s.rule_names.join(", "))})+"</div>":"")+
           (s.maintenance?'<div><span class="pill warn">'+t("paused &mdash; answering 503")+'</span></div>':"")+
           (s.enabled?"":"<div class=sub>"+t("disabled")+"</div>")+"</td>"+
         "<td class=mono>"+(s.targets.length?s.targets.map(esc).join("<br>"):"<span class=sub>"+t("no server")+"</span>")+
@@ -448,7 +456,7 @@ export async function servicesCard(){
         oauth_allow:((s.oauth||{}).allow||[]).join("\n"),
         oauth_forward:(s.oauth||{}).forward,
         allow_src:s.allow_src,allow_lists:s.allow_lists,
-        error_pages:s.error_pages,
+        error_pages:s.error_pages,rules:s.rules,
         rate_limit:s.rate_limit,rate_window:s.rate_window,
         certificate_id:s.certificate_id,
       })));

@@ -44,6 +44,7 @@ export const NAV=[
  ["access/users","Users"],
  ["access/groups","Groups"],
  ["p:sso","Single sign-on"],
+ ["p:crowdsec","CrowdSec"],
  /* Settings last: everything here is something you set once and revisit
     rarely, unlike the pages above that you watch. */
  ["grp","SETTINGS","collapse"],

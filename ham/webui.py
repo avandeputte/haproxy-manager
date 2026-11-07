@@ -435,6 +435,8 @@ def api_services():
             "allow_list_names": access.list_names(cfg, pool.get("allow_lists")),
             "error_pages": list(pool.get("error_pages") or []),
             "error_page_names": errorpages.names(cfg, pool.get("error_pages")),
+            "rules": list(pool.get("rules") or []),
+            "rule_names": [rules[r]["name"] for r in (pool.get("rules") or []) if r in rules and rules[r].get("name")],
             "rate_limit": pool.get("rate_limit") or "",
             "rate_window": pool.get("rate_window") or 10,
             "health": {"type": m.get("type") if m else "none",

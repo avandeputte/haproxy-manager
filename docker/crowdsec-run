@@ -1,0 +1,13 @@
+#!/bin/sh
+# Runs the CrowdSec SPOA bouncer under supervisord, and keeps running it.
+#
+# The bouncer halts when the CrowdSec LAPI cannot be reached at startup --
+# the LAPI being down, or its address wrong. Under systemd Restart=always
+# covers that; supervisord gives up after a few quick exits. So it is run in
+# a loop here, a few seconds apart, until the LAPI answers. HAProxy serves
+# in the meantime: a bouncer that is not there leaves requests alone.
+while true; do
+    /usr/bin/crowdsec-spoa-bouncer -c /etc/crowdsec/bouncers/crowdsec-spoa-bouncer.yaml
+    echo "crowdsec-spoa-bouncer exited ($?); trying again in 10s" >&2
+    sleep 10
+done

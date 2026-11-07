@@ -149,6 +149,7 @@ def api_wizard_publish():
                 allow_src=body.get("allow_src") if isinstance(body.get("allow_src"), str) else None,
                 allow_lists=body.get("allow_lists") if isinstance(body.get("allow_lists"), list) else None,
                 error_pages=body.get("error_pages") if isinstance(body.get("error_pages"), list) else None,
+                rules=body.get("rules") if isinstance(body.get("rules"), list) else None,
                 notify_mode=body.get("notify_mode") or None,
                 rate_limit=body.get("rate_limit") if "rate_limit" in body else None,
                 rate_window=body.get("rate_window") if "rate_window" in body else None,

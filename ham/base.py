@@ -21,6 +21,14 @@ HAPROXY_CFG = Path(os.environ.get("HAM_HAPROXY_CFG", "/etc/haproxy/haproxy.cfg")
 # Where the custom error pages are written for HAProxy to read. Under
 # /etc/haproxy like the certificates, so the container's volume keeps them.
 ERROR_DIR = Path(os.environ.get("HAM_ERROR_DIR", "/etc/haproxy/error-pages"))
+# CrowdSec: the SPOE engine HAProxy loads, the bouncer's configuration, its
+# binary and the pages it ships. The package's own paths, overridable for a
+# test rig.
+CROWDSEC_SPOE = Path(os.environ.get("HAM_CROWDSEC_SPOE", "/etc/haproxy/crowdsec.cfg"))
+CROWDSEC_BOUNCER_CFG = Path(os.environ.get("HAM_CROWDSEC_BOUNCER_CFG",
+                                           "/etc/crowdsec/bouncers/crowdsec-spoa-bouncer.yaml"))
+CROWDSEC_BIN = Path(os.environ.get("HAM_CROWDSEC_BIN", "/usr/bin/crowdsec-spoa-bouncer"))
+CROWDSEC_HTML = Path(os.environ.get("HAM_CROWDSEC_HTML", "/var/lib/crowdsec-haproxy-spoa-bouncer/html"))
 KEEPALIVED_CFG = Path(os.environ.get("HAM_KEEPALIVED_CFG", "/etc/keepalived/keepalived.conf"))
 ACME_HOME = Path(os.environ.get("HAM_ACME_HOME", str(Path.home() / ".acme.sh")))
 ACME_SH = os.environ.get("HAM_ACME_SH", str(ACME_HOME / "acme.sh"))

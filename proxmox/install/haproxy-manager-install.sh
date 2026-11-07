@@ -17,6 +17,19 @@ setting_up_container
 network_check
 update_os
 
+msg_info "Adding CrowdSec's repository and its SPOA bouncer"
+# Used only once CrowdSec is switched on in the UI; the bookworm build is a
+# static Go binary and runs on this release unchanged. Installed and left
+# stopped. Not fatal: a container without it serves everything else.
+mkdir -p /etc/apt/keyrings
+if curl -fsSL https://packagecloud.io/crowdsec/crowdsec/gpgkey | gpg --dearmor --yes -o /etc/apt/keyrings/crowdsec.gpg 2>/dev/null; then
+  echo "deb [signed-by=/etc/apt/keyrings/crowdsec.gpg] https://packagecloud.io/crowdsec/crowdsec/debian/ bookworm main" >/etc/apt/sources.list.d/crowdsec.list
+  $STD apt-get update
+  $STD apt-get install -y --no-install-recommends crowdsec-haproxy-spoa-bouncer || true
+  systemctl disable --now crowdsec-spoa-bouncer >/dev/null 2>&1 || true
+fi
+msg_ok "CrowdSec SPOA bouncer installed (stopped until CrowdSec is switched on)"
+
 fetch_and_deploy_gh_release "haproxy-manager" "avandeputte/haproxy-manager" "binary" "latest" "/opt/haproxy-manager" "haproxy-manager_*_all.deb"
 
 msg_info "Starting HAProxy Cluster Manager"

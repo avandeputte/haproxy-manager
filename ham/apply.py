@@ -16,7 +16,7 @@ from .base import (ACME_SH, CERT_DIR, HAPROXY_CFG, KEEPALIVED_CFG, VERSION, _loc
 from .config import CLUSTER_KEYS, config_hash, load_config, merged, save_config, shared_objects, shared_parts
 from .util import _by_id, cert_details, cert_path, parse_domains, run
 from .validate import check_setting_types
-from . import acme, auth, cluster, errorpages, haproxy, keepalived, notify, sync, updates, vrrp, watchdog, wizard
+from . import acme, auth, cluster, crowdsec, errorpages, haproxy, keepalived, notify, sync, updates, vrrp, watchdog, wizard
 
 # --------------------------------------------------------------------------
 
@@ -268,6 +268,7 @@ def check_rendered(cfg):
     fd, staging = tempfile.mkstemp(suffix=".cfg")
     try:
         errorpages.write_files(cfg)      # named by the rendered file; -c reads them
+        crowdsec.write_files(cfg)        # the SPOE engine too
         with os.fdopen(fd, "w") as f:
             f.write(haproxy.render_haproxy(cfg))
         rc, out = run(["haproxy", "-c", "-f", staging], timeout=30)
@@ -343,6 +344,14 @@ def do_apply(cfg=None, allow_push=True):
         pages = errorpages.write_files(cfg)
         if pages:
             result["steps"].append("error pages: " + ", ".join(pages))
+        # The bouncer before HAProxy, so the first request after the reload
+        # finds someone to ask. Fail-open either way.
+        cs_files = crowdsec.write_files(cfg)
+        step, warning = crowdsec.ensure_service(cfg, changed=bool(cs_files))
+        if step:
+            result["steps"].append(step)
+        if warning:
+            result.setdefault("warnings", []).append(warning)
 
         text = haproxy.render_haproxy(cfg)
         fd, staging = tempfile.mkstemp(suffix=".cfg")
@@ -559,6 +568,7 @@ def api_status():
         "vip_held": held,
         "role": ("active" if held else "passive") if vips else "standalone",
         "dirty": cfg["_meta"].get("applied_hash") != config_hash(cfg),
+        "crowdsec": crowdsec.summary(cfg),
         # Which shared configuration this node holds. Two nodes with the same
         # fingerprint agree; different fingerprints mean one of them is behind,
         # and the revision says which.

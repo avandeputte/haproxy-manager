@@ -333,7 +333,7 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
                    timeout_connect=None, timeout_server=None, service_id=None,
                    auth=None, oauth_opts=None, allow_src=None, notify_mode=None,
                    rate_limit=None, rate_window=None, proxy_protocol=None,
-                   allow_lists=None, error_pages=None):
+                   allow_lists=None, error_pages=None, rules=None):
     """Create (or update) everything needed to serve `pub` from `tgts`.
 
     Re-running for the same public host updates that mapping instead of adding
@@ -468,6 +468,11 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
     # dropped rather than stored as a reference to nothing.
     if error_pages is not None:
         pool_opts["error_pages"] = errorpages.known_pages(cfg, error_pages)
+    # Rules the service holds for itself. A routing rule is not one of them,
+    # and one that no longer exists is dropped rather than stored.
+    if rules is not None:
+        known = {r["id"]: r for r in hp["rules"] if r.get("id")}
+        pool_opts["rules"] = [r for r in rules if r in known and known[r].get("type") != "use_backend"]
     # A ceiling per client address. Silence leaves the pool as it is; an
     # empty limit switches it off. Refused here, where the typo can be fixed,
     # rather than saved and rendered as no limit at all.

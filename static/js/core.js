@@ -164,7 +164,8 @@ export function fieldRow(f,val){
     selectOption(inp,val||"");cell.appendChild(inp);
   }else if(f.t==="refmulti"){
     inp=document.createElement("div");inp.className="cklist";inp.id="f_"+f.k;inp.dataset.field=f.k;inp.dataset.refmulti="1";
-    const items=Array.isArray(lists[f.ref])?lists[f.ref]:[];
+    /* a field may offer part of a list: the rules a pool can hold are not the routing ones */
+    const items=(Array.isArray(lists[f.ref])?lists[f.ref]:[]).filter(it=>!f.filter||f.filter(it));
     if(!items.length){const d=document.createElement("div");d.className="none";d.textContent=t("Nothing defined yet.");inp.appendChild(d);}
     items.forEach(it=>{
       const l=document.createElement("label");

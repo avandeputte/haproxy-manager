@@ -82,6 +82,22 @@ DEFAULT_CONFIG = {
             "secret": "",
         },
     },
+    # CrowdSec: where the bouncer on every node asks for decisions, and what
+    # HAProxy does with them. Shared, since every node protects the same
+    # services; a node may hold its own API key under local.crowdsec.
+    "crowdsec": {
+        "enabled": False,
+        "api_url": "",               # the LAPI, e.g. http://192.168.1.5:8080/
+        "api_key": "",               # from: cscli bouncers add haproxy-manager
+        "insecure_skip_verify": False,
+        "mode": "ban",               # ban: a 403 page; captcha: a challenge first
+        "captcha_provider": "",      # hcaptcha, recaptcha or turnstile
+        "captcha_site_key": "",
+        "captcha_secret_key": "",
+        "captcha_signing_key": "",   # generated once; the same on every node
+        "contact_url": "",           # shown on the ban page, when set
+        "skip_lists": [],            # address lists never asked about: the LAN
+    },
     # Cluster-wide VRRP settings: identical on every node, so they sync.
     "cluster": {
         # The name that should reach whichever node is currently active. It is
@@ -305,7 +321,7 @@ def _lacks_defaults(cfg):
             if isinstance(v, dict) and isinstance(dst.get(k), dict) and lacks(dst[k], v):
                 return True
         return False
-    parts = [(cfg.get(sec), DEFAULT_CONFIG[sec]) for sec in ("haproxy", "acme", "cluster")]
+    parts = [(cfg.get(sec), DEFAULT_CONFIG[sec]) for sec in ("haproxy", "acme", "cluster", "crowdsec")]
     parts.append(((cfg.get("local") or {}).get("keepalived"), DEFAULT_CONFIG["local"]["keepalived"]))
     return any(not isinstance(dst, dict) or lacks(dst, src) for dst, src in parts)
 
@@ -454,7 +470,8 @@ def shared_view(cfg):
             "acme": cfg["acme"],
             "access": cfg.get("access", {}),
             "cluster": cfg["cluster"],
-            "notify": cfg.get("notify", {})}
+            "notify": cfg.get("notify", {}),
+            "crowdsec": cfg.get("crowdsec", {})}
 
 
 def _fp(value):
@@ -668,11 +685,14 @@ def is_webui_cert(cert):
 # same list in four places.
 
 def config_hash(cfg):
-    payload = json.dumps(
-        {"haproxy": cfg["haproxy"], "acme": cfg["acme"], "cluster": cfg["cluster"],
-         "keepalived": cfg["local"]["keepalived"]},
-        sort_keys=True,
-    )
+    # A section a file from before its time lacks is left out, so the hash
+    # of that file is what the version that wrote it computed; load_config
+    # then carries the applied marker over the defaults it adds.
+    parts = {"haproxy": cfg["haproxy"], "acme": cfg["acme"], "cluster": cfg["cluster"],
+             "keepalived": cfg["local"]["keepalived"]}
+    if "crowdsec" in cfg:
+        parts["crowdsec"] = cfg["crowdsec"]
+    payload = json.dumps(parts, sort_keys=True)
     return hashlib.sha256(payload.encode()).hexdigest()
 
 

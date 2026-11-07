@@ -23,6 +23,7 @@ from . import (
     twofactor,
     validate,
     crud,
+    crowdsec,
     errorpages,
     haproxy,
     history,
@@ -64,5 +65,5 @@ __all__ = [
     "sync", "setup", "peering", "probe", "vrrp", "cluster", "stats", "traffic",
     "mqtt", "hass", "oauth", "logs",
     "updates", "wizard", "dnsapi", "webui", "recipes", "rules", "backup", "static",
-    "errorpages",
+    "errorpages", "crowdsec",
 ]

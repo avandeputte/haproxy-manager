@@ -53,6 +53,7 @@ globalThis.fetch = async (u, o) => {
     "access/groups": [], "acme/accounts": [], "acme/challenges": [],
     "haproxy/addresslists": LISTS, "haproxy/conditions": CONDS, "haproxy/backends": [],
     "haproxy/errorpages": [],
+    "haproxy/rules": [{ id: "r9", name: "deny-admin", type: "http_request_deny" }, { id: "r8", name: "to-shop", type: "use_backend" }],
     recipes: { ok: true, recipes: [] },
     "wizard/publish": { ok: true, actions: [], warnings: [], public: "", target: "", preview: "" },
   };
@@ -143,6 +144,22 @@ ok([...document.querySelector("#f_error_pages").querySelectorAll("input")].filte
    "editing shows the page the service picked ticked");
 SERVICES[0].error_pages = ["p1"]; SERVICES[0].error_page_names = ["closed"];
 ok((await servicesCard()).textContent.includes("error pages closed"), "and the table names it");
+
+// -- the wizard picks rules for a service, routing ones left out -------------------
+lists["haproxy/rules"] = [{ id: "r9", name: "deny-admin", type: "http_request_deny" }, { id: "r8", name: "to-shop", type: "use_backend" }];
+document.querySelector("#dlgbody").innerHTML = "";
+openWizard();
+const rulesBox = document.querySelector("#f_rules");
+ok(!!rulesBox && [...rulesBox.querySelectorAll("input")].map(c => c.value).join() === "r9",
+   "the Rules section offers the rules that are not routing");
+document.querySelector("#f_url").value = "https://shop.example.com";
+document.querySelector("#f_target").value = "http://10.0.0.5:80";
+tick(rulesBox, "r9", true);
+sent = null;
+await findButton(document.querySelector("#dlgfoot"), "Publish").onclick();
+ok(JSON.stringify(sent.rules) === '["r9"]', "publishing sends the rules picked");
+SERVICES[0].rules = ["r9"]; SERVICES[0].rule_names = ["deny-admin"];
+ok((await servicesCard()).textContent.includes("rules deny-admin"), "and the table names them");
 
 // -- the Rules page: two lists, and the old shape read as them ------------------
 lists["haproxy/conditions"] = CONDS;
