@@ -21,7 +21,7 @@ export async function renderOverview(){
     '<div class=stat><div class=k>'+t("Configuration")+'</div><div class=v style="font-size:13px">'+
       (st.dirty?'<span class="pill" style="background:#f6ecdd;color:var(--drift)">'+t("unapplied changes")+'</span>':'<span class="pill up">'+t("applied")+'</span>')+"</div></div>"+
     /* only when it is on: a node without CrowdSec has nothing to say here */
-    ((st.crowdsec||{}).on?'<div class=stat><div class=k>CrowdSec</div><div class=v>'+pill(st.crowdsec.bouncer,["active"])+"</div></div>":"");
+    ((st.crowdsec||{}).on?'<a class=stat href="#/p:crowdsec" style="text-decoration:none;color:inherit"><div class=k>CrowdSec</div><div class=v>'+pill(st.crowdsec.bouncer,["active"])+"</div></a>":"");
   grid.style.gridTemplateColumns="repeat("+grid.children.length+",1fr)";
   c.appendChild(grid);
 

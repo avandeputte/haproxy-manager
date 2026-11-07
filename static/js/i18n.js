@@ -112,7 +112,8 @@ function fill(s, vars){
    Values are put in as given: where the result is markup, escape them first. */
 export function t(key, vars){
   const s = Object.prototype.hasOwnProperty.call(dict, key) ? dict[key] : key;
-  return vars ? fill(s, vars) : s;
+  /* the source writes a dash as " -- "; shown as one */
+  return (vars ? fill(s, vars) : s).replace(/ -- /g, " \u2014 ");
 }
 /* One of two forms by count, {n} filled in: tn(3, "{n} node", "{n} nodes"). */
 export function tn(n, one, other, vars){

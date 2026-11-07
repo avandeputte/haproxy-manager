@@ -1,4 +1,4 @@
-import { api, btn, closeDlg, esc, lists, nameOf, openDlg, selectOption, showText } from "../core.js";
+import { api, btn, closeDlg, esc, lists, nameOf, openDlg, selectOption, showText, trimHaproxy } from "../core.js";
 import { t } from "../i18n.js";
 import { refreshStatus, route } from "../shell.js";
 
@@ -43,8 +43,9 @@ function select(options,value){
   selectOption(s,value||"");
   return s;
 }
-function row(label,hint){
+function row(label,hint,forId){
   const lab=document.createElement("label");lab.className="fl";lab.textContent=label;
+  if(forId)lab.htmlFor=forId;
   const cell=document.createElement("div");
   if(hint){const h=document.createElement("div");h.className="hint";h.textContent=hint;cell.appendChild(h);}
   return [lab,cell];
@@ -83,7 +84,8 @@ function condRow(pre){
     type.addEventListener("change",sync);sync();
     [type,param,value,list,negWrap].forEach(el=>r.appendChild(el));
   }
-  r.appendChild(btn("×","sm",()=>r.remove()));
+  const rm=btn("×","sm",()=>r.remove());rm.setAttribute("aria-label",t("Remove this condition"));
+  r.appendChild(rm);
   return r;
 }
 function readRow(r){
@@ -113,7 +115,7 @@ function condGroup(id,hint,pre){
 export function openRuleWizard(rule){
   const wrap=document.createElement("div");
   const frm=document.createElement("div");frm.className="frm";
-  const add=(label,cell,hint)=>{const [lab,c]=row(label);if(cell)c.insertBefore(cell,c.firstChild);
+  const add=(label,cell,hint)=>{const [lab,c]=row(label,null,cell&&cell.id);if(cell)c.insertBefore(cell,c.firstChild);
     if(hint){const h=document.createElement("div");h.className="hint";h.textContent=hint;c.appendChild(h);}
     frm.appendChild(lab);frm.appendChild(c);return c;};
   const heading=txt=>{const h=document.createElement("div");h.className="fsec";h.textContent=txt;frm.appendChild(h);};
@@ -158,7 +160,7 @@ export function openRuleWizard(rule){
   fields.param1=add(t("Location"),p1);
   const p2=document.createElement("input");p2.type="text";p2.id="f_rw_param2";p2.value=rule?rule.param2||"":"";
   fields.param2=add(t("Value"),p2);
-  const test=select([{value:"if",label:"if"},{value:"unless",label:"unless"}],rule?rule.test||"if":"if");
+  const test=select([{value:"if",label:t("if")},{value:"unless",label:t("unless")}],rule?rule.test||"if":"if");
   test.id="f_rw_test";add(t("Apply when"),test,t("\"unless\" turns the whole test around"));
   const syncAction=()=>{
     const want=Object.fromEntries(ACTION_FIELDS[chosen(action)]||[]);
@@ -196,7 +198,7 @@ export function openRuleWizard(rule){
     const v=r.validation||{};
     bd.innerHTML='<div style="margin-bottom:10px"><span class="pill '+(v.ok?"up":"down")+'">'+
         (v.ok?t("HAProxy accepts it"):t("HAProxy refuses it"))+"</span>"+
-        (v.ok?"":"<pre class=mono style='white-space:pre-wrap;margin-top:8px'>"+esc(v.message||"")+"</pre>")+"</div>"+
+        (v.ok?"":"<pre class=mono style='white-space:pre-wrap;margin-top:8px'>"+esc(trimHaproxy(v.message||""))+"</pre>")+"</div>"+
       "<table><tbody>"+(r.actions||[]).map(a=>"<tr><td style='width:90px'><span class='pill "+
         (a.action==="created"||a.action==="attached"?"up":a.action==="updated"?"warn":"off")+"'>"+esc(t(a.action))+"</span></td><td>"+
         esc(a.type)+"</td><td class=mono>"+esc(a.name)+"</td></tr>").join("")+"</tbody></table>"+
@@ -215,9 +217,10 @@ export function openRuleWizard(rule){
     try{
       const r=await api("wizard/rule","POST",read());
       show(r,true);
-      save.disabled=true;preview.disabled=true;
+      save.disabled=true;preview.disabled=true;closeBtn.textContent=t("Done");
       await route();refreshStatus();
-    }catch(e){err.textContent=e.message;save.disabled=false;}
+    }catch(e){err.textContent=trimHaproxy(e.message);save.disabled=false;}
   });
-  openDlg(rule?t("Edit rule"):t("New rule"),wrap,[err,btn(t("Close"),"",closeDlg),preview,save]);
+  const closeBtn=btn(t("Close"),"",closeDlg);
+  openDlg(rule?t("Edit rule"):t("New rule"),wrap,[err,closeBtn,preview,save]);
 }

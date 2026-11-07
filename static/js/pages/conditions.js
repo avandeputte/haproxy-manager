@@ -1,4 +1,4 @@
-import { api, btn, closeDlg, esc, lists, openDlg, selectOption, showText } from "../core.js";
+import { api, btn, closeDlg, esc, lists, openDlg, selectOption, showText, trimHaproxy } from "../core.js";
 import { t } from "../i18n.js";
 import { refreshStatus, route } from "../shell.js";
 import { COND_LABEL } from "./rules.js";
@@ -33,6 +33,8 @@ export function openConditionWizard(cond){
   const rows={};
   const add=(k,label,el,hint)=>{
     const lab=document.createElement("label");lab.className="fl";lab.textContent=label;
+    const target=el.id?el:el.querySelector&&el.querySelector("input,select");
+    if(target&&target.id)lab.htmlFor=target.id;
     const cell=document.createElement("div");cell.appendChild(el);
     if(hint){const h=document.createElement("div");h.className="hint";h.textContent=hint;cell.appendChild(h);}
     frm.appendChild(lab);frm.appendChild(cell);rows[k]=[lab,cell];return el;
@@ -90,7 +92,7 @@ export function openConditionWizard(cond){
       :'<span class="pill off">'+t("only HAProxy can judge a raw ACL")+"</span>";
     bd.innerHTML='<div style="margin-bottom:10px">'+verdict+' <span class="pill '+(v.ok?"up":"down")+'">'+
         (v.ok?t("HAProxy accepts it"):t("HAProxy refuses it"))+"</span>"+
-        (v.ok?"":"<pre class=mono style='white-space:pre-wrap;margin-top:8px'>"+esc(v.message||"")+"</pre>")+"</div>"+
+        (v.ok?"":"<pre class=mono style='white-space:pre-wrap;margin-top:8px'>"+esc(trimHaproxy(v.message||""))+"</pre>")+"</div>"+
       "<pre class=mono style='white-space:pre-wrap;margin:0 0 10px'>"+esc(r.preview||"")+"</pre>"+
       "<table><tbody>"+(r.actions||[]).map(a=>"<tr><td style='width:90px'><span class='pill "+
         (a.action==="created"?"up":a.action==="updated"?"warn":"off")+"'>"+esc(t(a.action))+"</span></td><td>"+
@@ -106,9 +108,10 @@ export function openConditionWizard(cond){
     err.textContent="";save.disabled=true;
     try{
       const r=await api("wizard/condition","POST",read());
-      show(r,true);save.disabled=true;tryIt.disabled=true;
+      show(r,true);save.disabled=true;tryIt.disabled=true;closeBtn.textContent=t("Done");
       await route();refreshStatus();
-    }catch(e){err.textContent=e.message;save.disabled=false;}
+    }catch(e){err.textContent=trimHaproxy(e.message);save.disabled=false;}
   });
-  openDlg(cond?t("Edit condition"):t("New condition"),wrap,[err,btn(t("Close"),"",closeDlg),tryIt,save]);
+  const closeBtn=btn(t("Close"),"",closeDlg);
+  openDlg(cond?t("Edit condition"):t("New condition"),wrap,[err,closeBtn,tryIt,save]);
 }

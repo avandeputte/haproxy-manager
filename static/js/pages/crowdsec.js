@@ -3,6 +3,7 @@ import { $, api, btn, esc, fieldRow, list, readForm, showText } from "../core.js
 import { t } from "../i18n.js";
 import { refreshStatus } from "../shell.js";
 import { state } from "../state.js";
+import { describeList } from "../entities.js";
 
 export const MODE_LABEL={ban:"ban -- a 403 page",captcha:"captcha first, then a ban for those who fail"};
 export const PROVIDER_LABEL={"":"(none)",hcaptcha:"hCaptcha",recaptcha:"reCAPTCHA",turnstile:"Cloudflare Turnstile"};
@@ -16,7 +17,7 @@ export async function renderCrowdsec(){
 
   const card=document.createElement("div");card.className="card";
   card.innerHTML='<div class=hd><h2>CrowdSec</h2><div class=sp></div>'+
-    '<span class="pill '+(s.enabled?"up":"off")+'">'+(s.enabled?t("on"):t("off"))+"</span></div>";
+    '<span class="pill '+(s.enabled?"up":"off")+'">'+(s.enabled?t("saved: on"):t("saved: off"))+"</span></div>";
   const bd=document.createElement("div");bd.className="bd";
   bd.innerHTML='<p class=hint style="margin-bottom:14px">'+
     t("CrowdSec decides who is banned from what its agents see across the fleet; HAProxy asks about "+
@@ -28,7 +29,8 @@ export async function renderCrowdsec(){
   const node=document.createElement("div");node.className="hint";node.style.cssText="border:1px solid var(--hair);border-radius:6px;padding:10px 12px;margin-bottom:14px";
   const draw=(x)=>{
     node.innerHTML="<b>"+t("This node")+"</b> &mdash; "+
-      (x.installed?t("bouncer {version} installed",{version:esc(x.version||"")}):t("bouncer not installed"))+
+      (x.installed?t("bouncer {version} installed",{version:esc(x.version||"")})
+                  :t("bouncer not installed -- fetched at the next Apply once CrowdSec is on, or now:"))+
       (x.installed?", "+t("service")+" <span class='pill "+(x.service==="active"?"up":"off")+"'>"+esc(t(x.service||"unknown"))+"</span>":"")+
       (x.installed?"":" ");
     if(!x.installed&&!state.readOnly){
@@ -44,7 +46,6 @@ export async function renderCrowdsec(){
   bd.appendChild(node);
 
   const FIELDS=[
-   {k:"enabled",l:"Enable CrowdSec",t:"bool",h:"HAProxy asks the bouncer about every HTTP request, on every node. Takes effect at the next Apply."},
    {k:"api_url",l:"LAPI URL",t:"text",h:"Your CrowdSec local API, e.g. http://192.168.1.5:8080/ -- the machine running the CrowdSec agent."},
    {k:"api_key",l:"API key",t:"password",
     h:s.has_api_key?"Leave empty to keep the stored one":"On the CrowdSec host: cscli bouncers add haproxy-manager -- the key it prints. One key serves every node."},
@@ -55,7 +56,8 @@ export async function renderCrowdsec(){
    {k:"captcha_site_key",l:"Captcha site key",t:"text"},
    {k:"captcha_secret_key",l:"Captcha secret key",t:"password",h:s.has_captcha_secret?"Leave empty to keep the stored one":"From the provider's dashboard"},
    {k:"contact_url",l:"Contact URL on the ban page",t:"text",h:"Optional. A page a wrongly banned visitor can reach you through -- a form rather than a mailto:, which crawlers harvest."},
-   {k:"skip_lists",l:"Never ask about",t:"refmulti",ref:"haproxy/addresslists",h:"Address lists CrowdSec is not consulted for -- the LAN, typically. Everyone else is."},
+   {k:"skip_lists",l:"Never ask about",t:"refmulti",ref:"haproxy/addresslists",describe:describeList,h:"Address lists CrowdSec is not consulted for -- the LAN, typically. Everyone else is."},
+   {k:"enabled",l:"Enable CrowdSec",t:"bool",h:"HAProxy asks the bouncer about every HTTP request, on every node. Test the connection first; takes effect at the next Apply."},
   ];
   const frm=document.createElement("div");frm.className="frm";
   FIELDS.forEach(f=>fieldRow(f,s[f.k]).forEach(el=>frm.appendChild(el)));

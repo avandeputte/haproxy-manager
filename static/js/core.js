@@ -166,12 +166,24 @@ export function fieldRow(f,val){
     inp=document.createElement("div");inp.className="cklist";inp.id="f_"+f.k;inp.dataset.field=f.k;inp.dataset.refmulti="1";
     /* a field may offer part of a list: the rules a pool can hold are not the routing ones */
     const items=(Array.isArray(lists[f.ref])?lists[f.ref]:[]).filter(it=>!f.filter||f.filter(it));
-    if(!items.length){const d=document.createElement("div");d.className="none";d.textContent=t("Nothing defined yet.");inp.appendChild(d);}
+    if(!items.length){
+      /* nothing to pick: say where one is made, and let the link go there */
+      const d=document.createElement("div");d.className="none";
+      d.appendChild(document.createTextNode(t("Nothing defined yet.")+" "));
+      const a=document.createElement("a");a.href="#/"+f.ref;a.textContent=t("Create one");
+      a.addEventListener("click",()=>closeDlg());
+      d.appendChild(a);inp.appendChild(d);
+    }
     items.forEach(it=>{
       const l=document.createElement("label");
       const c=document.createElement("input");c.type="checkbox";c.value=it.id;
       c.checked=(val||[]).includes(it.id);
-      l.appendChild(c);l.appendChild(document.createTextNode(it.name));inp.appendChild(l);
+      if(it.type)l.dataset.kind=it.type;
+      l.appendChild(c);l.appendChild(document.createTextNode(it.name));
+      /* a name alone says little: a rule's action, a page's codes, a list's networks */
+      const what=f.describe?f.describe(it):"";
+      if(what){const sub=document.createElement("span");sub.className="sub";sub.style.marginLeft="8px";sub.textContent=what;l.appendChild(sub);}
+      inp.appendChild(l);
     });
     cell.appendChild(inp);
   }else if(f.t==="combo"){
@@ -244,6 +256,14 @@ export function fieldRow(f,val){
   }
   if(f.h){const h=document.createElement("div");h.className="hint";h.textContent=t(f.h);cell.appendChild(h);}
   return [lab,cell];
+}
+/* haproxy -c says what is wrong after two lines of notices about itself.
+   The alerts first, the notices gone, everything else after. */
+export function trimHaproxy(text){
+  const lines=String(text||"").split("\n");
+  const alerts=lines.filter(l=>/\[(ALERT|WARNING)\]/.test(l));
+  const rest=lines.filter(l=>!/\[(ALERT|WARNING|NOTICE)\]/.test(l));
+  return (alerts.length?alerts.join("\n")+"\n\n":"")+rest.join("\n").replace(/\n{3,}/g,"\n\n").trim();
 }
 export function readForm(fields){
   const out={};
