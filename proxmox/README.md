@@ -20,7 +20,9 @@ The container gets exactly what a package install gets: the release `.deb`,
 which carries acme.sh and pulls `haproxy`, `keepalived` and the Python
 dependencies through `Depends`. The package is architecture-independent, so
 this works on arm64 hosts too. Only stable releases are offered — the beta
-channel is never selected here.
+channel is never selected here. One third-party apt source is added: CrowdSec's
+repository, with its signing key checked against a pinned fingerprint, so the
+SPOA bouncer is on the node (stopped) should you switch CrowdSec on later.
 
 ## Updating
 

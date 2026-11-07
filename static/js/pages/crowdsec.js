@@ -78,7 +78,7 @@ export async function renderCrowdsec(){
     const data=readForm(FIELDS);
     try{
       const r=await api("crowdsec/settings","PUT",data);
-      msg.textContent=t("Saved. Apply to make it so on this node; the other nodes follow.");
+      msg.textContent=t("Saved. Apply to make it so; the other nodes follow.");
       if(r.status)draw(r.status);
       refreshStatus();
     }catch(e){

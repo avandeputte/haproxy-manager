@@ -7,7 +7,10 @@
 A small self-hosted web UI to manage an **HAProxy** configuration, obtain
 **Let's Encrypt** certificates, and run a **cluster of any number of nodes with
 Keepalived** on a shared virtual IP — one node active, the rest ready to take
-over, with settings and certificates syncing across all of them.
+over, with settings and certificates syncing across all of them. Since 2.0 it
+also keeps named **address lists**, lets a service carry its own **rules** and
+**error pages**, and can put a **CrowdSec** bouncer in front of every HTTP
+service.
 
 **No database to run — no PostgreSQL, no Redis, no message broker.** The whole
 configuration is one JSON file on disk, and a cluster keeps its nodes in step
@@ -69,7 +72,10 @@ It installs `haproxy`, `keepalived`, `python3-flask`, `python3-requests`,
 [`acme.sh`](https://github.com/acmesh-official/acme.sh) with no cron of its own
 (the manager drives renewals), enables `net.ipv4.ip_nonlocal_bind` so HAProxy
 can bind a VIP this node does not hold, creates the administrator and API key,
-and installs the systemd unit.
+and installs the systemd unit. It also adds one third-party apt source —
+CrowdSec's repository, its signing key checked against a pinned fingerprint —
+for the SPOA bouncer, left stopped until CrowdSec is switched on;
+`--without-crowdsec` leaves that out.
 
 Nothing in HAProxy's configuration is touched until you press Apply. The first
 Apply overwrites `/etc/haproxy/haproxy.cfg`, keeping a `.bak`.

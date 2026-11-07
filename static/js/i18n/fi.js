@@ -331,7 +331,6 @@ export default {
 "LAPI URL": "LAPIn URL",
 "Never ask about": "Älä koskaan kysy näistä",
 "Optional. A page a wrongly banned visitor can reach you through -- a form rather than a mailto:, which crawlers harvest.": "Valinnainen. Sivu, jonka kautta virheellisesti estetty kävijä tavoittaa sinut -- lomake mieluummin kuin mailto:, jonka ryömijät keräävät.",
-"Saved. Apply to make it so on this node; the other nodes follow.": "Tallennettu. Ota käyttöön tekee sen tässä solmussa; muut seuraavat.",
 "Skip TLS verification": "Ohita TLS-varmennus",
 "Test the LAPI connection": "Testaa LAPI-yhteys",
 "The 403 page is the one under Error Pages for 403 when there is one, else the bouncer's own. A captcha asks the visitor to prove they are human before the ban stands.": "403-sivu on Virhesivuissa koodille 403 määritelty sivu, jos sellainen on, muuten bouncerin oma. Captcha pyytää kävijää todistamaan olevansa ihminen ennen kuin esto astuu voimaan.",

@@ -331,7 +331,6 @@ export default {
 "LAPI URL": "LAPI-URL",
 "Never ask about": "Spørg aldrig om",
 "Optional. A page a wrongly banned visitor can reach you through -- a form rather than a mailto:, which crawlers harvest.": "Valgfrit. En side, en fejlagtigt blokeret besøgende kan nå dig igennem -- en formular frem for en mailto:, som crawlere høster.",
-"Saved. Apply to make it so on this node; the other nodes follow.": "Gemt. Anvend for at gøre det gældende på denne node; de andre følger.",
 "Skip TLS verification": "Spring TLS-verifikation over",
 "Test the LAPI connection": "Test forbindelsen til LAPI",
 "The 403 page is the one under Error Pages for 403 when there is one, else the bouncer's own. A captcha asks the visitor to prove they are human before the ban stands.": "403-siden er den under Fejlsider for 403, når der er en, ellers bouncerens egen. En captcha beder den besøgende bevise, at de er et menneske, før blokeringen gælder.",
