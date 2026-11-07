@@ -16,7 +16,7 @@ from .base import (ACME_SH, CERT_DIR, HAPROXY_CFG, KEEPALIVED_CFG, VERSION, _loc
 from .config import CLUSTER_KEYS, config_hash, load_config, merged, save_config, shared_objects, shared_parts
 from .util import _by_id, cert_details, cert_path, parse_domains, run
 from .validate import check_setting_types
-from . import acme, auth, cluster, haproxy, keepalived, notify, sync, updates, vrrp, watchdog, wizard
+from . import acme, auth, cluster, errorpages, haproxy, keepalived, notify, sync, updates, vrrp, watchdog, wizard
 
 # --------------------------------------------------------------------------
 
@@ -267,6 +267,7 @@ def check_rendered(cfg):
     problems = []
     fd, staging = tempfile.mkstemp(suffix=".cfg")
     try:
+        errorpages.write_files(cfg)      # named by the rendered file; -c reads them
         with os.fdopen(fd, "w") as f:
             f.write(haproxy.render_haproxy(cfg))
         rc, out = run(["haproxy", "-c", "-f", staging], timeout=30)
@@ -339,6 +340,9 @@ def do_apply(cfg=None, allow_push=True):
         placeholders = ensure_cert_files(cfg)
         if placeholders:
             result["steps"].append("created placeholder certificates: " + ", ".join(placeholders))
+        pages = errorpages.write_files(cfg)
+        if pages:
+            result["steps"].append("error pages: " + ", ".join(pages))
 
         text = haproxy.render_haproxy(cfg)
         fd, staging = tempfile.mkstemp(suffix=".cfg")

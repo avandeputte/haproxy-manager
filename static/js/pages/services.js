@@ -71,6 +71,8 @@ export const WIZ_SECTIONS=[
   {k:"allow_enabled",l:"Only allow certain networks",t:"bool",
    h:"Requests from anywhere else are refused. Works for tcp:// services too."},
   {k:"allow_src",l:"Networks",t:"textarea",h:"One address or CIDR per line, e.g. 192.168.0.0/16"},
+  {k:"allow_lists",l:"Address lists",t:"refmulti",ref:"haproxy/addresslists",
+   h:"Named lists from Advanced > HAProxy > Address Lists, counted with the networks above. Edit a list once and every service that names it follows."},
  ]},
  {title:"Rate limiting",toggle:"rate_enabled",fields:[
   {k:"rate_enabled",l:"Enable rate limiting",t:"bool",
@@ -89,6 +91,8 @@ export const WIZ_SECTIONS=[
    h:"What the browser shows above its password box. Defaults to the service name."},
   {k:"auth_exempt",l:"Skip the sign-in from",t:"textarea",
    h:"Optional. Networks trusted without a password -- typically the LAN, e.g. 192.168.1.0/24. Everyone else is asked to sign in."},
+  {k:"auth_exempt_lists",l:"Skip the sign-in from these lists",t:"refmulti",ref:"haproxy/addresslists",
+   h:"Address lists trusted without a password, beside the networks above"},
  ]},
  {title:"Single sign-on (OIDC)",toggle:"oauth_enabled",http:true,fields:[
   {k:"oauth_enabled",l:"Require single sign-on (OIDC)",t:"bool",
@@ -160,7 +164,7 @@ export function openWizard(prefill){
     if(prefill.health_enabled===undefined)
       prefill.health_enabled=prefill.health===undefined||(!!prefill.health&&prefill.health!=="none");
     if(prefill.health==="none")prefill.health="http";   // the checkbox carries "none"
-    if(prefill.allow_enabled===undefined)prefill.allow_enabled=!!String(prefill.allow_src||"").trim();
+    if(prefill.allow_enabled===undefined)prefill.allow_enabled=!!String(prefill.allow_src||"").trim()||!!(prefill.allow_lists||[]).length;
     if(prefill.rate_enabled===undefined)
       prefill.rate_enabled=prefill.rate_limit!==undefined&&prefill.rate_limit!==null&&String(prefill.rate_limit).trim()!=="";
   }
@@ -268,7 +272,7 @@ export function openWizard(prefill){
     const d=readForm(WIZ_FIELDS);
     /* an unticked section is off, whatever its hidden fields still say */
     if(!d.health_enabled)d.health="none";
-    if(!d.allow_enabled)d.allow_src="";
+    if(!d.allow_enabled){d.allow_src="";d.allow_lists=[];}
     if(!d.rate_enabled)d.rate_limit="";
     SECTION_ONLY.forEach(k=>delete d[k]);
     d.certificate=d.cert_mode!=="none";        // "none" attaches nothing
@@ -279,11 +283,11 @@ export function openWizard(prefill){
               status:d.health_status,user:d.health_user,method:d.health_method,
               version:d.health_version,host:d.health_host};
     d.auth={enabled:d.auth_enabled,groups:d.auth_groups,realm:d.auth_realm,
-            exempt:d.auth_exempt};
+            exempt:d.auth_exempt,exempt_lists:d.auth_exempt_lists};
     d.oauth={enabled:d.oauth_enabled,allow:d.oauth_allow,forward:d.oauth_forward};
     ["cert_mode","health_interval","health_uri","health_status","health_user",
      "health_method","health_version","health_host",
-     "auth_enabled","auth_groups","auth_realm","auth_exempt",
+     "auth_enabled","auth_groups","auth_realm","auth_exempt","auth_exempt_lists",
      "oauth_enabled","oauth_allow","oauth_forward"].forEach(k=>delete d[k]);
     return d;   // balance / persistence / stick_* / check_port / log_health_checks pass straight through
   };
@@ -355,8 +359,8 @@ export async function servicesCard(){
     /* the last round of URL probes; their absence must not cost the page */
     api("probes").catch(()=>({results:[]})),
     list("acme/accounts",true),list("acme/challenges",true),
-    /* the wizard's group picker reads this cache */
-    list("access/groups",true)]);
+    /* the wizard's group and address-list pickers read this cache */
+    list("access/groups",true),list("haproxy/addresslists",true)]);
   /* keyed by URL, kept only when something is wrong: a page dotted with green
      "fine" pills says less than one red pill on the row that is not */
   const probeBad={};
@@ -389,11 +393,12 @@ export async function servicesCard(){
              it is part of what this URL does, not a detail of the pool. */
           (auth.enabled?'<div class=sub>'+t("sign-in required &mdash; {who}",{who:
              ((auth.group_names||[]).length?esc(auth.group_names.join(", ")):t("any user"))})+
-             (auth.exempt?", "+t("except from {networks}",{networks:esc(auth.exempt.split("\n").join(", "))}):"")+"</div>":"")+
+             (auth.exempt||(auth.exempt_list_names||[]).length?", "+t("except from {networks}",{networks:
+               esc(auth.exempt.split("\n").filter(Boolean).concat(auth.exempt_list_names||[]).join(", "))}):"")+"</div>":"")+
           ((s.oauth||{}).enabled?'<div class=sub>'+t("sign-in via SSO &mdash; {who}",{who:
              esc(((s.oauth||{}).allow||[]).map(a=>a==="*"?t("anyone the provider signs in"):a).join(", "))})+"</div>":"")+
-          (s.allow_src?'<div class=sub>'+t("only from {networks}",{networks:
-             esc(s.allow_src.split("\n").join(", "))})+"</div>":"")+
+          (s.allow_src||(s.allow_list_names||[]).length?'<div class=sub>'+t("only from {networks}",{networks:
+             esc(s.allow_src.split("\n").filter(Boolean).concat(s.allow_list_names||[]).join(", "))})+"</div>":"")+
           (s.rate_limit?'<div class=sub>'+(s.scheme==="tcp"
              ?t("at most {n} connections per {s} s per client",{n:esc(s.rate_limit),s:esc(s.rate_window||10)})
              :t("at most {n} requests per {s} s per client",{n:esc(s.rate_limit),s:esc(s.rate_window||10)}))+"</div>":"")+
@@ -430,10 +435,11 @@ export async function servicesCard(){
         timeout_connect:s.timeout_connect,timeout_server:s.timeout_server,
         auth_enabled:(s.auth||{}).enabled,auth_groups:(s.auth||{}).groups,
         auth_realm:(s.auth||{}).realm,auth_exempt:(s.auth||{}).exempt,
+        auth_exempt_lists:(s.auth||{}).exempt_lists,
         oauth_enabled:(s.oauth||{}).enabled,
         oauth_allow:((s.oauth||{}).allow||[]).join("\n"),
         oauth_forward:(s.oauth||{}).forward,
-        allow_src:s.allow_src,
+        allow_src:s.allow_src,allow_lists:s.allow_lists,
         rate_limit:s.rate_limit,rate_window:s.rate_window,
         certificate_id:s.certificate_id,
       })));

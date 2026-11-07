@@ -9,6 +9,7 @@ cluster.py
 config.py
 crud.py
 dnsapi.py
+errorpages.py
 haproxy.py
 hass.py
 oauth.py

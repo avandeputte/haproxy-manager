@@ -12,7 +12,7 @@ import uuid
 
 from .base import ACME_HOME, ACME_SH, _lock, app
 from .config import load_config, save_config
-from .util import _by_id, _sec, cert_details, cert_path, parse_domains, run
+from .util import _by_id, _sec, cert_details, cert_path, parse_domains, rule_cond_ids, run
 from . import access, acme, validate, wizard, oauth
 
 # --------------------------------------------------------------------------
@@ -317,10 +317,10 @@ def _place_rule(hp, rule_ids, rule):
     """
     rules = _by_id(hp["rules"])
     ids = [r for r in rule_ids if r != rule["id"]]
-    mine = set(rule.get("conditions") or [])
+    mine = set(rule_cond_ids(rule))
     for i, rid in enumerate(ids):
         other = rules.get(rid)
-        if other and set(other.get("conditions") or []) < mine:
+        if other and set(rule_cond_ids(other)) < mine:
             return ids[:i] + [rule["id"]] + ids[i:]
     return ids + [rule["id"]]
 
@@ -332,7 +332,8 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
                    stick_type=None, log_health_checks=False, check_port=None,
                    timeout_connect=None, timeout_server=None, service_id=None,
                    auth=None, oauth_opts=None, allow_src=None, notify_mode=None,
-                   rate_limit=None, rate_window=None, proxy_protocol=None):
+                   rate_limit=None, rate_window=None, proxy_protocol=None,
+                   allow_lists=None):
     """Create (or update) everything needed to serve `pub` from `tgts`.
 
     Re-running for the same public host updates that mapping instead of adding
@@ -373,7 +374,7 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
         or (existing_fe or {}).get("default_backend") or "")
     existing_monitor = _by_id(hp["healthchecks"]).get((existing_pool or {}).get("healthcheck") or "")
     old_hosts = [c.get("value") for c in
-                 (_by_id(hp["conditions"]).get(cid) for cid in (existing_rule or {}).get("conditions") or [])
+                 (_by_id(hp["conditions"]).get(cid) for cid in rule_cond_ids(existing_rule))
                  if c and c.get("type") == "host_matches" and c.get("value")]
 
     is_tcp = pub["scheme"] == "tcp"
@@ -459,6 +460,10 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
             raise ValueError("not a network: %s -- one address or CIDR per line, "
                              "e.g. 192.168.0.0/16" % ", ".join(bad[:3]))
         pool_opts["allow_src"] = "\n".join(good)
+    # The named lists beside the typed networks. A list that no longer exists
+    # is dropped here rather than stored as a reference to nothing.
+    if allow_lists is not None:
+        pool_opts["allow_lists"] = access.known_lists(cfg, allow_lists)
     # A ceiling per client address. Silence leaves the pool as it is; an
     # empty limit switches it off. Refused here, where the typo can be fixed,
     # rather than saved and rendered as no limit at all.
@@ -489,6 +494,7 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
             raise ValueError("not a network: %s -- one address or CIDR per line, "
                              "e.g. 192.168.0.0/16" % ", ".join(bad[:3]))
         pool_opts["auth_exempt_src"] = "\n".join(good) if want else ""
+        pool_opts["auth_exempt_lists"] = access.known_lists(cfg, auth.get("exempt_lists")) if want else []
         if bool(auth.get("enabled")) and is_tcp:
             warns.append("A tcp:// service forwards a raw port, which carries no place to "
                          "put a sign-in, so it was not applied. Publish the service over "
@@ -627,7 +633,7 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
         return acts, warns
 
     # -- Conditions: host, and a path prefix when the URL has one ---------
-    cond_ids = []
+    host_ids, path_id = [], None
     for h in hosts:
         host_cond = wizard._find(hp["conditions"], lambda c: c.get("type") == "host_matches"
                           and (c.get("value") or "").lower() == h.lower())
@@ -641,7 +647,7 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
                          "description": "created by the publish wizard"}
             hp["conditions"].append(host_cond)
             act("created", "Condition", host_cond["name"])
-        cond_ids.append(host_cond["id"])
+        host_ids.append(host_cond["id"])
 
     if pub["path"]:
         pc = wizard._find(hp["conditions"], lambda c: c.get("type") == "path_starts_with"
@@ -655,7 +661,8 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
                   "description": "created by the publish wizard"}
             hp["conditions"].append(pc)
             act("created", "Condition", pc["name"])
-        cond_ids.append(pc["id"])
+        path_id = pc["id"]
+    cond_ids = host_ids + ([path_id] if path_id else [])
 
     # -- Rule -------------------------------------------------------------
     # When a service is being edited, follow its id: the conditions are derived
@@ -666,15 +673,31 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
         rule = _by_id(hp["rules"]).get(service_id)
     if rule is None:
         rule = wizard._find(hp["rules"], lambda r: r.get("type") == "use_backend"
-                     and set(r.get("conditions") or []) == set(cond_ids))
+                     and set(rule_cond_ids(r)) == set(cond_ids))
+    # What an operator added to the rule by hand -- an address list, a header
+    # test -- is theirs and stays. The wizard's own conditions are the host
+    # names and the path, told apart by type, and those it replaces. Until
+    # 2.0 an edit rewrote the whole list, and a condition added on the Rules
+    # page was gone the next time the service was saved.
+    conds_by_id = _by_id(hp["conditions"])
+    extras = [cid for cid in rule_cond_ids(rule)
+              if (conds_by_id.get(cid) or {}).get("type") not in ("host_matches", "path_starts_with")]
+    all_of = ([path_id] if path_id else []) + extras
+    if len(host_ids) > 1 and all_of:
+        # Several names, and something that must hold whichever of them was
+        # asked for: any of the names, and all of the rest.
+        shape = {"any_of": host_ids, "conditions": all_of, "operator": "and"}
+    else:
+        # One name, or names alone: the shape every version renders the same.
+        shape = {"any_of": [], "conditions": host_ids + all_of,
+                 "operator": "or" if len(host_ids) > 1 else "and"}
     if rule:
-        previous_conds = list(rule.get("conditions") or [])
-        rule["conditions"] = cond_ids
-        rule["operator"] = "or" if len(hosts) > 1 else "and"
+        previous_conds = rule_cond_ids(rule)
+        rule.update(shape)
         rule["backend"] = pool["id"]
         act("updated", "Rule", rule["name"])
         # conditions the old URL needed and nothing else uses
-        still_used = {c for r in hp["rules"] for c in (r.get("conditions") or [])}
+        still_used = {c for r in hp["rules"] for c in rule_cond_ids(r)}
         for cid in previous_conds:
             if cid in still_used:
                 continue
@@ -683,12 +706,9 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
                 hp["conditions"] = [c for c in hp["conditions"] if c.get("id") != cid]
                 acts.append({"action": "removed", "type": "Condition", "name": gone.get("name")})
     else:
-        rule = {"id": str(uuid.uuid4()),
-                "name": wizard._uniq_name({r["name"] for r in hp["rules"]}, "to-" + base),
-                "type": "use_backend", "test": "if",
-                # several host names are alternatives; a host and a path are not
-                "operator": "or" if len(hosts) > 1 else "and",
-                "conditions": cond_ids, "backend": pool["id"]}
+        rule = dict({"id": str(uuid.uuid4()),
+                     "name": wizard._uniq_name({r["name"] for r in hp["rules"]}, "to-" + base),
+                     "type": "use_backend", "test": "if", "backend": pool["id"]}, **shape)
         hp["rules"].append(rule)
         act("created", "Rule", rule["name"])
 

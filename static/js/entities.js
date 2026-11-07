@@ -37,7 +37,7 @@ export const E={
   cols:[["name","Name"],["mode","Mode"],["balance","Balance",r=>r.balance||"roundrobin"],
         ["servers","Servers",r=>(r.servers||[]).map(id=>esc(nameOf("haproxy/servers",id))).join(", ")||"—"],
         ["hc","Check",r=>r.healthcheck_enabled?esc(nameOf("haproxy/healthchecks",r.healthcheck)):t("off")]],
-  refs:["haproxy/servers","haproxy/healthchecks","access/groups"],
+  refs:["haproxy/servers","haproxy/healthchecks","access/groups","haproxy/addresslists","haproxy/errorpages"],
   fields:[
    {k:"name",l:"Name",t:"text"},
    {k:"enabled",l:"Enabled",t:"bool",d:true},
@@ -59,6 +59,7 @@ export const E={
    {k:"notify_mode",l:"Alert when",t:"select",o:["servers","outage","off"],d:"servers",
     h:"servers: any server lost is a warning. outage: alert only when no server is left -- for pools where only one is meant to pass, like a Patroni leader. off: never."},
    {k:"allow_src",l:"Allowed networks",t:"textarea",h:"Optional. One address or CIDR per line; requests from anywhere else are refused. Works in TCP mode too. An entry that does not parse refuses everyone rather than being ignored."},
+   {k:"allow_lists",l:"Allowed address lists",t:"refmulti",ref:"haproxy/addresslists",h:"Named lists that count with the networks above. Edit a list once and every pool that names it follows."},
    {k:"rate_limit",l:"Requests per client",t:"number",
     h:"Optional. A client address that asks more than this many times in the window below is refused until it slows down -- HTTP answers 429, TCP drops the connection. Counted in the pool's stick table. Empty means no limit."},
    {k:"rate_window",l:"Rate window (seconds)",t:"number",d:10,h:"The sliding window the requests are counted over, e.g. 10. Only used when a limit is set."},
@@ -66,12 +67,14 @@ export const E={
    {k:"auth_groups",l:"Allowed groups",t:"refmulti",ref:"access/groups",h:"Leave nothing ticked to admit any user"},
    {k:"auth_realm",l:"Sign-in prompt",t:"text",h:"What the browser shows above its password box. Defaults to the pool name."},
    {k:"auth_exempt_src",l:"Skip the sign-in from",t:"textarea",h:"Networks trusted without a password, one per line -- typically the LAN"},
+   {k:"auth_exempt_lists",l:"Skip the sign-in from these lists",t:"refmulti",ref:"haproxy/addresslists",h:"Address lists trusted without a password, beside the networks above"},
    {k:"oauth_enabled",l:"Require single sign-on (OIDC)",t:"bool",
     h:"Send visitors to the identity provider first. One sign-in per service: not together with basic auth. Configure the provider under Sign-in > Single sign-on."},
    {k:"oauth_allow",l:"SSO allowed identities",t:"textarea",
     h:"One per line: an email, @example.com for a domain, or * for anyone the provider signs in."},
    {k:"oauth_forward",l:"Pass the signed-in email to the servers",t:"bool",
     h:"X-Auth-Request-Email and Remote-User, set from the verified session; client-sent copies are stripped everywhere."},
+   {k:"error_pages",l:"Error pages",t:"refmulti",ref:"haproxy/errorpages",h:"Pages for this pool alone, over the ones that stand for every service. HTTP mode only."},
    {k:"custom",l:"Extra directives",t:"textarea",h:"Advanced. Raw lines added inside this backend, for anything the fields above do not cover -- for example \"http-reuse safe\". One per line. See the HAProxy configuration manual: https://docs.haproxy.org/2.6/configuration.html"}]},
 
  "haproxy/frontends":{title:"Public Services",one:"Public Service",add:"Add service",
@@ -97,31 +100,80 @@ export const E={
 
  "haproxy/conditions":{title:"Conditions",one:"Condition",add:"Add condition",
   intro:"Named tests (ACLs) evaluated against traffic. Combine them in Rules.",
-  cols:[["name","Name"],["type","Type"],["value","Value",r=>"<span class=mono>"+esc((r.param?r.param+" = ":"")+(r.value||""))+"</span>"],
+  cols:[["name","Name"],["type","Type"],["value","Value",r=>"<span class=mono>"+esc(r.type==="source_list"?nameOf("haproxy/addresslists",r.list):(r.param?r.param+" = ":"")+(r.value||""))+"</span>"],
         ["negate","Negate",r=>r.negate?t("yes"):t("no")]],
+  refs:["haproxy/addresslists"],
   fields:[
    {k:"name",l:"Name",t:"text"},
-   {k:"type",l:"Condition type",t:"select",o:["host_matches","host_starts_with","host_ends_with","path_matches","path_starts_with","path_ends_with","path_contains","url_parameter","http_header","source_ip","ssl_sni","custom"],d:"host_matches"},
+   {k:"type",l:"Condition type",t:"select",o:["host_matches","host_starts_with","host_ends_with","path_matches","path_starts_with","path_ends_with","path_contains","url_parameter","http_header","source_ip","source_list","ssl_sni","custom"],d:"host_matches"},
    {k:"param",l:"Header / parameter name",t:"text",h:"Only for the http_header and url_parameter types"},
-   {k:"value",l:"Value",t:"text",h:"For type custom: a raw ACL expression"},
+   {k:"value",l:"Value",t:"text",h:"Several values separated by spaces match any of them -- two host names, two networks. For type custom: a raw ACL expression."},
+   {k:"list",l:"Address list",t:"ref",ref:"haproxy/addresslists",h:"Only for the source_list type: the request comes from one of the list's networks"},
    {k:"negate",l:"Negate",t:"bool"},
    {k:"description",l:"Description",t:"text"}]},
 
  "haproxy/rules":{title:"Rules",one:"Rule",add:"Add rule",
   intro:"Actions taken when Conditions match: select a pool, redirect, set headers, deny.",
   cols:[["name","Name"],["type","Action"],
-        ["cond","Conditions",r=>(r.conditions||[]).map(id=>esc(nameOf("haproxy/conditions",id))).join(", ")||t("always")],
+        ["cond","Conditions",r=>{
+          /* "a | b + x": one of the first, and all of the rest. A rule from
+             before 2.0 with "or" over its one list is alternatives alone. */
+          const nm=id=>esc(nameOf("haproxy/conditions",id));
+          const any=(r.any_of||[]).concat(r.operator==="or"?(r.conditions||[]):[]).map(nm);
+          const all=(r.operator==="or"?[]:(r.conditions||[])).map(nm);
+          return [any.join(" | "),all.join(", ")].filter(Boolean).join(" + ")||t("always");}],
         ["tgt","Target",r=>r.type==="use_backend"?esc(nameOf("haproxy/backends",r.backend)):esc([r.param1,r.param2].filter(Boolean).join(" "))||"—"]],
   refs:["haproxy/conditions","haproxy/backends"],
+  /* A rule saved before 2.0 held one list and an operator; shown here as the
+     two lists it means, and saved that way. */
+  prepare:r=>r.operator==="or"?Object.assign({},r,{any_of:(r.any_of||[]).concat(r.conditions||[]),conditions:[],operator:"and"}):r,
   fields:[
    {k:"name",l:"Name",t:"text"},
    {k:"type",l:"Action",t:"select",o:["use_backend","redirect_scheme_https","redirect_location","http_request_deny","http_request_set_header","http_request_del_header","http_response_set_header","tcp_request_content_accept","tcp_request_content_reject","custom"],d:"use_backend"},
    {k:"test",l:"Apply when",t:"select",o:["if","unless"],d:"if"},
-   {k:"operator",l:"Combine conditions with",t:"select",o:["and","or"],d:"and"},
-   {k:"conditions",l:"Conditions",t:"refmulti",ref:"haproxy/conditions",h:"Leave empty to apply unconditionally"},
+   {k:"any_of",l:"Any of these conditions",t:"refmulti",ref:"haproxy/conditions",h:"One of them must match -- several host names, say"},
+   {k:"conditions",l:"All of these conditions",t:"refmulti",ref:"haproxy/conditions",h:"Every one of them must match, together with one of the above. Leave both empty to apply unconditionally."},
    {k:"backend",l:"Backend Pool",t:"ref",ref:"haproxy/backends",h:"Only for the use_backend action"},
    {k:"param1",l:"Name / location / raw line",t:"text"},
    {k:"param2",l:"Value",t:"text"}]},
+
+ "haproxy/addresslists":{title:"Address Lists",one:"Address List",add:"Add list",
+  intro:"Named sets of networks. A service's allowed networks, the networks that skip its sign-in and a source_list condition can name a list, so an address that changes is changed here once rather than on every service.",
+  cols:[["name","Name"],["networks","Networks",r=>"<span class=mono>"+esc((r.networks||"").split(/[\s,]+/).filter(Boolean).join(", "))+"</span>"],
+        ["description","Description"]],
+  fields:[
+   {k:"name",l:"Name",t:"text"},
+   {k:"networks",l:"Networks",t:"textarea",h:"One address or CIDR per line, e.g. 192.168.1.0/24 or 203.0.113.7"},
+   {k:"description",l:"Description",t:"text"}]},
+
+ "haproxy/errorpages":{title:"Error Pages",one:"Error Page",add:"Add page",
+  intro:"What visitors see when HAProxy itself answers with an error: no server left, a refused address, a rate limit, a paused service. Every node writes the pages to disk at Apply. HAProxy can only replace the responses it generates, and a page must fit its 16 kB buffer.",
+  cols:[["name","Name"],["codes","Status codes",r=>"<span class=mono>"+esc(r.codes||"")+"</span>"],
+        ["everywhere","Used for",r=>r.everywhere!==false?t("every service"):t("the pools that pick it")]],
+  /* A page is usually written elsewhere and pasted in. This reads a local
+     file into the field in the browser; nothing is uploaded, the page is
+     saved with the configuration like any other field. */
+  editorExtra:(frm)=>{
+    const lab=document.createElement("label");lab.className="fl";lab.textContent=t("Load from file");
+    const cell=document.createElement("div");
+    const inp=document.createElement("input");inp.type="file";inp.accept=".html,.htm,text/html";inp.id="f_html_file";
+    inp.addEventListener("change",()=>{
+      const f=inp.files&&inp.files[0];if(!f)return;
+      const rd=new FileReader();
+      rd.onload=()=>{const ta=document.getElementById("f_html");if(ta)ta.value=String(rd.result||"");};
+      rd.readAsText(f);
+    });
+    const h=document.createElement("div");h.className="hint";
+    h.textContent=t("Reads a local .html file into the field above. Nothing is uploaded: the page is saved with the configuration.");
+    cell.appendChild(inp);cell.appendChild(h);
+    frm.appendChild(lab);frm.appendChild(cell);
+  },
+  fields:[
+   {k:"name",l:"Name",t:"text"},
+   {k:"codes",l:"Status codes",t:"text",d:"503",h:"Space separated. HAProxy generates 400, 401, 403, 404, 405, 407, 408, 410, 413, 425, 429, 431, 500, 501, 502, 503 and 504; a 404 from a server behind the proxy passes through as it is."},
+   {k:"everywhere",l:"Use for every service",t:"bool",d:true,h:"Off: only the Backend Pools that pick this page use it"},
+   {k:"html",l:"HTML",t:"textarea",h:"The whole page. {error_code} and {error_message} are filled in per status code, so one page can serve several. Keep images as links or inline SVG: the whole response must fit HAProxy's 16 kB buffer."},
+   {k:"description",l:"Description",t:"text"}]},
 
  "haproxy/healthchecks":{title:"Health Monitors",one:"Health Monitor",add:"Add monitor",
   intro:"How Backend Pools decide whether a Real Server is alive.",
@@ -357,7 +409,8 @@ export function openEditor(key,item){
     wrap.appendChild(w);
   }
   const frm=document.createElement("div");frm.className="frm";
-  def.fields.forEach(f=>fieldRow(f,item?item[f.k]:undefined).forEach(el=>frm.appendChild(el)));
+  const shown=item&&def.prepare?def.prepare(item):item;
+  def.fields.forEach(f=>fieldRow(f,shown?shown[f.k]:undefined).forEach(el=>frm.appendChild(el)));
   if(def.editorExtra)def.editorExtra(frm,item);
   const cfgPane=document.createElement("div");cfgPane.hidden=true;
   if(isHap){
@@ -379,7 +432,7 @@ export function openEditor(key,item){
       if(which==="cfg"){
         pre.textContent=t("rendering...");
         api("haproxy/preview-object","POST",{col:key.split("/")[1],
-            item:Object.assign({},item||{},readForm(def.fields))})
+            item:Object.assign({},shown||{},readForm(def.fields))})
           .then(r=>{pre.textContent=r.text||r.note||"";})
           .catch(e=>{pre.textContent=e.message;});
       }

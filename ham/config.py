@@ -9,6 +9,7 @@ import os
 import shutil
 
 from .base import CONF_PATH, DATA_DIR, _lock, log
+from .util import rule_cond_ids
 
 # --------------------------------------------------------------------------
 
@@ -37,6 +38,12 @@ DEFAULT_CONFIG = {
         "healthchecks": [],  # Health Monitors
         "conditions": [],    # Conditions (named ACLs)
         "rules": [],         # Rules (actions bound to conditions)
+        # Named sets of networks: a pool's allow-list or a condition names
+        # the list, so an address that changes is changed in one place.
+        "addresslists": [],
+        # What HAProxy answers with when it cannot forward: a page per set of
+        # status codes, written to disk on every node at Apply.
+        "errorpages": [],
     },
     "acme": {
         "settings": {
@@ -195,7 +202,8 @@ DEFAULT_CONFIG = {
 }
 
 VALID_COLLECTIONS = {
-    "haproxy": {"servers", "backends", "frontends", "healthchecks", "conditions", "rules"},
+    "haproxy": {"servers", "backends", "frontends", "healthchecks", "conditions", "rules",
+                "addresslists", "errorpages"},
     "acme": {"accounts", "challenges", "certificates"},
 }
 
@@ -611,7 +619,7 @@ def webui_object_ids(cfg):
     for rule in hp.get("rules") or []:
         if rule.get("backend") in ids or is_webui_name(rule.get("name"), "to-"):
             ids.add(rule.get("id"))
-            ids |= set(rule.get("conditions") or [])
+            ids |= set(rule_cond_ids(rule))
     return {i for i in ids if i}
 
 

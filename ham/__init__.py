@@ -23,6 +23,7 @@ from . import (
     twofactor,
     validate,
     crud,
+    errorpages,
     haproxy,
     history,
     keepalived,

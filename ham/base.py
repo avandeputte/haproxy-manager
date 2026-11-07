@@ -18,6 +18,9 @@ DATA_DIR = Path(os.environ.get("HAM_DATA_DIR", "/var/lib/haproxy-manager"))
 CONF_PATH = DATA_DIR / "config.json"
 CERT_DIR = Path(os.environ.get("HAM_CERT_DIR", "/etc/haproxy/certs"))
 HAPROXY_CFG = Path(os.environ.get("HAM_HAPROXY_CFG", "/etc/haproxy/haproxy.cfg"))
+# Where the custom error pages are written for HAProxy to read. Under
+# /etc/haproxy like the certificates, so the container's volume keeps them.
+ERROR_DIR = Path(os.environ.get("HAM_ERROR_DIR", "/etc/haproxy/error-pages"))
 KEEPALIVED_CFG = Path(os.environ.get("HAM_KEEPALIVED_CFG", "/etc/keepalived/keepalived.conf"))
 ACME_HOME = Path(os.environ.get("HAM_ACME_HOME", str(Path.home() / ".acme.sh")))
 ACME_SH = os.environ.get("HAM_ACME_SH", str(ACME_HOME / "acme.sh"))

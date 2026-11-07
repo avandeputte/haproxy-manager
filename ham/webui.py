@@ -8,7 +8,7 @@ import copy
 
 from .base import LISTEN, PORT, _lock, app, log
 from .config import WEBUI_NAME, is_webui_cert, load_config, merged, move_to_local, promote_local, save_config, webui_object_ids
-from .util import _by_id, cert_details, cert_path
+from .util import _by_id, cert_details, cert_path, rule_cond_ids
 from . import access, apply, dnsapi, vrrp, wizard, oauth
 
 # --------------------------------------------------------------------------
@@ -68,7 +68,7 @@ def build_webui(cfg, pub, mode="auto", http_redirect=True):
     pools = {b["id"] for b in local_hp.get("backends") or [] if b.get("name") == WEBUI_NAME}
     ours = [r for r in local_hp.get("rules") or [] if r.get("backend") in pools]
     if ours:
-        best = max(ours, key=lambda r: len(r.get("conditions") or []))
+        best = max(ours, key=lambda r: len(rule_cond_ids(r)))
         cfg["local"].setdefault("web_ui", {})["rule_id"] = best["id"]
     return acts, warns
 
@@ -105,7 +105,7 @@ def current_webui_hosts(cfg):
     for rule in hp.get("rules") or []:
         if rule.get("backend") not in pools:
             continue
-        for cid in rule.get("conditions") or []:
+        for cid in rule_cond_ids(rule):
             c = conds.get(cid) or {}
             if c.get("type") == "host_matches" and c.get("value"):
                 out.add(c["value"].strip().lower())
@@ -166,13 +166,13 @@ def extra_ui_rules(cfg):
         # The recorded id names nothing here. Rather than call every rule a
         # leftover, keep the one testing the most host names -- the one built
         # for both this node's address and the shared one.
-        keep = max(ours, key=lambda r: len(r.get("conditions") or []),
+        keep = max(ours, key=lambda r: len(rule_cond_ids(r)),
                    default={}).get("id", "")
     out = []
     for rule in ours:
         if rule.get("id") != keep:
             hosts = [c.get("value") for c in all_of_it.get("conditions") or []
-                     if c.get("id") in (rule.get("conditions") or [])
+                     if c.get("id") in rule_cond_ids(rule)
                      and c.get("type") == "host_matches"]
             out.append({"id": rule.get("id"), "name": rule.get("name"), "hosts": hosts})
     return out
@@ -340,7 +340,7 @@ def api_webui_set():
         for rule in hp["rules"]:
             if rule.get("type") != "use_backend" or rule.get("id") == s.get("rule_id"):
                 continue
-            hosts = [conds[c].get("value", "").lower() for c in (rule.get("conditions") or [])
+            hosts = [conds[c].get("value", "").lower() for c in rule_cond_ids(rule)
                      if c in conds and conds[c].get("type") == "host_matches"]
             if pub["host"].lower() in hosts:
                 pool = _by_id(hp["backends"]).get(rule.get("backend"))
@@ -426,9 +426,13 @@ def api_services():
                      "groups": list(pool.get("auth_groups") or []),
                      "group_names": access.group_names(cfg, pool.get("auth_groups")),
                      "realm": pool.get("auth_realm") or "",
-                     "exempt": pool.get("auth_exempt_src") or ""},
+                     "exempt": pool.get("auth_exempt_src") or "",
+                     "exempt_lists": list(pool.get("auth_exempt_lists") or []),
+                     "exempt_list_names": access.list_names(cfg, pool.get("auth_exempt_lists"))},
             "oauth": oauth.pool_summary(pool),
             "allow_src": pool.get("allow_src") or "",
+            "allow_lists": list(pool.get("allow_lists") or []),
+            "allow_list_names": access.list_names(cfg, pool.get("allow_lists")),
             "rate_limit": pool.get("rate_limit") or "",
             "rate_window": pool.get("rate_window") or 10,
             "health": {"type": m.get("type") if m else "none",
@@ -480,7 +484,7 @@ def api_services():
             if not rule or rule.get("type") != "use_backend":
                 continue
             all_hosts, path = [], ""
-            for cid in rule.get("conditions") or []:
+            for cid in rule_cond_ids(rule):
                 c = conds.get(cid)
                 if not c:
                     continue
@@ -546,8 +550,8 @@ def _remove_service_objects(hp, rid):
     hp["rules"] = [r for r in hp["rules"] if r.get("id") != rid]
     removed = [{"type": "Rule", "name": rule.get("name")}]
 
-    still_used = {c for r in hp["rules"] for c in (r.get("conditions") or [])}
-    for cid in rule.get("conditions") or []:
+    still_used = {c for r in hp["rules"] for c in rule_cond_ids(r)}
+    for cid in rule_cond_ids(rule):
         if cid in still_used:
             continue
         cond = _by_id(hp["conditions"]).get(cid)

@@ -159,11 +159,12 @@ export function fieldRow(f,val){
   }else if(f.t==="ref"){
     inp=document.createElement("select");inp.id="f_"+f.k;inp.dataset.field=f.k;
     const none=document.createElement("option");none.value="";none.textContent=t("(none)");inp.appendChild(none);
-    (lists[f.ref]||[]).forEach(it=>{const op=document.createElement("option");op.value=it.id;op.textContent=it.name;inp.appendChild(op);});
+    /* a reference list that failed to load is an empty choice, not a broken form */
+    (Array.isArray(lists[f.ref])?lists[f.ref]:[]).forEach(it=>{const op=document.createElement("option");op.value=it.id;op.textContent=it.name;inp.appendChild(op);});
     selectOption(inp,val||"");cell.appendChild(inp);
   }else if(f.t==="refmulti"){
     inp=document.createElement("div");inp.className="cklist";inp.id="f_"+f.k;inp.dataset.field=f.k;inp.dataset.refmulti="1";
-    const items=lists[f.ref]||[];
+    const items=Array.isArray(lists[f.ref])?lists[f.ref]:[];
     if(!items.length){const d=document.createElement("div");d.className="none";d.textContent=t("Nothing defined yet.");inp.appendChild(d);}
     items.forEach(it=>{
       const l=document.createElement("label");

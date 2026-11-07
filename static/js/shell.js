@@ -34,6 +34,8 @@ export const NAV=[
  ["haproxy/servers","Real Servers"],
  ["haproxy/conditions","Conditions"],
  ["haproxy/rules","Rules"],
+ ["haproxy/addresslists","Address Lists"],
+ ["haproxy/errorpages","Error Pages"],
  ["haproxy/healthchecks","Health Monitors"],
  ["s:haproxy-settings","Settings"],
  /* Who a published service may ask to sign in -- not accounts for this UI,
