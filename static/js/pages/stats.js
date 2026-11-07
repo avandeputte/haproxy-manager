@@ -70,7 +70,9 @@ export async function renderStats(){
   if(Date.now()-historyAt>60000){
     historyAt=Date.now();
     try{
-      const h=await api("traffic");
+      /* about a point a pixel; the counts in the table come from the
+         server's totals, which are worked out from every minute */
+      const h=await api("traffic?series=req,e5&points=220");
       if(!fresh())return;   // navigated away while the history loaded
       historyHtml=(h.at||[]).length>1?historyCard(h):"";
     }catch(e){/* history is a nicety; the live figures are the page */}
@@ -124,10 +126,11 @@ function historyCard(h){
   /* Busiest first: a page of flat lines with the interesting one at the
      bottom is a page nobody reads to the bottom of. */
   const rows=Object.keys(h.series||{}).map(name=>{
-    const s=h.series[name];
-    return {name:name, s:s,
-            req:(s.req||[]).reduce((a,b)=>a+b,0),
-            err:(s.e5||[]).reduce((a,b)=>a+b,0)};
+    const s=h.series[name], tot=(h.totals||{})[name]||{};
+    const sum=a=>(a||[]).reduce((x,y)=>x+y,0);
+    return {name:name, s:s, tot:tot,
+            req:tot.req!=null?tot.req:sum(s.req),
+            err:tot.e5!=null?tot.e5:sum(s.e5)};
   }).filter(r=>r.req||r.err).sort((a,b)=>b.req-a.req);
   const head='<div class=hd><h2>'+t("Traffic")+'</h2><div class=sp></div>'+
     "<span class=hint>"+t("{span} of history, one point a minute",{span:esc(h.span)})+"</span></div>";
@@ -138,7 +141,7 @@ function historyCard(h){
     rows.map(r=>{
       const peak=Math.max(0,...(r.s.req||[]));
       return "<tr><td class=mono>"+esc(r.name.replace(/^b[ek]_/,""))+"</td>"+
-        "<td>"+trafficSpark(r.s,{width:220,height:28})+"</td>"+
+        "<td>"+trafficSpark(r.s,{width:220,height:28,totals:r.tot})+"</td>"+
         "<td>"+num(r.req)+"</td>"+
         "<td>"+(r.err?'<span style="color:var(--down)">'+num(r.err)+"</span>":"0")+"</td>"+
         "<td>"+num(peak)+" <span class=sub>"+t("req/min")+"</span></td></tr>";

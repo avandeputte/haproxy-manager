@@ -9,7 +9,7 @@ import { servicesCard } from "../pages/services.js";
 export async function renderOverview(){
   const c=$("#content");
   let st;
-  try{st=await api("status");}catch(e){c.innerHTML='<div class="card"><div class="bd">'+esc(e.message)+"</div></div>";return;}
+  try{st=await api("status?brief=1");}catch(e){c.innerHTML='<div class="card"><div class="bd">'+esc(e.message)+"</div></div>";return;}
   c.innerHTML="";
   const grid=document.createElement("div");grid.className="grid row5";grid.style.marginBottom="18px";
   const pill=(v,goodVals)=>'<span class="pill '+(goodVals.includes(v)?"up":v==="disabled"?"off":"down")+'">'+esc(t(v))+"</span>";

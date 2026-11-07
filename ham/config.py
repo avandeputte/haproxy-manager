@@ -428,7 +428,7 @@ def shared_fingerprint(cfg):
     return _fp(shared_view(cfg))
 
 
-def shared_objects(cfg, limit=4000):
+def shared_objects(cfg, limit=20000):
     """Every shared object, with a tag for its contents.
 
     A tag per collection can only say "these differ", which leaves the reader
@@ -436,7 +436,10 @@ def shared_objects(cfg, limit=4000):
     one node and not another, and what has the same identity but different
     contents.
 
-    Capped, because it travels between nodes on every health check.
+    Capped, because it travels between nodes -- though since 1.100.2 only
+    when they disagree, which is what let the cap go from 4,000 objects (about
+    800 services) to 20,000. Over it the answer is None, not {}, so a reader
+    can say "too many to list" rather than "this node does not report them".
     """
     out, seen = {}, 0
     for section, body in shared_view(cfg).items():
@@ -454,7 +457,7 @@ def shared_objects(cfg, limit=4000):
                              _fp(item)])
             seen += len(rows)
             if seen > limit:
-                return {}          # too many to be worth sending
+                return None        # too many to be worth sending
             out["%s.%s" % (section, coll)] = rows
     return out
 

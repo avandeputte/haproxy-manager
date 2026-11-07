@@ -110,7 +110,7 @@ export async function renderCluster(){
   b2.appendChild(ka);
   const fp=document.createElement("div");fp.className="hint";fp.style.marginTop="8px";
   try{
-    const st=await api("status");
+    const st=await api("status?brief=1");
     fp.innerHTML=st.api_key_fp
       ? t("This node's API key fingerprint: <span class=mono><b>{fp}</b></span>. "+
           "The other nodes must hold a key with this fingerprint for this node.",{fp:esc(st.api_key_fp)})
@@ -369,6 +369,11 @@ export async function clusterCard(fresh){
 function configDiff(nodes,s){
   const wrap=document.createElement("div");wrap.style.padding="0 16px 12px";
   const have=nodes.filter(n=>n.reachable&&n.config_objects&&Object.keys(n.config_objects).length);
+  if(have.length<2&&nodes.some(n=>n.reachable&&n.config_objects_capped)){
+    wrap.innerHTML='<div class=sub>'+t("This configuration has more objects than the nodes list one by one "+
+      "(20,000), so only the parts that differ are named above.")+"</div>";
+    return wrap;
+  }
   if(have.length<2){
     wrap.innerHTML='<div class=sub>'+t("Not every node reports its objects in detail, so there is "+
       "nothing to compare one by one. That usually means they are not all on the same version.")+"</div>";

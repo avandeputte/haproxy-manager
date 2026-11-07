@@ -159,7 +159,7 @@ async function draw(){
 }
 export async function refreshStatus(){
   try{
-    const st=await api("status");
+    const st=await api("status?brief=1");
     $("#brandhost").textContent=st.hostname+(st.version?" · v"+st.version:"");
     const ns=$("#nodestrip");ns.innerHTML="";
     const role=document.createElement("span");
