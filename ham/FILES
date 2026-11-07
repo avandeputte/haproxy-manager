@@ -23,6 +23,7 @@ peering.py
 probe.py
 qr.py
 recipes.py
+rules.py
 setup.py
 static.py
 stats.py

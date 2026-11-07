@@ -2,6 +2,7 @@ import { $, HEALTH_LABEL, PROXY_KEYWORD, PROXY_OPTIONS, api, btn, closeDlg, esc,
 import { t } from "./i18n.js";
 import { refreshStatus, route } from "./shell.js";
 import { certificateNotices, certExpiryCell, certLastCell, certStatusCell, dnsApiByHook, dnsApiOptions, dnsCredentialHelp, issueCert, loadAcmeHealth, loadCertStatus, loadDnsApis, openCertWizard, showCertLog } from "./pages/certificates.js";
+import { openRuleWizard } from "./pages/rules.js";
 import { state } from "./state.js";
 
 /* ---- entity registry ---- */
@@ -123,7 +124,9 @@ export const E={
           const all=(r.operator==="or"?[]:(r.conditions||[])).map(nm);
           return [any.join(" | "),all.join(", ")].filter(Boolean).join(" + ")||t("always");}],
         ["tgt","Target",r=>r.type==="use_backend"?esc(nameOf("haproxy/backends",r.backend)):esc([r.param1,r.param2].filter(Boolean).join(" "))||"—"]],
-  refs:["haproxy/conditions","haproxy/backends"],
+  refs:["haproxy/conditions","haproxy/backends","haproxy/frontends","haproxy/addresslists"],
+  rowActions:[
+   {label:"Wizard",fn:r=>openRuleWizard(r),title:"Open this rule in the wizard: where it applies, what it tests, what it does"}],
   /* A rule saved before 2.0 held one list and an operator; shown here as the
      two lists it means, and saved that way. */
   prepare:r=>r.operator==="or"?Object.assign({},r,{any_of:(r.any_of||[]).concat(r.conditions||[]),conditions:[],operator:"and"}):r,
@@ -331,6 +334,11 @@ export async function renderEntity(key,into){
   if(!state.readOnly){
     if(key==="acme/certificates"){
       hd.appendChild(btn(t("Request a certificate"),"pri sm",()=>openCertWizard()));
+      hd.appendChild(document.createTextNode(" "));
+      hd.appendChild(btn(t(def.add),"sm",()=>openEditor(key)));
+    }else if(key==="haproxy/rules"){
+      /* the wizard first: it also attaches the rule, which the plain editor leaves to the listener */
+      hd.appendChild(btn(t("Rule wizard"),"pri sm",()=>openRuleWizard()));
       hd.appendChild(document.createTextNode(" "));
       hd.appendChild(btn(t(def.add),"sm",()=>openEditor(key)));
     }else{
