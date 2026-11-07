@@ -19,6 +19,11 @@ from . import auth, notify, probe, stats
 STEP_SECONDS = 60
 KEEP_SAMPLES = 24 * 60
 TRAFFIC_PATH = DATA_DIR / "traffic.json"
+# How often the history goes to disk. A day for 180 pools is 4.5 MB, and
+# writing it every minute was 6.5 GB a day -- real wear on the SD card or eMMC
+# a small node runs from. It is also written when the process stops, so only
+# a crash loses anything, and then at most this much.
+SAVE_SECONDS = 600
 
 # Counters read from HAProxy, and the name each is kept under. They are
 # cumulative since the process started, so what is stored is the difference
@@ -28,7 +33,8 @@ COUNTERS = {"stot": "req", "hrsp_4xx": "e4", "hrsp_5xx": "e5",
 # And these are levels rather than counts: kept as they were at the sample.
 LEVELS = {"scur": "cur"}
 
-_state = {"loaded": False, "at": [], "series": {}, "last": {}, "sampled": 0.0}
+_state = {"loaded": False, "at": [], "series": {}, "last": {}, "sampled": 0.0,
+          "saved": 0.0, "unsaved": False}
 # The watchdog thread writes the history (record) while request handlers and
 # the MQTT poll read it (history, latest_per_pool). They are different threads
 # touching the same dicts, so every path that iterates or mutates _state holds
@@ -67,8 +73,16 @@ def _save():
         tmp.write_text(json.dumps({"step": STEP_SECONDS, "at": _state["at"],
                                    "series": _state["series"]}, separators=(",", ":")))
         os.replace(tmp, TRAFFIC_PATH)
+        _state["saved"], _state["unsaved"] = time.time(), False
     except OSError as e:
         log.warning("could not write the traffic history: %s", e)
+
+
+def flush():
+    """Write what has not been written yet; called when the process stops."""
+    with _tlock:
+        if _state["unsaved"]:
+            _save()
 
 
 def _delta(name, key, now):
@@ -151,7 +165,9 @@ def record(data):
 
         _state["at"].append(at)
         _trim()
-        _save()
+        _state["unsaved"] = True
+        if time.time() - _state["saved"] >= SAVE_SECONDS:
+            _save()
         return True
 
 
@@ -334,7 +350,27 @@ def check_services(cfg, data):
     notify.batch_end(cfg)
 
 
-def history(pool=None, minutes=None):
+def _buckets(n, points):
+    """[start, end) index ranges that put n samples into at most `points`.
+
+    Counted back from the newest sample, so the last bucket is always the most
+    recent minutes and only the oldest one can be short.
+    """
+    size = -(-n // points)
+    ends = range(n, 0, -size)
+    return [(max(0, e - size), e) for e in reversed(ends)]
+
+
+def history(pool=None, minutes=None, series=None, points=None):
+    """The recorded window, optionally narrowed.
+
+    `series` keeps only those keys (req, e5, ...). `points` draws the window in
+    at most that many buckets, each holding its busiest minute: a sparkline
+    110 pixels wide was being sent 1,440 points a line, 4.5 MB for 180 pools,
+    and the browser drew 10 MB of SVG from it. The busiest minute rather than
+    the average, so a spike stays a spike and a value still means "a minute".
+    `totals` is always worked out from every minute, never from the buckets.
+    """
     with _tlock:
         _load()
         at = list(_state["at"])
@@ -342,15 +378,26 @@ def history(pool=None, minutes=None):
         if minutes:
             cutoff = time.time() - minutes * 60
             keep = sum(1 for t in at if t >= cutoff)
-        series = _state["series"]
+        rows = _state["series"]
         if pool:
-            series = {k: v for k, v in series.items() if k == pool}
-        return {"ok": True, "step": STEP_SECONDS,
-                "at": at[len(at) - keep:],
-                "series": {name: {k: v[len(v) - keep:] for k, v in row.items()}
-                           for name, row in series.items()},
-                "span": _span_text(at),
-                "generated": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+            rows = {k: v for k, v in rows.items() if k == pool}
+        rows = {name: {k: v[len(v) - keep:] for k, v in row.items()
+                       if not series or k in series}
+                for name, row in rows.items()}
+    window = at[len(at) - keep:]
+    counters = set(COUNTERS.values())
+    totals = {name: {k: sum(v) for k, v in row.items() if k in counters}
+              for name, row in rows.items()}
+    if points and len(window) > points:
+        spans = _buckets(len(window), points)
+        window = [window[e - 1] for _s, e in spans]
+        rows = {name: {k: [max(v[s:e]) for s, e in spans] for k, v in row.items()}
+                for name, row in rows.items()}
+    return {"ok": True, "step": STEP_SECONDS,
+            "bucket": STEP_SECONDS * (-(-keep // points) if points and keep > points else 1),
+            "at": window, "series": rows, "totals": totals,
+            "span": _span_text(at),
+            "generated": datetime.now(timezone.utc).isoformat(timespec="seconds")}
 
 
 def latest_per_pool():
@@ -370,12 +417,17 @@ def latest_per_pool():
 def api_traffic():
     """Per-pool request and error counts, a minute at a time.
 
-    ?pool=<name> for one, ?minutes=<n> for a shorter window.
+    ?pool=<name> for one, ?minutes=<n> for a shorter window, ?series=req,e5
+    for only those, ?points=<n> for at most n points a line (see history()).
     """
-    try:
-        minutes = int(request.args.get("minutes") or 0)
-    except ValueError:
-        minutes = 0
+    def number(key):
+        try:
+            return max(0, int(request.args.get(key) or 0))
+        except ValueError:
+            return 0
+    series = {s.strip() for s in (request.args.get("series") or "").split(",") if s.strip()}
+    points = number("points")
     # history() serializes on the traffic lock itself; the config _lock is the
     # wrong lock and taking it here would block every writer for nothing.
-    return jsonify(history(request.args.get("pool") or None, minutes))
+    return jsonify(history(request.args.get("pool") or None, number("minutes"),
+                           series or None, max(2, points) if points else None))

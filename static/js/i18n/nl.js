@@ -510,6 +510,7 @@ export default {
 "<b>{node}</b> took the configuration from {source} and then did not match it ({mine} here against {theirs}). Something belonging to one node is inside the shared configuration; the object named below is the one to look at.": "<b>{node}</b> nam de configuratie over van {source} en kwam er daarna niet mee overeen ({mine} hier tegenover {theirs}). Iets dat bij één node hoort, zit in de gedeelde configuratie; het hieronder genoemde object is het object om naar te kijken.",
 "another node": "een andere node",
 "Not every node reports its objects in detail, so there is nothing to compare one by one. That usually means they are not all on the same version.": "Niet elke node meldt zijn objecten in detail, dus er is niets om één voor één te vergelijken. Dat betekent meestal dat ze niet allemaal op dezelfde versie zitten.",
+"This configuration has more objects than the nodes list one by one (20,000), so only the parts that differ are named above.": "Deze configuratie heeft meer objecten dan de nodes één voor één opsommen (20.000), dus hierboven worden alleen de delen genoemd die verschillen.",
 "only on {nodes}": "alleen op {nodes}",
 "missing from {nodes}": "ontbreekt op {nodes}",
 "different contents": "verschillende inhoud",

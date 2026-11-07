@@ -349,7 +349,9 @@ export async function servicesCard(){
      page with it: a sparkline is the least important thing on it. */
   const [svcs,traffic,probes]=await Promise.all([
     api("services"),
-    api("traffic").catch(()=>({at:[],series:{}})),
+    /* the two lines the sparklines draw, about a point a pixel: the whole
+       day for every pool was 4.5 MB at 180 services */
+    api("traffic?series=req,e5&points=110").catch(()=>({at:[],series:{}})),
     /* the last round of URL probes; their absence must not cost the page */
     api("probes").catch(()=>({results:[]})),
     list("acme/accounts",true),list("acme/challenges",true),
@@ -401,7 +403,8 @@ export async function servicesCard(){
           "<div class=sub>"+t("pool {name}",{name:esc(s.pool||"—")})+"</div></td>"+
         /* Requests a minute over the last day, with server errors over them.
            Answers "when did this start", which the live figures cannot. */
-        "<td>"+trafficSpark((traffic.series||{})["be_"+(s.pool||"")],{width:110,height:22})+
+        "<td>"+trafficSpark((traffic.series||{})["be_"+(s.pool||"")],
+                            {width:110,height:22,totals:(traffic.totals||{})["be_"+(s.pool||"")]})+
           (traffic.at&&traffic.at.length?'<div class=sub>'+esc(sparkCaption(traffic.at))+"</div>":"")+
         "</td>"+
         /* just which certificate serves it; its state lives on the Certificates page */

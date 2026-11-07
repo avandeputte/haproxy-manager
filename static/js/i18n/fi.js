@@ -510,6 +510,7 @@ export default {
 "<b>{node}</b> took the configuration from {source} and then did not match it ({mine} here against {theirs}). Something belonging to one node is inside the shared configuration; the object named below is the one to look at.": "<b>{node}</b> otti kokoonpanon lähteestä {source} eikä sitten täsmännyt siihen ({mine} täällä vastaan {theirs}). Jokin yhdelle solmulle kuuluva on jaetussa kokoonpanossa; alla nimetty objekti on se, jota kannattaa katsoa.",
 "another node": "toinen solmu",
 "Not every node reports its objects in detail, so there is nothing to compare one by one. That usually means they are not all on the same version.": "Kaikki solmut eivät raportoi objektejaan yksityiskohtaisesti, joten ei ole mitään verrattavaa yksitellen. Se tarkoittaa yleensä, etteivät ne kaikki ole samassa versiossa.",
+"This configuration has more objects than the nodes list one by one (20,000), so only the parts that differ are named above.": "Tässä kokoonpanossa on enemmän objekteja kuin solmut luettelevat yksitellen (20 000), joten yllä nimetään vain eroavat osat.",
 "only on {nodes}": "vain solmuilla {nodes}",
 "missing from {nodes}": "puuttuu solmuilta {nodes}",
 "different contents": "eri sisältö",

@@ -510,6 +510,7 @@ export default {
 "<b>{node}</b> took the configuration from {source} and then did not match it ({mine} here against {theirs}). Something belonging to one node is inside the shared configuration; the object named below is the one to look at.": "<b>{node}</b> a pris la configuration de {source} puis n'a pas concordé avec elle ({mine} ici contre {theirs}). Quelque chose qui appartient à un nœud se trouve dans la configuration partagée ; l'objet nommé ci-dessous est celui à examiner.",
 "another node": "un autre nœud",
 "Not every node reports its objects in detail, so there is nothing to compare one by one. That usually means they are not all on the same version.": "Tous les nœuds ne rapportent pas leurs objets en détail, il n'y a donc rien à comparer un par un. Cela signifie généralement qu'ils ne sont pas tous sur la même version.",
+"This configuration has more objects than the nodes list one by one (20,000), so only the parts that differ are named above.": "Cette configuration compte plus d'objets que les nœuds n'en listent un par un (20 000), donc seules les parties qui diffèrent sont nommées ci-dessus.",
 "only on {nodes}": "seulement sur {nodes}",
 "missing from {nodes}": "absent de {nodes}",
 "different contents": "contenu différent",
