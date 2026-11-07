@@ -273,11 +273,41 @@ def load_config():
             log.error("config.json exists but will not parse (%s); refusing to "
                       "treat this as first-run setup", e)
             cfg, unreadable = {}, True
+    # An upgrade that adds a collection the stored file never had -- address
+    # lists and error pages in 2.0 -- must not read as an unapplied change:
+    # nothing HAProxy serves is different. The marker the last Apply stored
+    # was computed over what was there, so when it still matches that, it is
+    # carried over to cover the defaults being added now. Only the hashed
+    # sections matter, and only while the file lacks something: once saved,
+    # the carried-over marker is in the file and this costs nothing.
+    before = None
+    if cfg and _lacks_defaults(cfg):
+        try:
+            before = config_hash(cfg)
+        except (KeyError, TypeError):
+            before = None
     cfg = _merge_defaults(cfg, DEFAULT_CONFIG)
+    if before is not None and cfg["_meta"].get("applied_hash") == before:
+        cfg["_meta"]["applied_hash"] = config_hash(cfg)
     if unreadable:
         cfg["_meta"]["unreadable"] = True
     _move_node_objects_into_local(cfg)
     return cfg
+
+
+def _lacks_defaults(cfg):
+    """Does the stored file lack a key, at any depth, in a section the applied
+    marker hashes?"""
+    def lacks(dst, src):
+        for k, v in src.items():
+            if k not in dst:
+                return True
+            if isinstance(v, dict) and isinstance(dst.get(k), dict) and lacks(dst[k], v):
+                return True
+        return False
+    parts = [(cfg.get(sec), DEFAULT_CONFIG[sec]) for sec in ("haproxy", "acme", "cluster")]
+    parts.append(((cfg.get("local") or {}).get("keepalived"), DEFAULT_CONFIG["local"]["keepalived"]))
+    return any(not isinstance(dst, dict) or lacks(dst, src) for dst, src in parts)
 
 
 LOCAL_SECTIONS = ("haproxy", "acme")
