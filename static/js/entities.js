@@ -3,6 +3,7 @@ import { t } from "./i18n.js";
 import { refreshStatus, route } from "./shell.js";
 import { certificateNotices, certExpiryCell, certLastCell, certStatusCell, dnsApiByHook, dnsApiOptions, dnsCredentialHelp, issueCert, loadAcmeHealth, loadCertStatus, loadDnsApis, openCertWizard, showCertLog } from "./pages/certificates.js";
 import { openRuleWizard } from "./pages/rules.js";
+import { openConditionWizard } from "./pages/conditions.js";
 import { state } from "./state.js";
 
 /* ---- entity registry ---- */
@@ -106,6 +107,8 @@ export const E={
   cols:[["name","Name"],["type","Type"],["value","Value",r=>"<span class=mono>"+esc(r.type==="source_list"?nameOf("haproxy/addresslists",r.list):(r.param?r.param+" = ":"")+(r.value||""))+"</span>"],
         ["negate","Negate",r=>r.negate?t("yes"):t("no")]],
   refs:["haproxy/addresslists"],
+  rowActions:[
+   {label:"Wizard",fn:r=>openConditionWizard(r),title:"Open this condition in the wizard: what it tests, tried against a sample request"}],
   fields:[
    {k:"name",l:"Name",t:"text"},
    {k:"type",l:"Condition type",t:"select",o:["host_matches","host_starts_with","host_ends_with","path_matches","path_starts_with","path_ends_with","path_contains","url_parameter","http_header","source_ip","source_list","ssl_sni","custom"],d:"host_matches"},
@@ -336,6 +339,10 @@ export async function renderEntity(key,into){
   if(!state.readOnly){
     if(key==="acme/certificates"){
       hd.appendChild(btn(t("Request a certificate"),"pri sm",()=>openCertWizard()));
+      hd.appendChild(document.createTextNode(" "));
+      hd.appendChild(btn(t(def.add),"sm",()=>openEditor(key)));
+    }else if(key==="haproxy/conditions"){
+      hd.appendChild(btn(t("Condition wizard"),"pri sm",()=>openConditionWizard()));
       hd.appendChild(document.createTextNode(" "));
       hd.appendChild(btn(t(def.add),"sm",()=>openEditor(key)));
     }else if(key==="haproxy/rules"){

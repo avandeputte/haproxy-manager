@@ -191,6 +191,42 @@ ok("use_backend" not in be, "a routing rule would mean nothing in a pool and is 
 svc = next(s for s in client.get("/api/services", headers=H).get_json() if s["pool"] == "shop")
 ok(svc["rules"] == [deny["rule"]["id"]] and svc["rule_names"] == [deny["rule"]["name"]], "the Services API reports them by name")
 
+# ---- the condition wizard: built, tried against a sample, judged ----------------------------
+def cond(body, want=200):
+    return post("wizard/condition", body, want=want)
+
+
+r = cond({"type": "host_matches", "value": "tv.example.com films.example.com", "dry_run": True,
+          "sample": {"host": "Films.example.com:8443"}})
+ok(r["matches"] is True and r["preview"].startswith("acl acl_host-tv") and "hdr(host)" in r["preview"] and r["validation"]["ok"],
+   "a host test tried against a sample: port stripped, case blind, and HAProxy's verdict alongside")
+ok(not any(c["name"] == "host-tv" and c.get("value", "").startswith("tv.example.com films") for c in load_config()["haproxy"]["conditions"]),
+   "trying it stores nothing")
+r = cond({"type": "path_starts_with", "value": "/api", "negate": True, "dry_run": True, "sample": {"path": "/api/x"}})
+ok(r["matches"] is False and "!" not in r["preview"], "turned around: the sample that the test hits does not match")
+r = cond({"type": "source_list", "list": friends["id"], "dry_run": True, "sample": {"src": "192.168.1.20"}})
+ok(r["matches"] is True, "an address-list test against an address in the list")
+r = cond({"type": "source_ip", "value": "10.0.0.0/8", "dry_run": True, "sample": {"src": "not-an-ip"}})
+ok(r["matches"] is None, "an address that is not one cannot be judged")
+r = cond({"type": "http_header", "param": "X-Env", "value": "prod", "dry_run": True, "sample": {"header": "PROD"}})
+ok(r["matches"] is True, "a header value, case blind")
+r = cond({"type": "custom", "value": "path_beg /x", "dry_run": True, "sample": {"path": "/x"}})
+ok(r["matches"] is None and r["validation"]["ok"], "a raw ACL is left to HAProxy, which accepts this one")
+cond({"type": "http_header", "value": "x"}, want=400)
+r = cond({"type": "host_ends_with", "value": ".example.org"})
+made = next(c for c in load_config()["haproxy"]["conditions"] if c["id"] == r["condition"]["id"])
+ok(made["name"] == "host-" and False or made["type"] == "host_ends_with" and made.get("description") == rules.MARK,
+   "saved: made and marked as the wizard's: " + made["name"])
+r2 = cond({"type": "host_ends_with", "value": ".example.org"})
+ok(r2["condition"]["id"] == r["condition"]["id"] and r2["actions"][0]["action"] == "reused", "the same test again is reused")
+r3 = cond({"id": r["condition"]["id"], "type": "host_ends_with", "value": ".example.net", "name": "net-hosts"})
+made = next(c for c in load_config()["haproxy"]["conditions"] if c["id"] == r["condition"]["id"])
+ok(r3["actions"][0]["action"] == "updated" and made["value"] == ".example.net" and made["name"] == "net-hosts",
+   "editing changes the test and the name")
+if have_haproxy():
+    r = cond({"type": "custom", "value": "this is not an acl"}, want=400)
+    ok("HAProxy would not load this condition" in r["error"], "a raw ACL HAProxy rejects is refused before it is stored")
+
 # ---- what HAProxy refuses is refused, with its reason ---------------------------------------
 if have_haproxy():
     r = post("wizard/rule", {"listeners": [fe()["id"]], "all_of": [{"type": "custom", "value": "this is not an acl"}],

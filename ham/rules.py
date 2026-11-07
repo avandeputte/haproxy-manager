@@ -18,6 +18,7 @@ from .base import _lock, app
 from .config import load_config, save_config
 from .util import _by_id, _sec, rule_cond_ids
 from . import access, apply, dnsapi, haproxy, wizard
+import ipaddress
 
 MARK = "created by the rule wizard"
 
@@ -279,4 +280,126 @@ def api_wizard_rule():
         save_config(draft)
     if body.get("apply"):
         summary["applied"] = apply.do_apply()
+    return jsonify(summary)
+
+
+# --------------------------------------------------------------------------
+# the condition wizard
+
+def matches(cfg, spec, sample):
+    """Would this condition hold for a sample request? True, False, or None
+    for a raw ACL, which only HAProxy can judge.
+
+    The sample is what the form offers: a host, a path, a source address, a
+    header or parameter value. Each type reads the part it tests, the way
+    the rendered ACL does: hosts without their port and case-blind, paths
+    as given, addresses against the networks.
+    """
+    t = spec["type"]
+    patterns = spec["value"].split()
+    host = (sample.get("host") or "").strip().lower()
+    host = host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+    path = (sample.get("path") or "").strip()
+    if t == "host_matches":
+        hit = host in {v.lower() for v in patterns}
+    elif t == "host_starts_with":
+        hit = any(host.startswith(v.lower()) for v in patterns)
+    elif t == "host_ends_with":
+        hit = any(host.endswith(v.lower()) for v in patterns)
+    elif t == "ssl_sni":
+        hit = (sample.get("host") or "").strip().lower() in {v.lower() for v in patterns}
+    elif t == "path_matches":
+        hit = path in patterns
+    elif t == "path_starts_with":
+        hit = any(path.startswith(v) for v in patterns)
+    elif t == "path_ends_with":
+        hit = any(path.endswith(v) for v in patterns)
+    elif t == "path_contains":
+        hit = any(v in path for v in patterns)
+    elif t in ("http_header", "url_parameter"):
+        got = (sample.get("header" if t == "http_header" else "param") or "").strip().lower()
+        hit = got in {v.lower() for v in patterns}
+    elif t in ("source_ip", "source_list"):
+        nets = access.list_networks(cfg, [spec["list"]])[0] if t == "source_list" else access.networks(spec["value"])[0]
+        try:
+            addr = ipaddress.ip_address((sample.get("src") or "").strip())
+        except ValueError:
+            return None
+        hit = any(addr in ipaddress.ip_network(n) for n in nets)
+    else:
+        return None
+    return (not hit) if spec["negate"] else hit
+
+
+def acl_line(cfg, cond):
+    """The acl line(s) this condition renders to, as a listener would declare them."""
+    if cond.get("type") == "source_list":
+        nets, _bad = access.list_networks(cfg, [cond.get("list")])
+        return "\n".join(haproxy._src_acl("acl_" + _sec(cond["name"]), nets))
+    expr = haproxy._line_safe(haproxy.COND_MAP.get(cond.get("type", "custom"), haproxy.COND_MAP["custom"])(cond))
+    return "acl acl_%s %s" % (_sec(cond["name"]), expr)
+
+
+@app.post("/api/wizard/condition")
+def api_wizard_condition():
+    """Build a condition; with dry_run, say what it renders to, whether HAProxy
+    accepts it, and whether it would match the sample request given."""
+    body = request.get_json(force=True, silent=True) or {}
+    dry_run = bool(body.get("dry_run"))
+    with _lock:
+        cfg = load_config()
+        draft = copy.deepcopy(cfg)
+        hp = draft["haproxy"]
+        try:
+            spec = _spec({k: body.get(k) for k in ("type", "value", "param", "list", "negate")})
+            if spec["type"] == "source_list" and not access.known_lists(cfg, [spec["list"]]):
+                raise ValueError("the address list picked no longer exists")
+        except ValueError as e:
+            return jsonify({"ok": False, "error": str(e)}), 400
+        acts = []
+        cond = _by_id(hp["conditions"]).get(body.get("id") or "")
+        if body.get("id") and cond is None:
+            return jsonify({"ok": False, "error": "the condition being edited no longer exists"}), 400
+        if cond is None:
+            cond = wizard._find(hp["conditions"], lambda c: _same(c, spec))
+            if cond:
+                acts.append({"action": "reused", "type": "Condition", "name": cond["name"]})
+        name = (body.get("name") or "").strip()
+        if cond is None:
+            cond = {"id": str(uuid.uuid4()),
+                    "name": wizard._uniq_name({c["name"] for c in hp["conditions"]}, _sec(name) if name else _cond_name(cfg, spec)),
+                    "description": MARK}
+            hp["conditions"].append(cond)
+            acts.append({"action": "created", "type": "Condition", "name": cond["name"]})
+        elif acts == []:
+            if name and name != cond.get("name"):
+                cond["name"] = wizard._uniq_name({c["name"] for c in hp["conditions"] if c is not cond}, _sec(name))
+            acts.append({"action": "updated", "type": "Condition", "name": cond["name"]})
+        cond.update({"type": spec["type"], "value": spec["value"], "param": spec["param"], "negate": spec["negate"]})
+        if spec["type"] == "source_list":
+            cond["list"] = spec["list"]
+        else:
+            cond.pop("list", None)
+        summary = {"ok": True, "actions": acts, "dry_run": dry_run,
+                   "condition": {"id": cond["id"], "name": cond["name"]},
+                   "preview": acl_line(draft, cond),
+                   "matches": matches(draft, spec, body.get("sample") or {}) if isinstance(body.get("sample"), dict) else None}
+        # HAProxy's verdict, with the condition tested by a throwaway rule on
+        # an HTTP listener in the draft, since a condition nothing tests
+        # renders nothing for -c to read.
+        probe = copy.deepcopy(draft)
+        fe = next((f for f in probe["haproxy"]["frontends"] if (f.get("mode") or "http") == "http"), None)
+        if fe is not None:
+            probe["haproxy"]["rules"].append({"id": "probe", "name": "probe", "type": "http_request_deny",
+                                              "test": "if", "any_of": [], "conditions": [cond["id"]]})
+            fe["rules"] = list(fe.get("rules") or []) + ["probe"]
+        ok, message = apply.check_rendered(probe)
+        summary["validation"] = {"ok": ok, "message": message}
+        if not ok and not dry_run:
+            return jsonify({"ok": False, "error": "HAProxy would not load this condition, so it was not "
+                            "saved.\n\n" + message, "validation": summary["validation"],
+                            "preview": summary["preview"]}), 400
+        if dry_run:
+            return jsonify(summary)
+        save_config(draft)
     return jsonify(summary)
