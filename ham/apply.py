@@ -486,7 +486,15 @@ def api_apply():
 
 @app.get("/api/status")
 def api_status():
+    """How this node is. `?brief=1` leaves out the per-object tags.
+
+    Those name what differs between nodes, which only the cluster comparison
+    reads -- and it asks for them only when the nodes disagree. The browser
+    polls this every ten seconds from every open tab, and with 180 services
+    the tags were 66 of its 67 kB.
+    """
     cfg = load_config()
+    brief = request.args.get("brief") == "1"
 
     def svc_state(name):
         rc, out = run(["systemctl", "is-active", name])
@@ -526,13 +534,14 @@ def api_status():
             info["last_issue"] = None
         certs.append(info)
 
+    objects = {} if brief else shared_objects(cfg)
     upd = cfg["_meta"].get("update") or {}
     ro, ro_why = auth.readonly_state(cfg)
     # Whether the passive-node lock has been lifted by hand, so the UI can
     # show it and offer to put it back.
     override = auth.session_unlocked(cfg) and auth.node_role(cfg)[0] == "passive" \
         and bool(sync.enabled_peers(cfg))
-    return jsonify({
+    out = {
         "read_only": ro,
         "read_only_reason": ro_why,
         "edit_override": override,
@@ -555,7 +564,8 @@ def api_status():
         "config_parts": shared_parts(cfg),
         # And one per object, so a disagreement can name the object rather
         # than the collection it is somewhere inside.
-        "config_objects": shared_objects(cfg),
+        "config_objects": objects or {},
+        "config_objects_capped": objects is None,
         # Set when this node took a configuration and then did not match it,
         # which can only mean something node-specific travelled with it.
         "config_leak": cfg["_meta"].get("config_leak") or None,
@@ -566,7 +576,10 @@ def api_status():
         "peers": len(cfg["local"]["sync"].get("peers") or []),
         "api_key_fp": auth.key_fingerprint(cfg["local"].get("api_key")),
         "sync_available": _requests is not None,
-    })
+    }
+    if brief:
+        out["brief"] = True     # so a reader can tell "left out" from "none"
+    return jsonify(out)
 
 
 @app.get("/api/ping")

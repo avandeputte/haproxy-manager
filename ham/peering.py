@@ -177,8 +177,8 @@ def peer_error(exc, url="", read_timeout=None):
     return text[:200]
 
 
-def _query_peer(peer, timeout=PEER_TIMEOUT):
-    """Ask one node for its status."""
+def _query_peer(peer, timeout=PEER_TIMEOUT, brief=False):
+    """Ask one node for its status; brief leaves out the per-object tags."""
     url = (peer.get("url") or "").rstrip("/")
     out = {"id": peer.get("id"), "name": peer.get("name") or url, "url": url,
            "self": False, "reachable": False, "error": ""}
@@ -187,7 +187,8 @@ def _query_peer(peer, timeout=PEER_TIMEOUT):
         return out
     started = time.time()
     try:
-        r = _requests.get(url + "/api/status", headers={"X-API-Key": peer.get("api_key", "")},
+        r = _requests.get(url + "/api/status", params={"brief": "1"} if brief else None,
+                          headers={"X-API-Key": peer.get("api_key", "")},
                           timeout=timeout, verify=bool(peer.get("verify_tls")))
         out["ms"] = int((time.time() - started) * 1000)
         if r.status_code == 401:
@@ -219,6 +220,9 @@ def _node_summary(st):
         "config_fp": st.get("config_fp") or "",
         "config_parts": st.get("config_parts") or {},
         "config_objects": st.get("config_objects") or {},
+        # The tags were left out on purpose (a brief answer), not missing.
+        "brief": bool(st.get("brief")),
+        "config_objects_capped": bool(st.get("config_objects_capped")),
         "config_leak": st.get("config_leak") or None,
         "update_available": bool(st.get("update_available")),
         "certs_total": len(certs),

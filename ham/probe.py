@@ -14,6 +14,7 @@ own -- a probe waits on timeouts, and the watchdog round must not.
 from datetime import datetime
 from datetime import timezone
 from flask import jsonify
+import concurrent.futures
 import http.client
 import socket
 import ssl
@@ -27,6 +28,11 @@ from . import auth, notify, wizard
 
 PROBE_SECONDS = 60
 TIMEOUT = 5
+# Probes at once. One at a time, each URL whose backend hangs costs the whole
+# timeout -- twice over for HTTPS with a certificate problem -- so with 180
+# services a dozen hung ones made a round longer than the minute between
+# rounds, and every result on the Services page was a round late.
+WORKERS = 8
 
 _state = {"at": 0.0, "results": [], "busy": False}
 _state_lock = threading.Lock()
@@ -224,8 +230,11 @@ def _tell(cfg, result):
 
 def _run(cfg, entries):
     results = []
-    for entry in entries:
-        r = probe_one(entry)
+    # The requests in parallel; what follows from each answer -- the counts,
+    # the notifications -- stays here, one at a time, in the order of the list.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=WORKERS) as ex:
+        answers = list(ex.map(probe_one, entries))
+    for entry, r in zip(entries, answers):
         results.append(r)
         # A response means the request went through HAProxy and was counted
         # against the pool; a TCP connect that was accepted is a session. A

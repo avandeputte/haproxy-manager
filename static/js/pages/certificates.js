@@ -217,7 +217,7 @@ export function acmeNotice(){
 /* Per-certificate state comes from /api/status, keyed by certificate id. */
 export let certStat={};
 export async function loadCertStatus(){
-  try{const st=await api("status");certStat={};(st.certs||[]).forEach(c=>{certStat[c.id]=c;});}
+  try{const st=await api("status?brief=1");certStat={};(st.certs||[]).forEach(c=>{certStat[c.id]=c;});}
   catch(e){certStat={};}
 }
 export const CERT_STATUS={

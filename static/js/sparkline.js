@@ -36,7 +36,10 @@ export function trafficSpark(series, opts){
   const o=opts||{};
   const req=(series&&series.req)||[], err=((series&&series.e5)||[]);
   if(!req.length)return '<span class=sub>'+t("no traffic recorded yet")+'</span>';
-  const total=req.reduce((a,b)=>a+b,0), bad=err.reduce((a,b)=>a+b,0);
+  /* Drawn from buckets (the busiest minute of each), the line cannot be
+     summed into a count; the server sends the window's totals beside it. */
+  const sum=a=>a.reduce((x,y)=>x+y,0), tot=o.totals||{};
+  const total=tot.req!=null?tot.req:sum(req), bad=tot.e5!=null?tot.e5:sum(err);
   if(!total&&!bad)return '<span class=sub>'+t("no traffic in the window")+'</span>';
   const w=o.width||120, h=o.height||24;
   /* Ten a minute is the floor for "this chart may fill its box": below that,

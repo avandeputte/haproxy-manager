@@ -28,8 +28,10 @@ anything, which is how the tests run.
 """
 
 from urllib.parse import urlsplit
+import atexit
 import logging
 import logging.handlers
+import signal
 import socket
 import sys
 import threading
@@ -41,7 +43,7 @@ from ham.auth import bad_username, key_fingerprint, set_admin
 from ham.acme import _renew_loop
 from ham.updates import _update_loop
 from ham.watchdog import _watchdog_loop
-from ham import sync
+from ham import sync, traffic
 
 
 def _cli(argv):
@@ -200,4 +202,10 @@ if __name__ == "__main__":
     # listener coming up: a node that is catching up should still be reachable
     # while it does.
     threading.Thread(target=_catch_up_at_start, daemon=True).start()
+    # The traffic history is written every ten minutes, so stopping must write
+    # the rest. systemd and supervisord stop with SIGTERM, which by default
+    # ends Python without running anything registered here; made an ordinary
+    # exit instead, it does.
+    atexit.register(traffic.flush)
+    signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(0))
     _serve()

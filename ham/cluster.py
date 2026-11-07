@@ -107,8 +107,19 @@ def cluster_snapshot(cfg=None):
             nodes += [dict(peering._query_peer(p), error="python3-requests is not installed on this node")
                       for p in peers]
         else:
+            # Brief: the per-object tags are only worth their size when the
+            # nodes disagree, so they are fetched below in that case alone.
             with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(peers))) as ex:
-                nodes += list(ex.map(peering._query_peer, peers))
+                nodes += list(ex.map(lambda p: peering._query_peer(p, brief=True), peers))
+            if len({n.get("config_fp") for n in nodes
+                    if n.get("reachable") and n.get("config_fp")}) > 1:
+                by_id = {p.get("id"): p for p in peers}
+                short = [i for i, n in enumerate(nodes) if n.get("brief") and n.get("reachable")]
+                with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(short) or 1)) as ex:
+                    full = list(ex.map(lambda i: peering._query_peer(by_id[nodes[i]["id"]]), short))
+                for i, n in zip(short, full):
+                    if n.get("reachable"):
+                        nodes[i] = n
 
     reachable = [n for n in nodes if n.get("reachable")]
     holders = [n for n in reachable if n.get("vip_held")]
