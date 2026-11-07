@@ -226,7 +226,9 @@ def ensure_service(cfg, changed=False):
         if rc != 0:
             return "", "The CrowdSec bouncer did not start: %s" % (out or "").strip()[:300]
         return step, ""
-    if installed() and service_state() == "active":
+    # Off: whatever state the bouncer is in -- running, retrying, failed --
+    # it is stopped and not brought back at boot.
+    if installed() and service_state() not in ("inactive", "unknown"):
         run(["systemctl", "stop", UNIT])
         run(["systemctl", "disable", "--quiet", UNIT])
         return "crowdsec bouncer stopped: CrowdSec is off", ""
