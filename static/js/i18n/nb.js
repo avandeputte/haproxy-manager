@@ -256,6 +256,8 @@ export default {
 "every service": "hver tjeneste",
 "the page is empty": "siden er tom",
 "the pools that pick it": "poolene som velger den",
+"Pages for this service alone, over the ones that stand for every service. Made under Advanced > HAProxy > Error Pages.": "Sider bare for denne tjenesten, foran dem som gjelder for hver tjeneste. Laget under Avansert > HAProxy > Feilsider.",
+"error pages {names}": "feilsider {names}",
 "Load from file": "Last inn fra fil",
 "Reads a local .html file into the field above. Nothing is uploaded: the page is saved with the configuration.": "Leser en lokal .html-fil inn i feltet ovenfor. Ingenting lastes opp: siden lagres sammen med konfigurasjonen.",
 "Value": "Verdi",

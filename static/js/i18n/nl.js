@@ -256,6 +256,8 @@ export default {
 "every service": "elke dienst",
 "the page is empty": "de pagina is leeg",
 "the pools that pick it": "de pools die haar kiezen",
+"Pages for this service alone, over the ones that stand for every service. Made under Advanced > HAProxy > Error Pages.": "Pagina's alleen voor deze dienst, boven die voor elke dienst gelden. Gemaakt onder Geavanceerd > HAProxy > Foutpagina's.",
+"error pages {names}": "foutpagina's {names}",
 "Load from file": "Uit bestand laden",
 "Reads a local .html file into the field above. Nothing is uploaded: the page is saved with the configuration.": "Leest een lokaal .html-bestand in het veld hierboven. Er wordt niets geüpload: de pagina wordt met de configuratie opgeslagen.",
 "Value": "Waarde",

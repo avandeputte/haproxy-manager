@@ -9,7 +9,7 @@ import copy
 from .base import LISTEN, PORT, _lock, app, log
 from .config import WEBUI_NAME, is_webui_cert, load_config, merged, move_to_local, promote_local, save_config, webui_object_ids
 from .util import _by_id, cert_details, cert_path, rule_cond_ids
-from . import access, apply, dnsapi, vrrp, wizard, oauth
+from . import access, apply, dnsapi, errorpages, vrrp, wizard, oauth
 
 # --------------------------------------------------------------------------
 
@@ -433,6 +433,8 @@ def api_services():
             "allow_src": pool.get("allow_src") or "",
             "allow_lists": list(pool.get("allow_lists") or []),
             "allow_list_names": access.list_names(cfg, pool.get("allow_lists")),
+            "error_pages": list(pool.get("error_pages") or []),
+            "error_page_names": errorpages.names(cfg, pool.get("error_pages")),
             "rate_limit": pool.get("rate_limit") or "",
             "rate_window": pool.get("rate_window") or 10,
             "health": {"type": m.get("type") if m else "none",

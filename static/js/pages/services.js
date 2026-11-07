@@ -94,6 +94,13 @@ export const WIZ_SECTIONS=[
   {k:"auth_exempt_lists",l:"Skip the sign-in from these lists",t:"refmulti",ref:"haproxy/addresslists",
    h:"Address lists trusted without a password, beside the networks above"},
  ]},
+ /* The pages that stand for every service apply without being picked; this
+    is for the pages a service wants for itself. HTTP only: a raw TCP port
+    has no HTTP to answer with. */
+ {title:"Error pages",http:true,fields:[
+  {k:"error_pages",l:"Error pages",t:"refmulti",ref:"haproxy/errorpages",
+   h:"Pages for this service alone, over the ones that stand for every service. Made under Advanced > HAProxy > Error Pages."},
+ ]},
  {title:"Single sign-on (OIDC)",toggle:"oauth_enabled",http:true,fields:[
   {k:"oauth_enabled",l:"Require single sign-on (OIDC)",t:"bool",
    h:"Send visitors to the identity provider before letting them through. HAProxy verifies the session and this service's allow-list on every request. Configure the provider under Sign-in > Single sign-on."},
@@ -360,7 +367,7 @@ export async function servicesCard(){
     api("probes").catch(()=>({results:[]})),
     list("acme/accounts",true),list("acme/challenges",true),
     /* the wizard's group and address-list pickers read this cache */
-    list("access/groups",true),list("haproxy/addresslists",true)]);
+    list("access/groups",true),list("haproxy/addresslists",true),list("haproxy/errorpages",true)]);
   /* keyed by URL, kept only when something is wrong: a page dotted with green
      "fine" pills says less than one red pill on the row that is not */
   const probeBad={};
@@ -402,6 +409,7 @@ export async function servicesCard(){
           (s.rate_limit?'<div class=sub>'+(s.scheme==="tcp"
              ?t("at most {n} connections per {s} s per client",{n:esc(s.rate_limit),s:esc(s.rate_window||10)})
              :t("at most {n} requests per {s} s per client",{n:esc(s.rate_limit),s:esc(s.rate_window||10)}))+"</div>":"")+
+          ((s.error_page_names||[]).length?'<div class=sub>'+t("error pages {names}",{names:esc(s.error_page_names.join(", "))})+"</div>":"")+
           (s.maintenance?'<div><span class="pill warn">'+t("paused &mdash; answering 503")+'</span></div>':"")+
           (s.enabled?"":"<div class=sub>"+t("disabled")+"</div>")+"</td>"+
         "<td class=mono>"+(s.targets.length?s.targets.map(esc).join("<br>"):"<span class=sub>"+t("no server")+"</span>")+
@@ -440,6 +448,7 @@ export async function servicesCard(){
         oauth_allow:((s.oauth||{}).allow||[]).join("\n"),
         oauth_forward:(s.oauth||{}).forward,
         allow_src:s.allow_src,allow_lists:s.allow_lists,
+        error_pages:s.error_pages,
         rate_limit:s.rate_limit,rate_window:s.rate_window,
         certificate_id:s.certificate_id,
       })));

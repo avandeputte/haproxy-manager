@@ -120,6 +120,30 @@ ok([...document.querySelector("#f_allow_lists").querySelectorAll("input")].filte
 ok([...document.querySelector("#f_auth_exempt_lists").querySelectorAll("input")].filter(c => c.checked).map(c => c.value).join() === "l2",
    "and the exempt list ticked");
 
+// -- the wizard picks error pages for a service ---------------------------------
+lists["haproxy/errorpages"] = [{ id: "p1", name: "closed", codes: "503" }];
+document.querySelector("#dlgbody").innerHTML = "";
+openWizard();
+const pagesBox = document.querySelector("#f_error_pages");
+ok(!!pagesBox && [...pagesBox.querySelectorAll("input")].length === 1, "the wizard offers the pages that exist");
+document.querySelector("#f_url").value = "https://shop.example.com";
+document.querySelector("#f_target").value = "http://10.0.0.5:80";
+tick(pagesBox, "p1", true);
+sent = null;
+await findButton(document.querySelector("#dlgfoot"), "Publish").onclick();
+ok(JSON.stringify(sent.error_pages) === '["p1"]', "publishing sends the pages picked");
+document.querySelector("#f_url").value = "tcp://0.0.0.0:3306";
+document.querySelector("#f_url").dispatchEvent(new window.Event("change"));
+const pagesRow = document.querySelector('[data-field="error_pages"]');
+ok(pagesRow.parentNode.style.display === "none" || pagesRow.parentNode.parentNode.style.display === "none",
+   "a raw TCP port is offered no pages: there is no HTTP to answer with");
+document.querySelector("#dlgbody").innerHTML = "";
+openWizard({ service_id: "r1", url: "https://shop.example.com", target: "http://10.0.0.5:80", error_pages: ["p1"] });
+ok([...document.querySelector("#f_error_pages").querySelectorAll("input")].filter(c => c.checked).map(c => c.value).join() === "p1",
+   "editing shows the page the service picked ticked");
+SERVICES[0].error_pages = ["p1"]; SERVICES[0].error_page_names = ["closed"];
+ok((await servicesCard()).textContent.includes("error pages closed"), "and the table names it");
+
 // -- the Rules page: two lists, and the old shape read as them ------------------
 lists["haproxy/conditions"] = CONDS;
 const col = E["haproxy/rules"].cols.find(c => c[0] === "cond")[2];

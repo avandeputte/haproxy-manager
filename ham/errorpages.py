@@ -182,6 +182,18 @@ def chosen(cfg, ids):
     return [by_id[i] for i in (ids or []) if i in by_id]
 
 
+def known_pages(cfg, ids):
+    """These ids, less any that name no page -- what a form is allowed to store."""
+    known = {p.get("id") for p in pages(cfg)}
+    return [i for i in (ids or []) if i in known]
+
+
+def names(cfg, ids):
+    """The names of these pages, in the order given; ids that name nothing are dropped."""
+    by_id = {p.get("id"): p for p in pages(cfg)}
+    return [by_id[i]["name"] for i in (ids or []) if i in by_id and by_id[i].get("name")]
+
+
 def page_for(cfg, pool, code):
     """The page that answers this code for this pool, if any: the pool's own
     choice first, then what stands for every service; the last claim wins."""

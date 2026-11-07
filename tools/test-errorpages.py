@@ -141,6 +141,20 @@ shop = next(b for b in c["haproxy"]["backends"] if b["name"] == "shop")
 shop["maintenance"] = False
 save_config(c)
 
+# ---- picked from the publish wizard -------------------------------------------------
+r = client.post("/api/wizard/publish", headers=H, json={
+    "url": "https://shop.example.com", "target": "10.0.0.5:80", "certificate": False,
+    "dry_run": False, "service_id": client.get("/api/services", headers=H).get_json()[0]["id"],
+    "error_pages": [own["id"], "gone"]})
+ok(r.status_code == 200, "the wizard takes the pages a service picks")
+shop = next(b for b in load_config()["haproxy"]["backends"] if b["name"] == "shop")
+ok(shop.get("error_pages") == [own["id"]], "and stores the ones that exist on the pool")
+svc = next(s for s in client.get("/api/services", headers=H).get_json() if s["pool"] == "shop")
+ok(svc["error_pages"] == [own["id"]] and svc["error_page_names"] == ["shop-only"],
+   "the Services API reports them, with their names")
+shop["error_pages"] = []
+c = load_config(); c["haproxy"]["backends"] = [b if b["name"] != "shop" else shop for b in c["haproxy"]["backends"]]; save_config(c)
+
 # ---- renamed, deleted, and written back before a check ---------------------------
 r = client.put("/api/haproxy/errorpages/" + own["id"], headers=H,
                json={"name": "closed", "codes": "503", "everywhere": True, "html": "<p>Closed.</p>"})

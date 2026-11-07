@@ -256,6 +256,8 @@ export default {
 "every service": "jokainen palvelu",
 "the page is empty": "sivu on tyhjä",
 "the pools that pick it": "sen valinneet poolit",
+"Pages for this service alone, over the ones that stand for every service. Made under Advanced > HAProxy > Error Pages.": "Sivut vain tälle palvelulle, ennen jokaiselle palvelulle päteviä. Luodaan kohdassa Lisäasetukset > HAProxy > Virhesivut.",
+"error pages {names}": "virhesivut {names}",
 "Load from file": "Lataa tiedostosta",
 "Reads a local .html file into the field above. Nothing is uploaded: the page is saved with the configuration.": "Lukee paikallisen .html-tiedoston yllä olevaan kenttään. Mitään ei ladata palvelimelle: sivu tallennetaan asetusten mukana.",
 "Value": "Arvo",

@@ -13,7 +13,7 @@ import uuid
 from .base import ACME_HOME, ACME_SH, _lock, app
 from .config import load_config, save_config
 from .util import _by_id, _sec, cert_details, cert_path, parse_domains, rule_cond_ids, run
-from . import access, acme, validate, wizard, oauth
+from . import access, acme, errorpages, validate, wizard, oauth
 
 # --------------------------------------------------------------------------
 
@@ -333,7 +333,7 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
                    timeout_connect=None, timeout_server=None, service_id=None,
                    auth=None, oauth_opts=None, allow_src=None, notify_mode=None,
                    rate_limit=None, rate_window=None, proxy_protocol=None,
-                   allow_lists=None):
+                   allow_lists=None, error_pages=None):
     """Create (or update) everything needed to serve `pub` from `tgts`.
 
     Re-running for the same public host updates that mapping instead of adding
@@ -464,6 +464,10 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
     # is dropped here rather than stored as a reference to nothing.
     if allow_lists is not None:
         pool_opts["allow_lists"] = access.known_lists(cfg, allow_lists)
+    # The pages this service wants for itself; one that no longer exists is
+    # dropped rather than stored as a reference to nothing.
+    if error_pages is not None:
+        pool_opts["error_pages"] = errorpages.known_pages(cfg, error_pages)
     # A ceiling per client address. Silence leaves the pool as it is; an
     # empty limit switches it off. Refused here, where the typo can be fixed,
     # rather than saved and rendered as no limit at all.

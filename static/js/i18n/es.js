@@ -256,6 +256,8 @@ export default {
 "every service": "todos los servicios",
 "the page is empty": "la página está vacía",
 "the pools that pick it": "los pools que la eligen",
+"Pages for this service alone, over the ones that stand for every service. Made under Advanced > HAProxy > Error Pages.": "Páginas solo para este servicio, por encima de las que valen para todos los servicios. Creadas en Avanzado > HAProxy > Páginas de error.",
+"error pages {names}": "páginas de error {names}",
 "Load from file": "Cargar desde archivo",
 "Reads a local .html file into the field above. Nothing is uploaded: the page is saved with the configuration.": "Lee un archivo .html local en el campo de arriba. No se sube nada: la página se guarda con la configuración.",
 "Value": "Valor",
