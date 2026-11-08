@@ -70,16 +70,16 @@ const publish = async () => { sent = null; await findButton($("#dlgfoot"), "Publ
 // -- the shape ---------------------------------------------------------------
 openWizard();
 ok(headings().map(h => h.textContent).join("|") ===
-   "Service|Certificate|Health check|Balancing and timeouts|Allowed networks|Rate limiting|Sign-in|Single sign-on (OIDC)|Advanced",
-   "the form is nine sections, in this order, the advanced pickers folded away last: " + headings().map(h => h.textContent).join(", "));
+   "Service|Certificate|Health check|Balancing and timeouts|Allowed networks|Rate limiting|Sign-in|Single sign-on (OIDC)|Error pages|Rules",
+   "the form is ten sections, in this order: " + headings().map(h => h.textContent).join(", "));
 const order = [...document.querySelectorAll("#dlgbody .fsec, #dlgbody [data-field]")]
   .map(e => e.classList.contains("fsec") ? "#" + e.textContent : e.getAttribute("data-field"));
 ok(order.indexOf("#Rate limiting") < order.indexOf("rate_enabled") &&
    order.indexOf("rate_enabled") < order.indexOf("rate_limit") &&
    order.indexOf("rate_limit") < order.indexOf("#Sign-in"), "a section's checkbox comes first, its settings after, under its heading");
 ok(WIZ_SECTIONS.filter(s => s.toggle).map(s => s.toggle).join(",") ===
-   "health_enabled,allow_enabled,rate_enabled,auth_enabled,oauth_enabled,advanced_enabled",
-   "six sections are optional, each opened by one checkbox -- the last only folds its pickers away");
+   "health_enabled,allow_enabled,rate_enabled,auth_enabled,oauth_enabled",
+   "five sections are optional, each opened by one checkbox");
 ok(WIZ_SECTIONS.every(s => !s.toggle || s.fields[0].k === s.toggle), "and the checkbox is the first thing in each");
 ok(WIZ_FIELDS.length === WIZ_SECTIONS.reduce((n, s) => n + s.fields.length, 0), "WIZ_FIELDS is every section's fields, flat");
 

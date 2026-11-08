@@ -374,9 +374,7 @@ export default {
 
 /* ---- 2.0 review: the menu, the wizards as editors, the pickers ---- */
 "ACCESS": "ACCESSO",
-"Advanced": "Avanzate",
 "Create one": "Creane uno",
-"Error pages and rules for this service alone, picked from what is defined under Advanced · HAProxy.": "Pagine di errore e regole solo per questo servizio, scelte tra ciò che è definito in Avanzate · HAProxy.",
 "HAProxy asks the bouncer about every HTTP request, on every node. Test the connection first; takes effect at the next Apply.": "HAProxy chiede al bouncer di ogni richiesta HTTP, su ogni nodo. Prova prima la connessione; ha effetto al prossimo Applica.",
 "Named lists from Access > Address Lists, counted with the networks above. Edit a list once and every service that names it follows.": "Elenchi con nome da Accesso > Elenchi di indirizzi, contati con le reti qui sopra. Modifica un elenco una volta e ogni servizio che lo nomina segue.",
 "Pages for this service alone, over the ones that stand for every service. HTTP services only.": "Pagine solo per questo servizio, sopra quelle valide per ogni servizio. Solo servizi HTTP.",
@@ -385,7 +383,6 @@ export default {
 "Saved. Apply to make it so; the other nodes follow.": "Salvato. Applica per renderlo effettivo; gli altri nodi seguono.",
 "Send visitors to the identity provider before letting them through. HAProxy verifies the session and this service's allow-list on every request. Configure the provider under Access > Single sign-on.": "Manda prima i visitatori al provider di identità. HAProxy verifica la sessione e l'elenco dei consentiti di questo servizio a ogni richiesta. Configura il provider in Accesso > Single sign-on.",
 "Send visitors to the identity provider first. One sign-in per service: not together with basic auth. Configure the provider under Access > Single sign-on.": "Manda prima i visitatori al provider di identità. Un accesso per servizio: non insieme all'autenticazione di base. Configura il provider in Accesso > Single sign-on.",
-"Show advanced options": "Mostra le opzioni avanzate",
 "and": "e",
 "bouncer not installed -- fetched at the next Apply once CrowdSec is on, or now:": "bouncer non installato -- scaricato al prossimo Applica quando CrowdSec è attivo, oppure ora:",
 "or": "o",

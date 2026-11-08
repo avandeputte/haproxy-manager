@@ -374,9 +374,7 @@ export default {
 
 /* ---- 2.0 review: the menu, the wizards as editors, the pickers ---- */
 "ACCESS": "ÅTKOMST",
-"Advanced": "Avancerat",
 "Create one": "Skapa en",
-"Error pages and rules for this service alone, picked from what is defined under Advanced · HAProxy.": "Felsidor och regler bara för den här tjänsten, valda bland det som finns under Avancerat · HAProxy.",
 "HAProxy asks the bouncer about every HTTP request, on every node. Test the connection first; takes effect at the next Apply.": "HAProxy frågar bouncern om varje HTTP-begäran, på varje nod. Testa anslutningen först; träder i kraft vid nästa Tillämpa.",
 "Named lists from Access > Address Lists, counted with the networks above. Edit a list once and every service that names it follows.": "Namngivna listor från Åtkomst > Adresslistor, räknade tillsammans med nätverken ovan. Ändra en lista en gång, så följer varje tjänst som nämner den efter.",
 "Pages for this service alone, over the ones that stand for every service. HTTP services only.": "Sidor bara för den här tjänsten, före dem som gäller för varje tjänst. Bara HTTP-tjänster.",
@@ -385,7 +383,6 @@ export default {
 "Saved. Apply to make it so; the other nodes follow.": "Sparat. Tillämpa för att göra det gällande; de andra noderna följer.",
 "Send visitors to the identity provider before letting them through. HAProxy verifies the session and this service's allow-list on every request. Configure the provider under Access > Single sign-on.": "Skicka besökare till identitetsleverantören först. HAProxy kontrollerar sessionen och den här tjänstens tillåtelselista vid varje begäran. Ställ in leverantören under Åtkomst > Enkel inloggning.",
 "Send visitors to the identity provider first. One sign-in per service: not together with basic auth. Configure the provider under Access > Single sign-on.": "Skicka besökare till identitetsleverantören först. En inloggning per tjänst: inte tillsammans med basic auth. Ställ in leverantören under Åtkomst > Enkel inloggning.",
-"Show advanced options": "Visa avancerade alternativ",
 "and": "och",
 "bouncer not installed -- fetched at the next Apply once CrowdSec is on, or now:": "bouncern är inte installerad -- hämtas vid nästa Tillämpa när CrowdSec är på, eller nu:",
 "or": "eller",

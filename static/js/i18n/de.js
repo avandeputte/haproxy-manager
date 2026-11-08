@@ -374,9 +374,7 @@ export default {
 
 /* ---- 2.0 review: the menu, the wizards as editors, the pickers ---- */
 "ACCESS": "ZUGANG",
-"Advanced": "Erweitert",
 "Create one": "Eine anlegen",
-"Error pages and rules for this service alone, picked from what is defined under Advanced · HAProxy.": "Fehlerseiten und Regeln nur für diesen Dienst, gewählt aus dem, was unter Erweitert · HAProxy angelegt ist.",
 "HAProxy asks the bouncer about every HTTP request, on every node. Test the connection first; takes effect at the next Apply.": "HAProxy befragt den Bouncer zu jeder HTTP-Anfrage, auf jedem Knoten. Erst die Verbindung testen; gilt ab dem nächsten Anwenden.",
 "Named lists from Access > Address Lists, counted with the networks above. Edit a list once and every service that names it follows.": "Benannte Listen aus Zugang > Adresslisten, die mit den Netzen oben zusammen zählen. Eine Liste einmal ändern, und jeder Dienst, der sie nennt, folgt.",
 "Pages for this service alone, over the ones that stand for every service. HTTP services only.": "Seiten nur für diesen Dienst, vor denen, die für jeden Dienst gelten. Nur HTTP-Dienste.",
@@ -385,7 +383,6 @@ export default {
 "Saved. Apply to make it so; the other nodes follow.": "Gespeichert. Anwenden setzt es um; die anderen Knoten folgen.",
 "Send visitors to the identity provider before letting them through. HAProxy verifies the session and this service's allow-list on every request. Configure the provider under Access > Single sign-on.": "Besucher werden zuerst zum Identitätsanbieter geschickt. HAProxy prüft die Sitzung und die Zulassungsliste dieses Dienstes bei jeder Anfrage. Den Anbieter unter Zugang > Single Sign-on einrichten.",
 "Send visitors to the identity provider first. One sign-in per service: not together with basic auth. Configure the provider under Access > Single sign-on.": "Besucher werden zuerst zum Identitätsanbieter geschickt. Eine Anmeldung je Dienst: nicht zusammen mit Basic Auth. Den Anbieter unter Zugang > Single Sign-on einrichten.",
-"Show advanced options": "Erweiterte Optionen anzeigen",
 "and": "und",
 "bouncer not installed -- fetched at the next Apply once CrowdSec is on, or now:": "Bouncer nicht installiert -- wird beim nächsten Anwenden geholt, sobald CrowdSec eingeschaltet ist, oder jetzt:",
 "or": "oder",

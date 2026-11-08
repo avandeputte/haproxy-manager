@@ -374,9 +374,7 @@ export default {
 
 /* ---- 2.0 review: the menu, the wizards as editors, the pickers ---- */
 "ACCESS": "ACCÈS",
-"Advanced": "Avancé",
 "Create one": "En créer une",
-"Error pages and rules for this service alone, picked from what is defined under Advanced · HAProxy.": "Pages d'erreur et règles pour ce service seul, choisies parmi ce qui est défini sous Avancé · HAProxy.",
 "HAProxy asks the bouncer about every HTTP request, on every node. Test the connection first; takes effect at the next Apply.": "HAProxy interroge le bouncer pour chaque requête HTTP, sur chaque nœud. Testez d'abord la connexion ; prend effet à la prochaine application.",
 "Named lists from Access > Address Lists, counted with the networks above. Edit a list once and every service that names it follows.": "Listes nommées de Accès > Listes d'adresses, comptées avec les réseaux ci-dessus. Modifiez une liste une fois et chaque service qui la nomme suit.",
 "Pages for this service alone, over the ones that stand for every service. HTTP services only.": "Pages pour ce service seul, avant celles qui valent pour tous les services. Services HTTP seulement.",
@@ -385,7 +383,6 @@ export default {
 "Saved. Apply to make it so; the other nodes follow.": "Enregistré. Appliquez pour que ce soit effectif ; les autres nœuds suivent.",
 "Send visitors to the identity provider before letting them through. HAProxy verifies the session and this service's allow-list on every request. Configure the provider under Access > Single sign-on.": "Envoyer d'abord les visiteurs au fournisseur d'identité. HAProxy vérifie la session et la liste d'accès de ce service à chaque requête. Configurez le fournisseur sous Accès > Authentification unique.",
 "Send visitors to the identity provider first. One sign-in per service: not together with basic auth. Configure the provider under Access > Single sign-on.": "Envoyer d'abord les visiteurs au fournisseur d'identité. Une connexion par service : pas avec l'authentification basique. Configurez le fournisseur sous Accès > Authentification unique.",
-"Show advanced options": "Afficher les options avancées",
 "and": "et",
 "bouncer not installed -- fetched at the next Apply once CrowdSec is on, or now:": "bouncer non installé -- récupéré à la prochaine application une fois CrowdSec activé, ou maintenant :",
 "or": "ou",

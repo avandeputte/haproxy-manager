@@ -374,9 +374,7 @@ export default {
 
 /* ---- 2.0 review: the menu, the wizards as editors, the pickers ---- */
 "ACCESS": "TOEGANG",
-"Advanced": "Geavanceerd",
 "Create one": "Maak er een",
-"Error pages and rules for this service alone, picked from what is defined under Advanced · HAProxy.": "Foutpagina's en regels alleen voor deze dienst, gekozen uit wat onder Geavanceerd · HAProxy is gemaakt.",
 "HAProxy asks the bouncer about every HTTP request, on every node. Test the connection first; takes effect at the next Apply.": "HAProxy vraagt de bouncer naar elk HTTP-verzoek, op elke node. Test eerst de verbinding; geldt vanaf de volgende Toepassen.",
 "Named lists from Access > Address Lists, counted with the networks above. Edit a list once and every service that names it follows.": "Benoemde lijsten uit Toegang > Adreslijsten, die meetellen met de netwerken hierboven. Wijzig een lijst eenmaal en elke dienst die haar noemt volgt.",
 "Pages for this service alone, over the ones that stand for every service. HTTP services only.": "Pagina's alleen voor deze dienst, boven die voor elke dienst gelden. Alleen HTTP-diensten.",
@@ -385,7 +383,6 @@ export default {
 "Saved. Apply to make it so; the other nodes follow.": "Opgeslagen. Toepassen maakt het waar; de andere nodes volgen.",
 "Send visitors to the identity provider before letting them through. HAProxy verifies the session and this service's allow-list on every request. Configure the provider under Access > Single sign-on.": "Stuur bezoekers eerst naar de identiteitsprovider. HAProxy controleert de sessie en de toelatingslijst van deze dienst bij elk verzoek. Stel de provider in onder Toegang > Single sign-on.",
 "Send visitors to the identity provider first. One sign-in per service: not together with basic auth. Configure the provider under Access > Single sign-on.": "Stuur bezoekers eerst naar de identiteitsprovider. Eén aanmelding per dienst: niet samen met basic auth. Stel de provider in onder Toegang > Single sign-on.",
-"Show advanced options": "Geavanceerde opties tonen",
 "and": "en",
 "bouncer not installed -- fetched at the next Apply once CrowdSec is on, or now:": "bouncer niet geïnstalleerd -- wordt bij de volgende Toepassen opgehaald zodra CrowdSec aan staat, of nu:",
 "or": "of",

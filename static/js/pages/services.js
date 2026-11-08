@@ -106,16 +106,16 @@ export const WIZ_SECTIONS=[
      "of these headers a client sends is stripped on every service, so the value is always this "+
      "proxy's word. Only safe while the app is reachable through the proxy alone."},
  ]},
- /* Last, and folded away: what a service picks for itself from the Advanced
-    pages. The pages that stand for every service apply without being picked;
-    rules picked here are acted on inside the service's pool, so they reach
-    this service alone. Unticking this section changes nothing -- it only
-    hides the two pickers again. */
- {title:"Advanced",toggle:"advanced_enabled",fields:[
-  {k:"advanced_enabled",l:"Show advanced options",t:"bool",
-   h:"Error pages and rules for this service alone, picked from what is defined under Advanced \u00b7 HAProxy."},
+ /* Last: what a service picks for itself from the Advanced pages. The pages
+    that stand for every service apply without being picked; HTTP only, as
+    the answer is a page. Rules picked here are acted on inside the service's
+    pool, so they reach this service alone; routing rules belong on the
+    listener, where the rule wizard puts them, and are not offered. */
+ {title:"Error pages",http:true,fields:[
   {k:"error_pages",l:"Error pages",t:"refmulti",ref:"haproxy/errorpages",describe:describePage,
    h:"Pages for this service alone, over the ones that stand for every service. HTTP services only."},
+ ]},
+ {title:"Rules",fields:[
   {k:"rules",l:"Rules",t:"refmulti",ref:"haproxy/rules",filter:r=>r.type!=="use_backend",describe:describeRule,
    h:"Rules for this service alone: deny, headers, redirects, raw lines, with their conditions. Routing rules belong on the listener and are not offered."},
  ]},
@@ -123,7 +123,7 @@ export const WIZ_SECTIONS=[
 /* every field, in the order it is shown -- what the form reads and sends */
 export const WIZ_FIELDS=WIZ_SECTIONS.flatMap(sec=>sec.fields);
 /* the checkboxes that only stand for a section being on or off */
-const SECTION_ONLY=["health_enabled","allow_enabled","rate_enabled","advanced_enabled"];
+const SECTION_ONLY=["health_enabled","allow_enabled","rate_enabled"];
 /* which of the health_* rows make sense for each check kind */
 export const HEALTH_SHOWS={none:[],tcp:["health_interval"],ssl:["health_interval"],
   http:["health_interval","health_uri","health_status","health_method","health_version","health_host"],
@@ -137,7 +137,9 @@ export const NOTIFY_MODE_LABEL={servers:"a server is lost",
 
 /* Tell the user which certificate a host will end up using, before they commit. */
 export async function updateCertNote(note){
-  const raw=(fieldEl("url")||{}).value||"";
+  /* the first URL: the note is about the name a certificate is asked for,
+     and the others are alternatives on the same service */
+  const raw=((fieldEl("url")||{}).value||"").split("\n").map(s=>s.trim()).filter(Boolean)[0]||"";
   const mode=(fieldEl("cert_mode")||{}).value||"auto";
   let host="";
   try{host=new URL(raw.includes("://")?raw:"https://"+raw).hostname;}catch(e){}
@@ -181,8 +183,6 @@ export function openWizard(prefill){
     if(prefill.allow_enabled===undefined)prefill.allow_enabled=!!String(prefill.allow_src||"").trim()||!!(prefill.allow_lists||[]).length;
     if(prefill.rate_enabled===undefined)
       prefill.rate_enabled=prefill.rate_limit!==undefined&&prefill.rate_limit!==null&&String(prefill.rate_limit).trim()!=="";
-    if(prefill.advanced_enabled===undefined)
-      prefill.advanced_enabled=!!((prefill.error_pages||[]).length||(prefill.rules||[]).length);
   }
   const wrap=document.createElement("div");
 
@@ -235,6 +235,11 @@ export function openWizard(prefill){
 
   const frm=document.createElement("div");frm.className="frm";
   const rows={},heads={};
+  /* which certificate the first name will get: said under the Certificate
+     section, where the choice is made */
+  const note=document.createElement("div");note.className="hint";note.style.margin="2px 0 0";
+  const noteRow=document.createElement("div");noteRow.appendChild(note);
+  const noteCells=[document.createElement("div"),noteRow];
   WIZ_SECTIONS.forEach(sec=>{
     const h=document.createElement("div");h.className="fsec";h.textContent=t(sec.title);
     heads[sec.title]=h;frm.appendChild(h);
@@ -243,6 +248,7 @@ export function openWizard(prefill){
       rows[f.k]=cells;
       cells.forEach(el=>frm.appendChild(el));
     });
+    if(sec.title==="Certificate"){rows.cert_note=noteCells;noteCells.forEach(el=>frm.appendChild(el));}
   });
   wrap.appendChild(frm);
   // friendlier labels than the raw option values
@@ -267,40 +273,27 @@ export function openWizard(prefill){
       heads[sec.title].style.display=shown?"":"none";
       const open=shown&&(!sec.toggle||on(sec.toggle));
       sec.fields.forEach(f=>setRow(f.k,f.k===sec.toggle?shown:open));
+      if(sec.title==="Certificate")setRow("cert_note",shown);
     });
     // and within an open section, the rows that follow from a choice in it
     const show=on("health_enabled")?(HEALTH_SHOWS[chosen(hsel)||"none"]||[]):[];
     ["health_interval","health_uri","health_status","health_user","health_method",
      "health_version","health_host"].forEach(k=>setRow(k,show.includes(k)));
     ["stick_type","stick_size","stick_expire"].forEach(k=>setRow(k,val("persistence")==="source"));
-    /* within Advanced: pages are HTTP's, and so are the rules that act on HTTP */
-    if(on("advanced_enabled")){
-      setRow("error_pages",!isTcp);
-      const box=fieldEl("rules");
-      if(box)[...box.querySelectorAll("label")].forEach(l=>{
-        const http=/^(http_|redirect_)/.test(l.dataset.kind||"");
-        l.style.display=(isTcp&&http)?"none":"";
-        if(isTcp&&http){const c=l.querySelector("input");if(c){c.checked=false;c.removeAttribute("checked");}}
-      });
-    }
-    /* within Advanced: pages are HTTP's, and so are the rules that act on HTTP */
-    if(on("advanced_enabled")){
-      setRow("error_pages",!isTcp);
-      const box=fieldEl("rules");
-      if(box)[...box.querySelectorAll("label")].forEach(l=>{
-        const http=/^(http_|redirect_)/.test(l.dataset.kind||"");
-        l.style.display=(isTcp&&http)?"none":"";
-        if(isTcp&&http){const c=l.querySelector("input");if(c){c.checked=false;c.removeAttribute("checked");}}
-      });
-    }
+    /* a raw TCP port has no HTTP for a rule to act on */
+    const box=fieldEl("rules");
+    if(box)[...box.querySelectorAll("label")].forEach(l=>{
+      const http=/^(http_|redirect_)/.test(l.dataset.kind||"");
+      l.style.display=(isTcp&&http)?"none":"";
+      if(isTcp&&http){const c=l.querySelector("input");if(c){c.checked=false;c.removeAttribute("checked");}}
+    });
+
+
     /* A raw TCP port cannot answer an HTTP check -- unless the check is aimed at
        a different port, which is exactly how Patroni is fronted: traffic to
        PostgreSQL on 5432, the check to its REST API on 8008. */
     if(isTcp&&!val("check_port").trim()&&chosen(hsel)==="http")selectOption(hsel,"tcp");
   };
-  const note=document.createElement("div");note.className="hint";note.style.margin="2px 0 0";
-  const noteRow=document.createElement("div");noteRow.appendChild(note);
-  frm.appendChild(document.createElement("div"));frm.appendChild(noteRow);
   const out=document.createElement("div");out.style.marginTop="16px";wrap.appendChild(out);
   const err=document.createElement("div");err.className="err";
 

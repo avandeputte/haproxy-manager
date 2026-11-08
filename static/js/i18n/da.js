@@ -374,9 +374,7 @@ export default {
 
 /* ---- 2.0 review: the menu, the wizards as editors, the pickers ---- */
 "ACCESS": "ADGANG",
-"Advanced": "Avanceret",
 "Create one": "Opret en",
-"Error pages and rules for this service alone, picked from what is defined under Advanced · HAProxy.": "Fejlsider og regler kun for denne tjeneste, valgt blandt det, der er defineret under Avanceret · HAProxy.",
 "HAProxy asks the bouncer about every HTTP request, on every node. Test the connection first; takes effect at the next Apply.": "HAProxy spørger bounceren om hver HTTP-forespørgsel, på hver node. Test forbindelsen først; træder i kraft ved næste Anvend.",
 "Named lists from Access > Address Lists, counted with the networks above. Edit a list once and every service that names it follows.": "Navngivne lister fra Adgang > Adresselister, talt med sammen med netværkene ovenfor. Ret en liste én gang, og hver tjeneste, der nævner den, følger med.",
 "Pages for this service alone, over the ones that stand for every service. HTTP services only.": "Sider kun for denne tjeneste, over dem, der gælder for hver tjeneste. Kun HTTP-tjenester.",
@@ -385,7 +383,6 @@ export default {
 "Saved. Apply to make it so; the other nodes follow.": "Gemt. Anvend for at gøre det gældende; de andre noder følger.",
 "Send visitors to the identity provider before letting them through. HAProxy verifies the session and this service's allow-list on every request. Configure the provider under Access > Single sign-on.": "Send besøgende til identitetsudbyderen først. HAProxy kontrollerer sessionen og denne tjenestes tilladelsesliste ved hver forespørgsel. Opsæt udbyderen under Adgang > Single sign-on.",
 "Send visitors to the identity provider first. One sign-in per service: not together with basic auth. Configure the provider under Access > Single sign-on.": "Send besøgende til identitetsudbyderen først. Ét login pr. tjeneste: ikke sammen med basic auth. Opsæt udbyderen under Adgang > Single sign-on.",
-"Show advanced options": "Vis avancerede indstillinger",
 "and": "og",
 "bouncer not installed -- fetched at the next Apply once CrowdSec is on, or now:": "bouncer ikke installeret -- hentes ved næste Anvend, når CrowdSec er slået til, eller nu:",
 "or": "eller",

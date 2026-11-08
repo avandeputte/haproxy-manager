@@ -374,9 +374,7 @@ export default {
 
 /* ---- 2.0 review: the menu, the wizards as editors, the pickers ---- */
 "ACCESS": "PÄÄSY",
-"Advanced": "Lisäasetukset",
 "Create one": "Luo yksi",
-"Error pages and rules for this service alone, picked from what is defined under Advanced · HAProxy.": "Virhesivut ja säännöt vain tälle palvelulle, valittuina siitä, mitä on määritelty kohdassa Lisäasetukset · HAProxy.",
 "HAProxy asks the bouncer about every HTTP request, on every node. Test the connection first; takes effect at the next Apply.": "HAProxy kysyy bouncerilta jokaisesta HTTP-pyynnöstä, jokaisessa solmussa. Testaa yhteys ensin; tulee voimaan seuraavassa Ota käyttöön -vaiheessa.",
 "Named lists from Access > Address Lists, counted with the networks above. Edit a list once and every service that names it follows.": "Nimetyt luettelot kohdasta Pääsy > Osoiteluettelot, jotka lasketaan yhdessä yllä olevien verkkojen kanssa. Muokkaa luetteloa kerran, niin jokainen sen nimeävä palvelu seuraa perässä.",
 "Pages for this service alone, over the ones that stand for every service. HTTP services only.": "Sivut vain tälle palvelulle, ennen jokaiselle palvelulle päteviä. Vain HTTP-palvelut.",
@@ -385,7 +383,6 @@ export default {
 "Saved. Apply to make it so; the other nodes follow.": "Tallennettu. Ota käyttöön tekee sen; muut solmut seuraavat.",
 "Send visitors to the identity provider before letting them through. HAProxy verifies the session and this service's allow-list on every request. Configure the provider under Access > Single sign-on.": "Lähetä kävijät ensin identiteetintarjoajalle. HAProxy tarkistaa istunnon ja tämän palvelun sallittujen luettelon jokaisessa pyynnössä. Määritä tarjoaja kohdassa Pääsy > Kertakirjautuminen.",
 "Send visitors to the identity provider first. One sign-in per service: not together with basic auth. Configure the provider under Access > Single sign-on.": "Lähetä kävijät ensin identiteetintarjoajalle. Yksi kirjautuminen palvelua kohden: ei yhdessä basic auth -tunnistuksen kanssa. Määritä tarjoaja kohdassa Pääsy > Kertakirjautuminen.",
-"Show advanced options": "Näytä lisäasetukset",
 "and": "ja",
 "bouncer not installed -- fetched at the next Apply once CrowdSec is on, or now:": "bounceria ei ole asennettu -- haetaan seuraavassa Ota käyttöön -vaiheessa, kun CrowdSec on päällä, tai nyt:",
 "or": "tai",
