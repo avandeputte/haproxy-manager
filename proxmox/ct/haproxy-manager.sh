@@ -57,6 +57,8 @@ tags = [r["tag_name"] for r in json.load(sys.stdin) if not r.get("draft")]
 print(max(tags, key=key) if tags else "")' 2>/dev/null)
     if [[ -n "$TAG" ]]; then
       WANT="$TAG"
+      # The helpers drop pre-releases, pinned or not, unless told otherwise.
+      export GH_INCLUDE_PRERELEASE=1
       msg_info "Betas are offered on this node: looking at ${TAG}"
     fi
   fi
