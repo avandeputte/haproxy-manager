@@ -293,11 +293,31 @@ do_uninstall() {
 # steps
 # --------------------------------------------------------------------------
 
+# The one line CrowdSec's repository is used through. Its Debian 13 suite is
+# empty, and the suite a distribution names for itself may be too; the
+# bookworm build is a static Go binary with one trivial dependency and
+# installs on anything newer. Always this line, never the node's own suite:
+# a 2.0.1 node that had been given "trixie" could not run apt-get update at
+# all, and so could not update the app either.
+CROWDSEC_LIST=/etc/apt/sources.list.d/crowdsec.list
+CROWDSEC_LINE="deb [signed-by=/etc/apt/keyrings/crowdsec.gpg] https://packagecloud.io/crowdsec/crowdsec/debian/ bookworm main"
+
+heal_crowdsec_source() {
+    [ -f "$CROWDSEC_LIST" ] || return 0
+    if ! grep -qxF "$CROWDSEC_LINE" "$CROWDSEC_LIST"; then
+        log "Pointing CrowdSec's repository entry at the suite that has the package"
+        printf '%s\n' "$CROWDSEC_LINE" > "$CROWDSEC_LIST"
+    fi
+}
+
 install_packages() {
     log "Installing packages (haproxy, keepalived, python3-flask, python3-waitress, ...)"
     export DEBIAN_FRONTEND=noninteractive
     export NEEDRESTART_MODE=a          # keep Ubuntu's needrestart from prompting
-    apt-get update -q
+    heal_crowdsec_source
+    # A source that cannot be read must not stop this update: apt keeps the
+    # lists it has, and the app's own packages are from the distribution.
+    apt-get update -q || warn "apt-get update could not read every source; continuing with the lists it has"
     apt-get install -y --no-install-recommends \
         python3 python3-flask python3-requests python3-waitress \
         haproxy keepalived \
@@ -306,10 +326,9 @@ install_packages() {
 
 # CrowdSec's SPOA bouncer, so switching CrowdSec on in the UI is a setting
 # rather than a package install on a node already serving traffic. From
-# CrowdSec's own repository: the distribution's suite when it has the package,
-# the bookworm build otherwise -- a static Go binary with one trivial
-# dependency. Installed and left stopped; the app runs it when CrowdSec is
-# on. Nothing here is fatal: a node without it still serves everything.
+# CrowdSec's own repository, through the one line above. Installed and left
+# stopped; the app runs it when CrowdSec is on. Nothing here is fatal: a node
+# without it still serves everything.
 install_crowdsec() {
     log "Adding CrowdSec's repository and its SPOA bouncer (used only when CrowdSec is switched on)"
     export DEBIAN_FRONTEND=noninteractive
@@ -329,14 +348,8 @@ install_crowdsec() {
         warn "CrowdSec's repository key does not match the expected fingerprint; the bouncer was not installed"
         return 0
     fi
-    . /etc/os-release
-    _cs_line() { echo "deb [signed-by=/etc/apt/keyrings/crowdsec.gpg] https://packagecloud.io/crowdsec/crowdsec/$1/ $2 main"; }
-    _cs_line "${ID:-debian}" "${VERSION_CODENAME:-bookworm}" > /etc/apt/sources.list.d/crowdsec.list
+    printf '%s\n' "$CROWDSEC_LINE" > "$CROWDSEC_LIST"
     apt-get update -q >/dev/null 2>&1 || true
-    if [ -z "$(apt-cache policy crowdsec-haproxy-spoa-bouncer 2>/dev/null | grep -i candidate | grep -v none)" ]; then
-        _cs_line debian bookworm > /etc/apt/sources.list.d/crowdsec.list
-        apt-get update -q >/dev/null 2>&1 || true
-    fi
     if apt-get install -y --no-install-recommends crowdsec-haproxy-spoa-bouncer >/dev/null 2>&1; then
         systemctl disable --now crowdsec-spoa-bouncer >/dev/null 2>&1 || true
         log "CrowdSec SPOA bouncer installed (stopped until CrowdSec is switched on)"
