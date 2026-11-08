@@ -380,7 +380,6 @@ export default {
 "HAProxy asks the bouncer about every HTTP request, on every node. Test the connection first; takes effect at the next Apply.": "HAProxy vraagt de bouncer naar elk HTTP-verzoek, op elke node. Test eerst de verbinding; geldt vanaf de volgende Toepassen.",
 "Named lists from Access > Address Lists, counted with the networks above. Edit a list once and every service that names it follows.": "Benoemde lijsten uit Toegang > Adreslijsten, die meetellen met de netwerken hierboven. Wijzig een lijst eenmaal en elke dienst die haar noemt volgt.",
 "Pages for this service alone, over the ones that stand for every service. HTTP services only.": "Pagina's alleen voor deze dienst, boven die voor elke dienst gelden. Alleen HTTP-diensten.",
-"Raw fields": "Ruwe velden",
 "Remove this condition": "Deze voorwaarde verwijderen",
 "Rules for this service alone: deny, headers, redirects, raw lines, with their conditions. Routing rules belong on the listener and are not offered.": "Regels alleen voor deze dienst: weigeren, headers, omleidingen, ruwe regels, met hun voorwaarden. Doorstuurregels horen op de listener en worden niet aangeboden.",
 "Saved. Apply to make it so; the other nodes follow.": "Opgeslagen. Toepassen maakt het waar; de andere nodes volgen.",

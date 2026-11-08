@@ -380,7 +380,6 @@ export default {
 "HAProxy asks the bouncer about every HTTP request, on every node. Test the connection first; takes effect at the next Apply.": "HAProxy consulta al bouncer por cada petición HTTP, en cada nodo. Pruebe antes la conexión; tiene efecto al siguiente Aplicar.",
 "Named lists from Access > Address Lists, counted with the networks above. Edit a list once and every service that names it follows.": "Listas con nombre de Acceso > Listas de direcciones, contadas con las redes de arriba. Edite una lista una vez y cada servicio que la nombra la sigue.",
 "Pages for this service alone, over the ones that stand for every service. HTTP services only.": "Páginas solo para este servicio, por encima de las que valen para todos los servicios. Solo servicios HTTP.",
-"Raw fields": "Campos en bruto",
 "Remove this condition": "Quitar esta condición",
 "Rules for this service alone: deny, headers, redirects, raw lines, with their conditions. Routing rules belong on the listener and are not offered.": "Reglas solo para este servicio: denegar, cabeceras, redirecciones, líneas en bruto, con sus condiciones. Las reglas de enrutado van en el escucha y no se ofrecen.",
 "Saved. Apply to make it so; the other nodes follow.": "Guardado. Aplique para hacerlo efectivo; los demás nodos siguen.",

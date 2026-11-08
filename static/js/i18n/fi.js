@@ -380,7 +380,6 @@ export default {
 "HAProxy asks the bouncer about every HTTP request, on every node. Test the connection first; takes effect at the next Apply.": "HAProxy kysyy bouncerilta jokaisesta HTTP-pyynnöstä, jokaisessa solmussa. Testaa yhteys ensin; tulee voimaan seuraavassa Ota käyttöön -vaiheessa.",
 "Named lists from Access > Address Lists, counted with the networks above. Edit a list once and every service that names it follows.": "Nimetyt luettelot kohdasta Pääsy > Osoiteluettelot, jotka lasketaan yhdessä yllä olevien verkkojen kanssa. Muokkaa luetteloa kerran, niin jokainen sen nimeävä palvelu seuraa perässä.",
 "Pages for this service alone, over the ones that stand for every service. HTTP services only.": "Sivut vain tälle palvelulle, ennen jokaiselle palvelulle päteviä. Vain HTTP-palvelut.",
-"Raw fields": "Raa'at kentät",
 "Remove this condition": "Poista tämä ehto",
 "Rules for this service alone: deny, headers, redirects, raw lines, with their conditions. Routing rules belong on the listener and are not offered.": "Säännöt vain tälle palvelulle: hylkäykset, otsakkeet, ohjaukset, raa'at rivit ehtoineen. Reitityssäännöt kuuluvat kuuntelijaan eikä niitä tarjota.",
 "Saved. Apply to make it so; the other nodes follow.": "Tallennettu. Ota käyttöön tekee sen; muut solmut seuraavat.",

@@ -364,10 +364,8 @@ export async function renderEntity(key,into){
       hd.appendChild(document.createTextNode(" "));
       hd.appendChild(btn(t(def.add),"sm",()=>openEditor(key)));
     }else if(def.wizard){
-      /* the wizard is the editor; the raw fields stay a click away */
+      /* the wizard is the editor: it asks for everything the fields hold */
       hd.appendChild(btn(t(def.add),"pri sm",()=>def.wizard()));
-      hd.appendChild(document.createTextNode(" "));
-      hd.appendChild(btn(t("Raw fields"),"sm",()=>openEditor(key)));
     }else{
       hd.appendChild(btn(t(def.add),"pri sm",()=>openEditor(key)));
     }
@@ -410,10 +408,6 @@ export async function renderEntity(key,into){
         act.appendChild(b);act.appendChild(document.createTextNode(" "));
       });
       act.appendChild(btn(state.readOnly?t("View"):t("Edit"),"sm",()=>(def.wizard&&!state.readOnly?def.wizard(row):openEditor(key,row))));
-      if(def.wizard&&!state.readOnly){
-        act.appendChild(document.createTextNode(" "));
-        act.appendChild(btn(t("Raw fields"),"sm",()=>openEditor(key,row)));
-      }
       if(!state.readOnly){
       act.appendChild(document.createTextNode(" "));
       act.appendChild(btn(t("Delete"),"sm dngr",async()=>{

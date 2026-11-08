@@ -380,7 +380,6 @@ export default {
 "HAProxy asks the bouncer about every HTTP request, on every node. Test the connection first; takes effect at the next Apply.": "HAProxy frågar bouncern om varje HTTP-begäran, på varje nod. Testa anslutningen först; träder i kraft vid nästa Tillämpa.",
 "Named lists from Access > Address Lists, counted with the networks above. Edit a list once and every service that names it follows.": "Namngivna listor från Åtkomst > Adresslistor, räknade tillsammans med nätverken ovan. Ändra en lista en gång, så följer varje tjänst som nämner den efter.",
 "Pages for this service alone, over the ones that stand for every service. HTTP services only.": "Sidor bara för den här tjänsten, före dem som gäller för varje tjänst. Bara HTTP-tjänster.",
-"Raw fields": "Råa fält",
 "Remove this condition": "Ta bort det här villkoret",
 "Rules for this service alone: deny, headers, redirects, raw lines, with their conditions. Routing rules belong on the listener and are not offered.": "Regler bara för den här tjänsten: nekanden, huvuden, omdirigeringar, råa rader, med sina villkor. Vidarebefordringsregler hör hemma på lyssnaren och erbjuds inte.",
 "Saved. Apply to make it so; the other nodes follow.": "Sparat. Tillämpa för att göra det gällande; de andra noderna följer.",
