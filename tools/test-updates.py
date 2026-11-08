@@ -118,6 +118,33 @@ v = client.get("/api/version", headers=H).get_json()
 ok(v["latest"] == "" and v["available"] is False and v["latest_ref"] == "main",
    "switching betas off withdraws the offer before any new check")
 
+# ---- a package install takes the release's package ------------------------------------
+import pathlib as _pl
+_mark = _pl.Path(os.environ["HAM_DATA_DIR"]) / "dpkg-list"
+updates.DPKG_LIST, updates.INSTALLER_UNIT = _mark, _pl.Path(os.environ["HAM_DATA_DIR"]) / "no-unit"
+ok(updates.install_kind() == "", "neither mark: not an installer-managed node")
+_mark.write_text("")
+ok(updates.install_kind() == "deb", "dpkg's file list says a package install")
+ok(updates.package_asset("2.0.0", "deb") == "haproxy-manager_2.0.0_all.deb"
+   and updates.package_asset("2.0.0-beta.8", "deb") == "haproxy-manager_2.0.0.beta.8_all.deb"
+   and updates.package_asset("2.0.0-beta.8", "rpm") == "haproxy-manager-2.0.0.beta.8-1.noarch.rpm",
+   "the release asset is named as GitHub shows it: a beta's ~ as a dot")
+sh = updates._package_shell("2.0.0-beta.8", "deb")
+ok("releases/download/v2.0.0-beta.8/haproxy-manager_2.0.0.beta.8_all.deb" in sh and "apt-get" in sh
+   and "DPkg::Lock::Timeout" in sh and "release may not be cut yet" in sh,
+   "a deb node fetches the release's package and installs it with apt, and says so when there is none")
+ok("dnf install" in updates._package_shell("2.0.0", "rpm"), "an rpm node with dnf")
+client.put("/api/local", headers=H, json={"updates": {"beta": True}})
+client.post("/api/version/check", headers=H)
+c = load_config()
+ok(updates._package_version(None, c) == "1.95.0-beta.1" and updates._package_version("beta", c) == "1.95.0-beta.1",
+   "the version a package node installs is what the check found, for the ref on offer")
+ok(updates._package_version("main", c) == "1.94.2", "another ref: that ref's VERSION, read now")
+v = client.get("/api/version", headers=H).get_json()
+ok(v["install_kind"] == "deb", "and the page is told how the node was installed")
+client.put("/api/local", headers=H, json={"updates": {"beta": False}})
+_mark.unlink()
+
 # ---- the update names its branch ----------------------------------------
 sh = updates._update_shell("https://x/install.sh", "beta")
 ok("--update --yes --ref beta" in sh, "the updater is told the branch")

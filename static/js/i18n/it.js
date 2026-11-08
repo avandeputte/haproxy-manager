@@ -389,6 +389,7 @@ export default {
 "saved: off": "salvato: off",
 "saved: on": "salvato: on",
 "when {conditions}": "quando {conditions}",
+"This node was installed from a package, so an update installs the release's package and keeps the package manager in step. A version pushed ahead of its release cannot be installed here until the release is cut.": "Questo nodo è stato installato da un pacchetto, quindi un aggiornamento installa il pacchetto della release e tiene il gestore dei pacchetti allineato. Una versione pubblicata prima della sua release non può essere installata qui finché la release non esiste.",
 "Load from file": "Carica da file",
 "Reads a local .html file into the field above. Nothing is uploaded: the page is saved with the configuration.": "Legge un file .html locale nel campo qui sopra. Nulla viene caricato sul server: la pagina viene salvata con la configurazione.",
 "Value": "Valore",

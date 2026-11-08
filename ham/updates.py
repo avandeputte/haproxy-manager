@@ -157,13 +157,71 @@ def check_for_update():
     return result
 
 
+# Where each kind of install leaves its mark. Module constants, so a test rig
+# can point them at files of its own.
+DPKG_LIST = Path("/var/lib/dpkg/info/haproxy-manager.list")
+INSTALLER_UNIT = Path("/etc/systemd/system/haproxy-manager.service")
+
+
+def install_kind():
+    """How this node was installed: "deb" or "rpm" (a package, the Proxmox
+    container among them), "installer" (install.sh), or "" for neither."""
+    if DPKG_LIST.exists():
+        return "deb"
+    if shutil.which("rpm") and run(["rpm", "-q", "haproxy-manager"], timeout=15)[0] == 0:
+        return "rpm"
+    if INSTALLER_UNIT.exists():
+        return "installer"
+    return ""
+
+
 def update_supported():
-    """One-click update only makes sense for the systemd install."""
+    """One-click update makes sense under systemd: the installer's node runs
+    install.sh again, a package's node installs the release's package."""
     if not Path("/run/systemd/system").exists():
         return False, "this node runs in a container -- pull a new image instead"
-    if not Path("/etc/systemd/system/haproxy-manager.service").exists():
+    if not install_kind():
         return False, "no haproxy-manager.service was found; this is not an installer-managed node"
     return True, ""
+
+
+def package_asset(version, kind):
+    """The release asset for this version: GitHub shows the ~ of 2.0.0~beta.8
+    as a dot, so a beta's file is named with one."""
+    v = version.replace("-", ".")
+    return ("haproxy-manager_%s_all.deb" % v) if kind == "deb" else ("haproxy-manager-%s-1.noarch.rpm" % v)
+
+
+def package_url(version, kind):
+    return "https://github.com/%s/releases/download/v%s/%s" % (UPDATE_REPO, version, package_asset(version, kind))
+
+
+def _package_shell(version, kind):
+    """Fetch the release's package and install it the way the node was
+    installed, so the package database stays in step with the files.
+    A version with no release yet -- a branch ahead of its release -- is
+    said so, rather than half-installed."""
+    url = package_url(version, kind)
+    tmp = shlex.quote("/tmp/" + package_asset(version, kind))
+    if kind == "deb":
+        install = ("DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 "
+                   "install -y %s" % tmp)
+    else:
+        install = ("if command -v dnf >/dev/null; then dnf install -y %s; else yum install -y %s; fi"
+                   % (tmp, tmp))
+    return ("{ echo fetching %s; curl -fsSL --retry 3 -o %s %s || { echo 'no package for %s is "
+            "published at that address -- a package install takes releases, and the release may "
+            "not be cut yet'; exit 1; }; %s; rm -f %s; } >>%s 2>&1"
+            % (shlex.quote(url), tmp, shlex.quote(url), shlex.quote(version), install, tmp, UPDATE_LOG))
+
+
+def _package_version(asked, cfg):
+    """The version a package node installs for a ref: what the last check
+    found on that ref, else that ref's VERSION file, read now."""
+    latest, ref = _offer(cfg)
+    if latest and (not asked or asked == ref):
+        return latest
+    return _version_at(asked or UPDATE_REF)
 
 
 @app.get("/api/version")
@@ -186,6 +244,7 @@ def api_version():
         "repo": UPDATE_REPO, "ref": UPDATE_REF,
         "beta": wants_beta(cfg), "beta_ref": BETA_REF,
         "can_update": ok, "cannot_update_reason": why,
+        "install_kind": install_kind(),
         "updating": _update_running(),
         # How many other nodes there are, so the page can offer to update them
         # in the same go rather than making someone visit each one.
@@ -291,7 +350,16 @@ def api_update():
     # The other nodes first, while this one is still running to ask them.
     peers = update_peers(cfg, ref) if body.get("peers") else None
 
+    kind = install_kind()
     url = INSTALL_URL
+    version = ""
+    if kind in ("deb", "rpm"):
+        try:
+            version = _package_version(body.get("ref"), cfg)
+        except Exception as e:
+            return jsonify({"ok": False, "error": "could not read the version to install: %s" % e,
+                            "nodes": peers}), 502
+        url = package_url(version, kind)
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     try:                                    # keep the log from growing forever
         if UPDATE_LOG.stat().st_size > 256 * 1024:
@@ -305,7 +373,7 @@ def api_update():
     # systemd-run puts the updater in its own unit. Running it as a child of
     # this service would kill it halfway: restarting haproxy-manager.service
     # takes down everything in that service's cgroup, the updater included.
-    shell = _update_shell(url, ref)
+    shell = _package_shell(version, kind) if version else _update_shell(url, ref)
     if shutil.which("systemd-run"):
         cmd = ["systemd-run", "--unit=" + UPDATE_UNIT, "--collect", "--quiet",
                "/bin/sh", "-c", shell]

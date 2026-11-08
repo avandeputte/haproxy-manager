@@ -36,9 +36,10 @@ pct enter <CTID>
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/proxmox/ct/haproxy-manager.sh)"
 ```
 
-Use this rather than the app's own Updates page on a container built this way:
-both install the same files, but this one keeps the package database and the
-version check in step.
+The app's own **Settings › Updates** page works here too: on a node installed
+from a package it installs the release's `.deb` with apt, so the package
+database stays in step. Either way takes releases; a version pushed ahead of
+its release waits for the release.
 
 ## Clustering
 

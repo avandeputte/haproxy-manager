@@ -389,6 +389,7 @@ export default {
 "saved: off": "opgeslagen: uit",
 "saved: on": "opgeslagen: aan",
 "when {conditions}": "wanneer {conditions}",
+"This node was installed from a package, so an update installs the release's package and keeps the package manager in step. A version pushed ahead of its release cannot be installed here until the release is cut.": "Deze node is uit een pakket geïnstalleerd, dus een update installeert het pakket van de release en houdt de pakketbeheerder bij. Een versie die vóór haar release is gepusht kan hier pas worden geïnstalleerd zodra de release is gemaakt.",
 "Load from file": "Uit bestand laden",
 "Reads a local .html file into the field above. Nothing is uploaded: the page is saved with the configuration.": "Leest een lokaal .html-bestand in het veld hierboven. Er wordt niets geüpload: de pagina wordt met de configuratie opgeslagen.",
 "Value": "Waarde",
