@@ -389,6 +389,7 @@ export default {
 "saved: off": "sparat: av",
 "saved: on": "sparat: på",
 "when {conditions}": "när {conditions}",
+"This node was installed from a package, so an update installs the release's package and keeps the package manager in step. A version pushed ahead of its release cannot be installed here until the release is cut.": "Den här noden installerades från ett paket, så en uppdatering installerar utgåvans paket och håller pakethanteraren i takt. En version som skickats ut före sin utgåva kan inte installeras här förrän utgåvan är gjord.",
 "Load from file": "Läs in från fil",
 "Reads a local .html file into the field above. Nothing is uploaded: the page is saved with the configuration.": "Läser in en lokal .html-fil i fältet ovan. Inget laddas upp: sidan sparas med konfigurationen.",
 "Value": "Värde",

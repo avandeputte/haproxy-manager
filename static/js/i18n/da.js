@@ -389,6 +389,7 @@ export default {
 "saved: off": "gemt: fra",
 "saved: on": "gemt: til",
 "when {conditions}": "når {conditions}",
+"This node was installed from a package, so an update installs the release's package and keeps the package manager in step. A version pushed ahead of its release cannot be installed here until the release is cut.": "Denne node blev installeret fra en pakke, så en opdatering installerer udgivelsens pakke og holder pakkehåndteringen ajour. En version, der er skubbet ud før sin udgivelse, kan ikke installeres her, før udgivelsen er lavet.",
 "Load from file": "Indlæs fra fil",
 "Reads a local .html file into the field above. Nothing is uploaded: the page is saved with the configuration.": "Læser en lokal .html-fil ind i feltet ovenfor. Intet uploades: siden gemmes sammen med konfigurationen.",
 "Value": "Værdi",

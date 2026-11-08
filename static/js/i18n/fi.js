@@ -389,6 +389,7 @@ export default {
 "saved: off": "tallennettu: pois",
 "saved: on": "tallennettu: päällä",
 "when {conditions}": "kun {conditions}",
+"This node was installed from a package, so an update installs the release's package and keeps the package manager in step. A version pushed ahead of its release cannot be installed here until the release is cut.": "Tämä solmu asennettiin paketista, joten päivitys asentaa julkaisun paketin ja pitää paketinhallinnan ajan tasalla. Julkaisuaan ennen työnnettyä versiota ei voi asentaa tähän ennen kuin julkaisu on tehty.",
 "Load from file": "Lataa tiedostosta",
 "Reads a local .html file into the field above. Nothing is uploaded: the page is saved with the configuration.": "Lukee paikallisen .html-tiedoston yllä olevaan kenttään. Mitään ei ladata palvelimelle: sivu tallennetaan asetusten mukana.",
 "Value": "Arvo",

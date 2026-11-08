@@ -102,6 +102,11 @@ export async function renderUpdates(){
     const w=document.createElement("div");w.className="hint";w.style.marginTop="10px";
     w.textContent=t("One-click update is not available here: {reason}",{reason:v.cannot_update_reason});
     row.appendChild(w);
+  }else if(v.install_kind==="deb"||v.install_kind==="rpm"){
+    /* a package node takes releases: there is no branch to install from */
+    const w=document.createElement("div");w.className="hint";w.style.marginTop="10px";
+    w.textContent=t("This node was installed from a package, so an update installs the release's package and keeps the package manager in step. A version pushed ahead of its release cannot be installed here until the release is cut.");
+    row.appendChild(w);
   }
   bd.appendChild(row);bd.appendChild(msg);card.appendChild(bd);c.appendChild(card);
 
