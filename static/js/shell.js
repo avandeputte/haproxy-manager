@@ -4,7 +4,7 @@
  * is what keeps the graph acyclic: pages import the shell for route() and
  * refreshStatus(), and only main.js knows what all the pages are.
  */
-import { $, api, btn, esc, showText } from "./core.js";
+import { $, api, btn, esc, showText, trimHaproxy } from "./core.js";
 import { t } from "./i18n.js";
 import { state } from "./state.js";
 
@@ -32,16 +32,18 @@ export const NAV=[
  ["haproxy/frontends","Public Services"],
  ["haproxy/backends","Backend Pools"],
  ["haproxy/servers","Real Servers"],
- ["haproxy/conditions","Conditions"],
  ["haproxy/rules","Rules"],
+ ["haproxy/errorpages","Error Pages"],
  ["haproxy/healthchecks","Health Monitors"],
  ["s:haproxy-settings","Settings"],
- /* Who a published service may ask to sign in -- not accounts for this UI,
-    which is why they are their own group rather than part of Settings. */
- ["grp","SIGN-IN","collapse"],
+ /* Who gets in: the people a service may ask to sign in (not accounts for
+    this UI), the networks it lets through or keeps out, and CrowdSec. */
+ ["grp","ACCESS","collapse"],
  ["access/users","Users"],
  ["access/groups","Groups"],
  ["p:sso","Single sign-on"],
+ ["haproxy/addresslists","Address Lists"],
+ ["p:crowdsec","CrowdSec"],
  /* Settings last: everything here is something you set once and revisit
     rarely, unlike the pages above that you watch. */
  ["grp","SETTINGS","collapse"],
@@ -146,7 +148,9 @@ async function draw(){
       if(body&&body.hidden)toggleGroup(body.previousElementSibling,true);
     }
   });
-  const entry=NAV.find(x=>x[0]===key)||NAV[0];
+  /* a page reached by link rather than from the menu -- Conditions, from
+     Rules -- is titled by what it is, not as the Overview */
+  const entry=NAV.find(x=>x[0]===key)||(render.entities[key]?[key,render.entities[key].title]:NAV[0]);
   $("#pagetitle").textContent=t(entry[1]);
   try{
     if(key.startsWith("s:"))await render.settings(key.slice(2));
@@ -189,7 +193,7 @@ export async function doApply(){
     text+=(r.steps||[]).map(s=>"* "+s).join("\n")+
       "\n\n--- "+t("haproxy -c output")+" ---\n"+(r.haproxy_check||t("(none)"))+
       (r.keepalived_check?"\n\n--- "+t("keepalived -t output")+" ---\n"+r.keepalived_check:"");
-    showText(!r.ok?t("Apply failed"):warn.length?t("Applied with problems"):t("Configuration applied"),text);
+    showText(!r.ok?t("Apply failed"):warn.length?t("Applied with problems"):t("Configuration applied"),trimHaproxy(text));
   }catch(e){showText(t("Apply failed"),e.message);}
   b.disabled=false;b.textContent=t("Apply");
   refreshStatus();

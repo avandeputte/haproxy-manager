@@ -147,6 +147,9 @@ def api_wizard_publish():
                 auth=body.get("auth") if isinstance(body.get("auth"), dict) else None,
                 oauth_opts=body.get("oauth") if isinstance(body.get("oauth"), dict) else None,
                 allow_src=body.get("allow_src") if isinstance(body.get("allow_src"), str) else None,
+                allow_lists=body.get("allow_lists") if isinstance(body.get("allow_lists"), list) else None,
+                error_pages=body.get("error_pages") if isinstance(body.get("error_pages"), list) else None,
+                rules=body.get("rules") if isinstance(body.get("rules"), list) else None,
                 notify_mode=body.get("notify_mode") or None,
                 rate_limit=body.get("rate_limit") if "rate_limit" in body else None,
                 rate_window=body.get("rate_window") if "rate_window" in body else None,
@@ -166,6 +169,9 @@ def api_wizard_publish():
         except Exception as e:
             return jsonify({"ok": False, "error": "the resulting configuration is not renderable: %s" % e}), 400
         if dry_run:
+            # The verdict the other wizards show: would HAProxy load it.
+            ok, message = apply.check_rendered(draft)
+            summary["validation"] = {"ok": ok, "message": message}
             return jsonify(summary)
         save_config(draft)
 

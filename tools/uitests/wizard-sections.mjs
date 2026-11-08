@@ -70,8 +70,8 @@ const publish = async () => { sent = null; await findButton($("#dlgfoot"), "Publ
 // -- the shape ---------------------------------------------------------------
 openWizard();
 ok(headings().map(h => h.textContent).join("|") ===
-   "Service|Certificate|Health check|Balancing and timeouts|Allowed networks|Rate limiting|Sign-in|Single sign-on (OIDC)",
-   "the form is eight sections, in this order: " + headings().map(h => h.textContent).join(", "));
+   "Service|Certificate|Health check|Balancing and timeouts|Allowed networks|Rate limiting|Sign-in|Single sign-on (OIDC)|Error pages|Rules",
+   "the form is ten sections, in this order: " + headings().map(h => h.textContent).join(", "));
 const order = [...document.querySelectorAll("#dlgbody .fsec, #dlgbody [data-field]")]
   .map(e => e.classList.contains("fsec") ? "#" + e.textContent : e.getAttribute("data-field"));
 ok(order.indexOf("#Rate limiting") < order.indexOf("rate_enabled") &&

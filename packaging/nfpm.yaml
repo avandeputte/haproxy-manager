@@ -34,6 +34,11 @@ depends:
   - openssl
   - curl
   - socat
+# CrowdSec's SPOA bouncer comes from CrowdSec's repository, not the
+# distribution's, so it is recommended rather than depended on: apt skips a
+# recommendation it cannot find. Sign-in > CrowdSec installs it on demand.
+recommends:
+  - crowdsec-haproxy-spoa-bouncer
   - keepalived
 
 overrides:

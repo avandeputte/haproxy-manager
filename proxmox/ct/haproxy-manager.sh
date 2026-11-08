@@ -38,12 +38,35 @@ function update_script() {
     exit
   fi
 
-  if check_for_gh_release "haproxy-manager" "avandeputte/haproxy-manager"; then
+  # "latest" to GitHub is the newest release that is not a pre-release, so a
+  # node that has ticked "Also offer beta versions" (Settings > Updates)
+  # would never see a beta from here. For such a node the newest release of
+  # all is taken, betas included -- a stable release still outranks the
+  # betas before it -- and named to the helpers, which fetch a tag as
+  # readily as "latest".
+  WANT="latest"
+  if python3 -c 'import json,sys; c=json.load(open("/var/lib/haproxy-manager/config.json")); sys.exit(0 if c.get("local",{}).get("updates",{}).get("beta") else 1)' 2>/dev/null; then
+    TAG=$(curl -fsSL "https://api.github.com/repos/avandeputte/haproxy-manager/releases?per_page=30" 2>/dev/null | python3 -c '
+import json, re, sys
+def key(tag):
+    m = re.match(r"v?(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?$", tag)
+    if not m:
+        return (0,)
+    return (int(m[1]), int(m[2]), int(m[3]), int(m[4]) if m[4] else 10**9)
+tags = [r["tag_name"] for r in json.load(sys.stdin) if not r.get("draft")]
+print(max(tags, key=key) if tags else "")' 2>/dev/null)
+    if [[ -n "$TAG" ]]; then
+      WANT="$TAG"
+      msg_info "Betas are offered on this node: looking at ${TAG}"
+    fi
+  fi
+  PIN=""; [[ "$WANT" != "latest" ]] && PIN="$WANT"
+  if check_for_gh_release "haproxy-manager" "avandeputte/haproxy-manager" "$PIN"; then
     msg_info "Stopping Service"
     systemctl stop haproxy-manager
     msg_ok "Stopped Service"
 
-    fetch_and_deploy_gh_release "haproxy-manager" "avandeputte/haproxy-manager" "binary" "latest" "/opt/haproxy-manager" "haproxy-manager_*_all.deb"
+    fetch_and_deploy_gh_release "haproxy-manager" "avandeputte/haproxy-manager" "binary" "$WANT" "/opt/haproxy-manager" "haproxy-manager_*_all.deb"
 
     msg_info "Starting Service"
     systemctl daemon-reload

@@ -90,6 +90,7 @@ Options (or the equivalent environment variable):
   --api-key <key>          HAM_API_KEY    API key for peer sync (random if unset)
   --no-api-key                            do not set an API key
   --skip-acme              HAM_SKIP_ACME  do not install acme.sh
+  --without-crowdsec                      do not add CrowdSec's repository or its SPOA bouncer
   --tarball <url|path>     HAM_TARBALL    install from this tarball instead of GitHub
                            GITHUB_TOKEN   token for a private repository
 
@@ -124,6 +125,7 @@ parse_args() {
             --admin-user) HAM_ADMIN_USER="${2:?--admin-user needs a value}"; shift 2 ;;
             --admin-password) HAM_ADMIN_PASSWORD="${2:?--admin-password needs a value}"; shift 2 ;;
             --skip-acme)  SKIP_ACME=1; shift ;;
+            --without-crowdsec) SKIP_CROWDSEC=1; shift ;;
             -h|--help)    usage; exit 0 ;;
             *)            die "unknown option: $1 (try --help)" ;;
         esac
@@ -300,6 +302,47 @@ install_packages() {
         python3 python3-flask python3-requests python3-waitress \
         haproxy keepalived \
         openssl ca-certificates curl socat iproute2 procps tar
+}
+
+# CrowdSec's SPOA bouncer, so switching CrowdSec on in the UI is a setting
+# rather than a package install on a node already serving traffic. From
+# CrowdSec's own repository: the distribution's suite when it has the package,
+# the bookworm build otherwise -- a static Go binary with one trivial
+# dependency. Installed and left stopped; the app runs it when CrowdSec is
+# on. Nothing here is fatal: a node without it still serves everything.
+install_crowdsec() {
+    log "Adding CrowdSec's repository and its SPOA bouncer (used only when CrowdSec is switched on)"
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get install -y --no-install-recommends gnupg >/dev/null 2>&1 || true
+    mkdir -p /etc/apt/keyrings
+    if [ -f /var/lib/haproxy-manager/crowdsec-not-wanted ]; then
+        log "CrowdSec's bouncer is not wanted on this node (--without-crowdsec); leaving it out"
+        return 0
+    fi
+    if ! curl -fsSL --max-time 60 https://packagecloud.io/crowdsec/crowdsec/gpgkey | gpg --dearmor --yes -o /etc/apt/keyrings/crowdsec.gpg 2>/dev/null; then
+        warn "could not fetch CrowdSec's repository key; the bouncer can be installed later from Access > CrowdSec"
+        return 0
+    fi
+    # Held to the key's fingerprint: a wrong key installs nothing.
+    if ! gpg --show-keys --with-colons /etc/apt/keyrings/crowdsec.gpg 2>/dev/null | grep -q "^fpr:::::::::6A89E3C2303A901A889971D3376ED5326E93CD0C:"; then
+        rm -f /etc/apt/keyrings/crowdsec.gpg
+        warn "CrowdSec's repository key does not match the expected fingerprint; the bouncer was not installed"
+        return 0
+    fi
+    . /etc/os-release
+    _cs_line() { echo "deb [signed-by=/etc/apt/keyrings/crowdsec.gpg] https://packagecloud.io/crowdsec/crowdsec/$1/ $2 main"; }
+    _cs_line "${ID:-debian}" "${VERSION_CODENAME:-bookworm}" > /etc/apt/sources.list.d/crowdsec.list
+    apt-get update -q >/dev/null 2>&1 || true
+    if [ -z "$(apt-cache policy crowdsec-haproxy-spoa-bouncer 2>/dev/null | grep -i candidate | grep -v none)" ]; then
+        _cs_line debian bookworm > /etc/apt/sources.list.d/crowdsec.list
+        apt-get update -q >/dev/null 2>&1 || true
+    fi
+    if apt-get install -y --no-install-recommends crowdsec-haproxy-spoa-bouncer >/dev/null 2>&1; then
+        systemctl disable --now crowdsec-spoa-bouncer >/dev/null 2>&1 || true
+        log "CrowdSec SPOA bouncer installed (stopped until CrowdSec is switched on)"
+    else
+        warn "the CrowdSec bouncer could not be installed; it can be installed later from Access > CrowdSec"
+    fi
 }
 
 # curl, but patient: retry a few times, and try IPv4 on a second pass. A
@@ -666,6 +709,17 @@ main() {
     [ "$MODE" = "uninstall" ] && do_uninstall
     [ "$MODE" = "update" ] && log "Updating the existing installation"
     install_packages
+    # The app installs the bouncer when CrowdSec is switched on and it is
+    # missing; the marker tells it not to, on a node that must not carry it.
+    # Set by --without-crowdsec on any run; cleared only by a fresh install
+    # without the flag, never by an update, which the one-click updater runs
+    # without any flags.
+    if [ "${SKIP_CROWDSEC:-0}" = 1 ]; then
+        mkdir -p /var/lib/haproxy-manager && touch /var/lib/haproxy-manager/crowdsec-not-wanted
+    elif [ "$MODE" != "update" ]; then
+        rm -f /var/lib/haproxy-manager/crowdsec-not-wanted
+    fi
+    install_crowdsec
     fetch_source
     install_acme
     install_app

@@ -8,7 +8,9 @@ base.py
 cluster.py
 config.py
 crud.py
+crowdsec.py
 dnsapi.py
+errorpages.py
 haproxy.py
 hass.py
 oauth.py
@@ -22,6 +24,7 @@ peering.py
 probe.py
 qr.py
 recipes.py
+rules.py
 setup.py
 static.py
 stats.py

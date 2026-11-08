@@ -200,6 +200,59 @@ def networks(text):
 
 
 # --------------------------------------------------------------------------
+# address lists
+#
+# A named set of networks, kept once and named from wherever it is wanted: a
+# pool's allow-list, the networks that skip its sign-in, a condition. The
+# point is the people whose address changes -- a user behind a home
+# connection that gets a new address every few weeks is edited in one list,
+# not in every service that lets them in.
+
+def address_lists(cfg):
+    return (cfg.get("haproxy") or {}).get("addresslists") or []
+
+
+def check_list(item):
+    """Refuse a list an entry of which is not a network, before it is stored.
+
+    Raises ValueError with the entries. A list is where the typo would hide
+    best: nothing on the service that names it shows the addresses.
+    """
+    _good, bad = networks(item.get("networks") or "")
+    if bad:
+        raise ValueError("not a network: %s -- one address or CIDR per line, "
+                         "e.g. 192.168.0.0/16" % ", ".join(bad[:3]))
+
+
+def list_networks(cfg, ids):
+    """The networks of these lists, flattened, in the order they are given.
+
+    A list that no longer exists contributes nothing, which can only narrow
+    who gets in. Duplicates across lists are dropped: HAProxy would accept
+    them, but the line gets long enough as it is.
+    """
+    by_id = {a.get("id"): a for a in address_lists(cfg)}
+    good, bad = [], []
+    for i in ids or []:
+        g, b = networks((by_id.get(i) or {}).get("networks") or "")
+        good.extend(n for n in g if n not in good)
+        bad.extend(b)
+    return good, bad
+
+
+def list_names(cfg, ids):
+    """The names of these lists, in the order given; ids that name nothing are dropped."""
+    by_id = {a.get("id"): a for a in address_lists(cfg)}
+    return [by_id[i]["name"] for i in (ids or []) if i in by_id and by_id[i].get("name")]
+
+
+def known_lists(cfg, ids):
+    """These ids, less any that name no list -- what a form is allowed to store."""
+    known = {a.get("id") for a in address_lists(cfg)}
+    return [i for i in (ids or []) if i in known]
+
+
+# --------------------------------------------------------------------------
 # users
 
 @app.route("/api/access/users", methods=["GET", "POST"])

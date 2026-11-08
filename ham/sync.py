@@ -447,6 +447,11 @@ def _receive_locked(cfg, data, conf, source=None):
         # Configured once and shared: each node then alerts about its own
         # troubles through the same destinations.
         cfg["notify"] = _merge_defaults(conf["notify"], DEFAULT_CONFIG["notify"])
+    if isinstance(conf.get("crowdsec"), dict):
+        # Where every node's bouncer asks, and what HAProxy does with the
+        # answer. A sender from before 2.0.0-beta.3 carries none, and this
+        # node's own stays.
+        cfg["crowdsec"] = _merge_defaults(conf["crowdsec"], DEFAULT_CONFIG["crowdsec"])
 
     # An optional membership list: every other node as seen by the sender.
     mesh = data.get("peers")

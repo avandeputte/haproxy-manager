@@ -9,6 +9,7 @@ import os
 import shutil
 
 from .base import CONF_PATH, DATA_DIR, _lock, log
+from .util import rule_cond_ids
 
 # --------------------------------------------------------------------------
 
@@ -37,6 +38,12 @@ DEFAULT_CONFIG = {
         "healthchecks": [],  # Health Monitors
         "conditions": [],    # Conditions (named ACLs)
         "rules": [],         # Rules (actions bound to conditions)
+        # Named sets of networks: a pool's allow-list or a condition names
+        # the list, so an address that changes is changed in one place.
+        "addresslists": [],
+        # What HAProxy answers with when it cannot forward: a page per set of
+        # status codes, written to disk on every node at Apply.
+        "errorpages": [],
     },
     "acme": {
         "settings": {
@@ -74,6 +81,22 @@ DEFAULT_CONFIG = {
             "allow_unverified": False,
             "secret": "",
         },
+    },
+    # CrowdSec: where the bouncer on every node asks for decisions, and what
+    # HAProxy does with them. Shared, since every node protects the same
+    # services; a node may hold its own API key under local.crowdsec.
+    "crowdsec": {
+        "enabled": False,
+        "api_url": "",               # the LAPI, e.g. http://192.168.1.5:8080/
+        "api_key": "",               # from: cscli bouncers add haproxy-manager
+        "insecure_skip_verify": False,
+        "mode": "ban",               # ban: a 403 page; captcha: a challenge first
+        "captcha_provider": "",      # hcaptcha, recaptcha or turnstile
+        "captcha_site_key": "",
+        "captcha_secret_key": "",
+        "captcha_signing_key": "",   # generated once; the same on every node
+        "contact_url": "",           # shown on the ban page, when set
+        "skip_lists": [],            # address lists never asked about: the LAN
     },
     # Cluster-wide VRRP settings: identical on every node, so they sync.
     "cluster": {
@@ -195,7 +218,8 @@ DEFAULT_CONFIG = {
 }
 
 VALID_COLLECTIONS = {
-    "haproxy": {"servers", "backends", "frontends", "healthchecks", "conditions", "rules"},
+    "haproxy": {"servers", "backends", "frontends", "healthchecks", "conditions", "rules",
+                "addresslists", "errorpages"},
     "acme": {"accounts", "challenges", "certificates"},
 }
 
@@ -265,11 +289,41 @@ def load_config():
             log.error("config.json exists but will not parse (%s); refusing to "
                       "treat this as first-run setup", e)
             cfg, unreadable = {}, True
+    # An upgrade that adds a collection the stored file never had -- address
+    # lists and error pages in 2.0 -- must not read as an unapplied change:
+    # nothing HAProxy serves is different. The marker the last Apply stored
+    # was computed over what was there, so when it still matches that, it is
+    # carried over to cover the defaults being added now. Only the hashed
+    # sections matter, and only while the file lacks something: once saved,
+    # the carried-over marker is in the file and this costs nothing.
+    before = None
+    if cfg and _lacks_defaults(cfg):
+        try:
+            before = config_hash(cfg)
+        except (KeyError, TypeError):
+            before = None
     cfg = _merge_defaults(cfg, DEFAULT_CONFIG)
+    if before is not None and cfg["_meta"].get("applied_hash") == before:
+        cfg["_meta"]["applied_hash"] = config_hash(cfg)
     if unreadable:
         cfg["_meta"]["unreadable"] = True
     _move_node_objects_into_local(cfg)
     return cfg
+
+
+def _lacks_defaults(cfg):
+    """Does the stored file lack a key, at any depth, in a section the applied
+    marker hashes?"""
+    def lacks(dst, src):
+        for k, v in src.items():
+            if k not in dst:
+                return True
+            if isinstance(v, dict) and isinstance(dst.get(k), dict) and lacks(dst[k], v):
+                return True
+        return False
+    parts = [(cfg.get(sec), DEFAULT_CONFIG[sec]) for sec in ("haproxy", "acme", "cluster", "crowdsec")]
+    parts.append(((cfg.get("local") or {}).get("keepalived"), DEFAULT_CONFIG["local"]["keepalived"]))
+    return any(not isinstance(dst, dict) or lacks(dst, src) for dst, src in parts)
 
 
 LOCAL_SECTIONS = ("haproxy", "acme")
@@ -416,7 +470,8 @@ def shared_view(cfg):
             "acme": cfg["acme"],
             "access": cfg.get("access", {}),
             "cluster": cfg["cluster"],
-            "notify": cfg.get("notify", {})}
+            "notify": cfg.get("notify", {}),
+            "crowdsec": cfg.get("crowdsec", {})}
 
 
 def _fp(value):
@@ -472,7 +527,9 @@ def shared_parts(cfg):
     view = shared_view(cfg)
     out = {}
     for section, body in view.items():
-        if not isinstance(body, dict):
+        # A section of plain settings is one part: tagging each key would
+        # send a tag per secret around the cluster for no reader's benefit.
+        if not isinstance(body, dict) or not any(isinstance(v, (list, dict)) for v in body.values()):
             out[section] = _fp(body)
             continue
         for coll, items in sorted(body.items()):
@@ -611,7 +668,7 @@ def webui_object_ids(cfg):
     for rule in hp.get("rules") or []:
         if rule.get("backend") in ids or is_webui_name(rule.get("name"), "to-"):
             ids.add(rule.get("id"))
-            ids |= set(rule.get("conditions") or [])
+            ids |= set(rule_cond_ids(rule))
     return {i for i in ids if i}
 
 
@@ -630,11 +687,14 @@ def is_webui_cert(cert):
 # same list in four places.
 
 def config_hash(cfg):
-    payload = json.dumps(
-        {"haproxy": cfg["haproxy"], "acme": cfg["acme"], "cluster": cfg["cluster"],
-         "keepalived": cfg["local"]["keepalived"]},
-        sort_keys=True,
-    )
+    # A section a file from before its time lacks is left out, so the hash
+    # of that file is what the version that wrote it computed; load_config
+    # then carries the applied marker over the defaults it adds.
+    parts = {"haproxy": cfg["haproxy"], "acme": cfg["acme"], "cluster": cfg["cluster"],
+             "keepalived": cfg["local"]["keepalived"]}
+    if "crowdsec" in cfg:
+        parts["crowdsec"] = cfg["crowdsec"]
+    payload = json.dumps(parts, sort_keys=True)
     return hashlib.sha256(payload.encode()).hexdigest()
 
 

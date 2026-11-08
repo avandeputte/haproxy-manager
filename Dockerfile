@@ -29,17 +29,31 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
+        gnupg \
     && curl -fsSL https://haproxy.debian.net/haproxy-archive-keyring.gpg \
         --create-dirs --output /etc/apt/keyrings/haproxy-archive-keyring.gpg \
     && . /etc/os-release \
     && echo "deb [signed-by=/etc/apt/keyrings/haproxy-archive-keyring.gpg] https://haproxy.debian.net ${VERSION_CODENAME}-backports-${HAPROXY_BRANCH} main" \
         > /etc/apt/sources.list.d/haproxy.list \
+    # CrowdSec's SPOA bouncer, from CrowdSec's own repository. Its Debian 13
+    # suite is empty; the bookworm build is a static Go binary with one
+    # trivial dependency and runs here unchanged. Installed, not started: the
+    # app starts it once CrowdSec is switched on.
+    # The slim image drops /usr/share/doc, and the bouncer's post-install
+    # copies its example engine from there; let that one package keep it
+    # (read after the image's own exclude, which is why the name sorts last).
+    && echo "path-include /usr/share/doc/crowdsec-haproxy-spoa-bouncer/*" > /etc/dpkg/dpkg.cfg.d/zz-crowdsec \
+    && curl -fsSL https://packagecloud.io/crowdsec/crowdsec/gpgkey | gpg --dearmor -o /etc/apt/keyrings/crowdsec.gpg \
+    && gpg --show-keys --with-colons /etc/apt/keyrings/crowdsec.gpg | grep -q '^fpr:::::::::6A89E3C2303A901A889971D3376ED5326E93CD0C:' \
+    && echo "deb [signed-by=/etc/apt/keyrings/crowdsec.gpg] https://packagecloud.io/crowdsec/crowdsec/debian/ bookworm main" \
+        > /etc/apt/sources.list.d/crowdsec.list \
     && apt-get update && apt-get install -y --no-install-recommends \
         python3 \
         python3-flask \
         python3-requests \
         python3-waitress \
         "haproxy=${HAPROXY_BRANCH}.*" \
+        crowdsec-haproxy-spoa-bouncer \
         keepalived \
         openssl \
         socat \
@@ -78,10 +92,11 @@ COPY static/ ./static/
 
 COPY docker/syslogd.py /usr/local/bin/ham-syslogd
 COPY docker/systemctl /usr/local/bin/systemctl
+COPY docker/crowdsec-run /usr/local/bin/crowdsec-run
 COPY docker/haproxy-run /usr/local/bin/haproxy-run
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY docker/supervisord.conf /etc/supervisor/supervisord.conf
-RUN chmod 0755 /usr/local/bin/systemctl /usr/local/bin/haproxy-run \
+RUN chmod 0755 /usr/local/bin/systemctl /usr/local/bin/haproxy-run /usr/local/bin/crowdsec-run \
                /usr/local/bin/entrypoint.sh /usr/local/bin/ham-syslogd
 
 ENV HAM_DATA_DIR=/var/lib/haproxy-manager \

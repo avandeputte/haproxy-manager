@@ -1,4 +1,5 @@
-import { $, HEALTH_LABEL, PROXY_OPTIONS, api, btn, closeDlg, esc, fieldEl, fieldRow, list, openDlg, readForm, selectOption, showText } from "../core.js";
+import { $, HEALTH_LABEL, PROXY_OPTIONS, api, btn, closeDlg, esc, fieldEl, fieldRow, list, openDlg, readForm, selectOption, showText, trimHaproxy } from "../core.js";
+import { describeList, describePage, describeRule } from "../entities.js";
 import { t } from "../i18n.js";
 import { refreshStatus, route } from "../shell.js";
 import { CERT_STATUS } from "../pages/certificates.js";
@@ -71,6 +72,8 @@ export const WIZ_SECTIONS=[
   {k:"allow_enabled",l:"Only allow certain networks",t:"bool",
    h:"Requests from anywhere else are refused. Works for tcp:// services too."},
   {k:"allow_src",l:"Networks",t:"textarea",h:"One address or CIDR per line, e.g. 192.168.0.0/16"},
+  {k:"allow_lists",l:"Address lists",t:"refmulti",ref:"haproxy/addresslists",describe:describeList,
+   h:"Named lists from Access > Address Lists, counted with the networks above. Edit a list once and every service that names it follows."},
  ]},
  {title:"Rate limiting",toggle:"rate_enabled",fields:[
   {k:"rate_enabled",l:"Enable rate limiting",t:"bool",
@@ -89,10 +92,12 @@ export const WIZ_SECTIONS=[
    h:"What the browser shows above its password box. Defaults to the service name."},
   {k:"auth_exempt",l:"Skip the sign-in from",t:"textarea",
    h:"Optional. Networks trusted without a password -- typically the LAN, e.g. 192.168.1.0/24. Everyone else is asked to sign in."},
+  {k:"auth_exempt_lists",l:"Skip the sign-in from these lists",t:"refmulti",ref:"haproxy/addresslists",describe:describeList,
+   h:"Address lists trusted without a password, beside the networks above"},
  ]},
  {title:"Single sign-on (OIDC)",toggle:"oauth_enabled",http:true,fields:[
   {k:"oauth_enabled",l:"Require single sign-on (OIDC)",t:"bool",
-   h:"Send visitors to the identity provider before letting them through. HAProxy verifies the session and this service's allow-list on every request. Configure the provider under Sign-in > Single sign-on."},
+   h:"Send visitors to the identity provider before letting them through. HAProxy verifies the session and this service's allow-list on every request. Configure the provider under Access > Single sign-on."},
   {k:"oauth_allow",l:"Allowed identities",t:"textarea",
    h:"One per line: an email, a whole domain as @example.com, or * for anyone the provider signs in."},
   {k:"oauth_forward",l:"Pass the signed-in email to the servers",t:"bool",
@@ -101,10 +106,23 @@ export const WIZ_SECTIONS=[
      "of these headers a client sends is stripped on every service, so the value is always this "+
      "proxy's word. Only safe while the app is reachable through the proxy alone."},
  ]},
+ /* Last: what a service picks for itself from the Advanced pages. The pages
+    that stand for every service apply without being picked; HTTP only, as
+    the answer is a page. Rules picked here are acted on inside the service's
+    pool, so they reach this service alone; routing rules belong on the
+    listener, where the rule wizard puts them, and are not offered. */
+ {title:"Error pages",http:true,fields:[
+  {k:"error_pages",l:"Error pages",t:"refmulti",ref:"haproxy/errorpages",describe:describePage,
+   h:"Pages for this service alone, over the ones that stand for every service. HTTP services only."},
+ ]},
+ {title:"Rules",fields:[
+  {k:"rules",l:"Rules",t:"refmulti",ref:"haproxy/rules",filter:r=>r.type!=="use_backend",describe:describeRule,
+   h:"Rules for this service alone: deny, headers, redirects, raw lines, with their conditions. Routing rules belong on the listener and are not offered."},
+ ]},
 ];
 /* every field, in the order it is shown -- what the form reads and sends */
 export const WIZ_FIELDS=WIZ_SECTIONS.flatMap(sec=>sec.fields);
-/* the three checkboxes that only stand for a section being on or off */
+/* the checkboxes that only stand for a section being on or off */
 const SECTION_ONLY=["health_enabled","allow_enabled","rate_enabled"];
 /* which of the health_* rows make sense for each check kind */
 export const HEALTH_SHOWS={none:[],tcp:["health_interval"],ssl:["health_interval"],
@@ -119,7 +137,9 @@ export const NOTIFY_MODE_LABEL={servers:"a server is lost",
 
 /* Tell the user which certificate a host will end up using, before they commit. */
 export async function updateCertNote(note){
-  const raw=(fieldEl("url")||{}).value||"";
+  /* the first URL: the note is about the name a certificate is asked for,
+     and the others are alternatives on the same service */
+  const raw=((fieldEl("url")||{}).value||"").split("\n").map(s=>s.trim()).filter(Boolean)[0]||"";
   const mode=(fieldEl("cert_mode")||{}).value||"auto";
   let host="";
   try{host=new URL(raw.includes("://")?raw:"https://"+raw).hostname;}catch(e){}
@@ -160,7 +180,7 @@ export function openWizard(prefill){
     if(prefill.health_enabled===undefined)
       prefill.health_enabled=prefill.health===undefined||(!!prefill.health&&prefill.health!=="none");
     if(prefill.health==="none")prefill.health="http";   // the checkbox carries "none"
-    if(prefill.allow_enabled===undefined)prefill.allow_enabled=!!String(prefill.allow_src||"").trim();
+    if(prefill.allow_enabled===undefined)prefill.allow_enabled=!!String(prefill.allow_src||"").trim()||!!(prefill.allow_lists||[]).length;
     if(prefill.rate_enabled===undefined)
       prefill.rate_enabled=prefill.rate_limit!==undefined&&prefill.rate_limit!==null&&String(prefill.rate_limit).trim()!=="";
   }
@@ -215,6 +235,11 @@ export function openWizard(prefill){
 
   const frm=document.createElement("div");frm.className="frm";
   const rows={},heads={};
+  /* which certificate the first name will get: said under the Certificate
+     section, where the choice is made */
+  const note=document.createElement("div");note.className="hint";note.style.margin="2px 0 0";
+  const noteRow=document.createElement("div");noteRow.appendChild(note);
+  const noteCells=[document.createElement("div"),noteRow];
   WIZ_SECTIONS.forEach(sec=>{
     const h=document.createElement("div");h.className="fsec";h.textContent=t(sec.title);
     heads[sec.title]=h;frm.appendChild(h);
@@ -223,6 +248,7 @@ export function openWizard(prefill){
       rows[f.k]=cells;
       cells.forEach(el=>frm.appendChild(el));
     });
+    if(sec.title==="Certificate"){rows.cert_note=noteCells;noteCells.forEach(el=>frm.appendChild(el));}
   });
   wrap.appendChild(frm);
   // friendlier labels than the raw option values
@@ -247,20 +273,27 @@ export function openWizard(prefill){
       heads[sec.title].style.display=shown?"":"none";
       const open=shown&&(!sec.toggle||on(sec.toggle));
       sec.fields.forEach(f=>setRow(f.k,f.k===sec.toggle?shown:open));
+      if(sec.title==="Certificate")setRow("cert_note",shown);
     });
     // and within an open section, the rows that follow from a choice in it
     const show=on("health_enabled")?(HEALTH_SHOWS[chosen(hsel)||"none"]||[]):[];
     ["health_interval","health_uri","health_status","health_user","health_method",
      "health_version","health_host"].forEach(k=>setRow(k,show.includes(k)));
     ["stick_type","stick_size","stick_expire"].forEach(k=>setRow(k,val("persistence")==="source"));
+    /* a raw TCP port has no HTTP for a rule to act on */
+    const box=fieldEl("rules");
+    if(box)[...box.querySelectorAll("label")].forEach(l=>{
+      const http=/^(http_|redirect_)/.test(l.dataset.kind||"");
+      l.style.display=(isTcp&&http)?"none":"";
+      if(isTcp&&http){const c=l.querySelector("input");if(c){c.checked=false;c.removeAttribute("checked");}}
+    });
+
+
     /* A raw TCP port cannot answer an HTTP check -- unless the check is aimed at
        a different port, which is exactly how Patroni is fronted: traffic to
        PostgreSQL on 5432, the check to its REST API on 8008. */
     if(isTcp&&!val("check_port").trim()&&chosen(hsel)==="http")selectOption(hsel,"tcp");
   };
-  const note=document.createElement("div");note.className="hint";note.style.margin="2px 0 0";
-  const noteRow=document.createElement("div");noteRow.appendChild(note);
-  frm.appendChild(document.createElement("div"));frm.appendChild(noteRow);
   const out=document.createElement("div");out.style.marginTop="16px";wrap.appendChild(out);
   const err=document.createElement("div");err.className="err";
 
@@ -268,7 +301,7 @@ export function openWizard(prefill){
     const d=readForm(WIZ_FIELDS);
     /* an unticked section is off, whatever its hidden fields still say */
     if(!d.health_enabled)d.health="none";
-    if(!d.allow_enabled)d.allow_src="";
+    if(!d.allow_enabled){d.allow_src="";d.allow_lists=[];}
     if(!d.rate_enabled)d.rate_limit="";
     SECTION_ONLY.forEach(k=>delete d[k]);
     d.certificate=d.cert_mode!=="none";        // "none" attaches nothing
@@ -279,20 +312,23 @@ export function openWizard(prefill){
               status:d.health_status,user:d.health_user,method:d.health_method,
               version:d.health_version,host:d.health_host};
     d.auth={enabled:d.auth_enabled,groups:d.auth_groups,realm:d.auth_realm,
-            exempt:d.auth_exempt};
+            exempt:d.auth_exempt,exempt_lists:d.auth_exempt_lists};
     d.oauth={enabled:d.oauth_enabled,allow:d.oauth_allow,forward:d.oauth_forward};
     ["cert_mode","health_interval","health_uri","health_status","health_user",
      "health_method","health_version","health_host",
-     "auth_enabled","auth_groups","auth_realm","auth_exempt",
+     "auth_enabled","auth_groups","auth_realm","auth_exempt","auth_exempt_lists",
      "oauth_enabled","oauth_allow","oauth_forward"].forEach(k=>delete d[k]);
     return d;   // balance / persistence / stick_* / check_port / log_health_checks pass straight through
   };
   const show=(r,saved)=>{
     out.innerHTML="";
     const box=document.createElement("div");box.className="card";box.style.margin="0";
-    box.innerHTML='<div class=hd><h2>'+(saved?t("Created"):t("What this will create"))+'</h2></div>';
+    box.innerHTML='<div class=hd><h2>'+(saved?t("Saved"):t("What this will create"))+'</h2></div>';
     const bd=document.createElement("div");bd.className="bd";
+    const v=r.validation;
     bd.innerHTML='<div class=mono style="margin-bottom:10px">'+esc(r.public)+" &rarr; "+esc(r.target)+"</div>"+
+      (v?'<div style="margin-bottom:10px"><span class="pill '+(v.ok?"up":"down")+'">'+(v.ok?t("HAProxy accepts it"):t("HAProxy refuses it"))+"</span>"+
+         (v.ok?"":"<pre class=mono style='white-space:pre-wrap;margin-top:8px'>"+esc(trimHaproxy(v.message||""))+"</pre>")+"</div>":"")+
       "<table><tbody>"+r.actions.map(a=>"<tr><td style='width:90px'><span class='pill "+
         (a.action==="created"?"up":a.action==="updated"?"warn":"off")+"'>"+esc(t(a.action))+"</span></td><td>"+
         esc(a.type)+"</td><td class=mono>"+esc(a.name)+"</td></tr>").join("")+"</tbody></table>"+
@@ -312,11 +348,12 @@ export function openWizard(prefill){
     try{
       const r=await api("wizard/publish","POST",read());
       show(r,true);
-      create.disabled=true;preview.disabled=true;
+      create.disabled=true;preview.disabled=true;closeBtn.textContent=t("Done");
       await route();refreshStatus();
     }catch(e){err.textContent=e.message;create.disabled=false;}
   });
-  openDlg(prefill?t("Edit service"):t("Publish a service"),wrap,[err,btn(t("Close"),"",closeDlg),preview,create]);
+  const closeBtn=btn(t("Close"),"",closeDlg);
+  openDlg(prefill?t("Edit service"):t("Publish a service"),wrap,[err,closeBtn,preview,create]);
 
   /* Only now are these fields in the document, and only elements that are in
      it can be found by id or usefully listened to. Wiring the form while it
@@ -355,8 +392,9 @@ export async function servicesCard(){
     /* the last round of URL probes; their absence must not cost the page */
     api("probes").catch(()=>({results:[]})),
     list("acme/accounts",true),list("acme/challenges",true),
-    /* the wizard's group picker reads this cache */
-    list("access/groups",true)]);
+    /* the wizard's group and address-list pickers read this cache */
+    list("access/groups",true),list("haproxy/addresslists",true),list("haproxy/errorpages",true),
+    list("haproxy/rules",true),list("haproxy/conditions",true)]);
   /* keyed by URL, kept only when something is wrong: a page dotted with green
      "fine" pills says less than one red pill on the row that is not */
   const probeBad={};
@@ -389,14 +427,17 @@ export async function servicesCard(){
              it is part of what this URL does, not a detail of the pool. */
           (auth.enabled?'<div class=sub>'+t("sign-in required &mdash; {who}",{who:
              ((auth.group_names||[]).length?esc(auth.group_names.join(", ")):t("any user"))})+
-             (auth.exempt?", "+t("except from {networks}",{networks:esc(auth.exempt.split("\n").join(", "))}):"")+"</div>":"")+
+             (auth.exempt||(auth.exempt_list_names||[]).length?", "+t("except from {networks}",{networks:
+               esc(auth.exempt.split("\n").filter(Boolean).concat(auth.exempt_list_names||[]).join(", "))}):"")+"</div>":"")+
           ((s.oauth||{}).enabled?'<div class=sub>'+t("sign-in via SSO &mdash; {who}",{who:
              esc(((s.oauth||{}).allow||[]).map(a=>a==="*"?t("anyone the provider signs in"):a).join(", "))})+"</div>":"")+
-          (s.allow_src?'<div class=sub>'+t("only from {networks}",{networks:
-             esc(s.allow_src.split("\n").join(", "))})+"</div>":"")+
+          (s.allow_src||(s.allow_list_names||[]).length?'<div class=sub>'+t("only from {networks}",{networks:
+             esc(s.allow_src.split("\n").filter(Boolean).concat(s.allow_list_names||[]).join(", "))})+"</div>":"")+
           (s.rate_limit?'<div class=sub>'+(s.scheme==="tcp"
              ?t("at most {n} connections per {s} s per client",{n:esc(s.rate_limit),s:esc(s.rate_window||10)})
              :t("at most {n} requests per {s} s per client",{n:esc(s.rate_limit),s:esc(s.rate_window||10)}))+"</div>":"")+
+          ((s.error_page_names||[]).length?'<div class=sub>'+t("error pages {names}",{names:esc(s.error_page_names.join(", "))})+"</div>":"")+
+          ((s.rule_names||[]).length?'<div class=sub>'+t("rules {names}",{names:esc(s.rule_names.join(", "))})+"</div>":"")+
           (s.maintenance?'<div><span class="pill warn">'+t("paused &mdash; answering 503")+'</span></div>':"")+
           (s.enabled?"":"<div class=sub>"+t("disabled")+"</div>")+"</td>"+
         "<td class=mono>"+(s.targets.length?s.targets.map(esc).join("<br>"):"<span class=sub>"+t("no server")+"</span>")+
@@ -430,10 +471,12 @@ export async function servicesCard(){
         timeout_connect:s.timeout_connect,timeout_server:s.timeout_server,
         auth_enabled:(s.auth||{}).enabled,auth_groups:(s.auth||{}).groups,
         auth_realm:(s.auth||{}).realm,auth_exempt:(s.auth||{}).exempt,
+        auth_exempt_lists:(s.auth||{}).exempt_lists,
         oauth_enabled:(s.oauth||{}).enabled,
         oauth_allow:((s.oauth||{}).allow||[]).join("\n"),
         oauth_forward:(s.oauth||{}).forward,
-        allow_src:s.allow_src,
+        allow_src:s.allow_src,allow_lists:s.allow_lists,
+        error_pages:s.error_pages,rules:s.rules,
         rate_limit:s.rate_limit,rate_window:s.rate_window,
         certificate_id:s.certificate_id,
       })));

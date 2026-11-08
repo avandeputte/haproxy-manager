@@ -141,6 +141,18 @@ def cluster_snapshot(cfg=None):
     if len(versions) > 1:
         warnings.append("Nodes run different versions: %s." % ", ".join(sorted(versions)))
 
+    def major(v):
+        try:
+            return int(str(v).split(".")[0])
+        except ValueError:
+            return 0
+    old = [n["name"] for n in reachable if n.get("version") and major(n["version"]) < 2]
+    if old and any(major(v) >= 2 for v in versions):
+        warnings.append("%s still run 1.x, which reads only the old rule shape: a rule saved "
+                        "here with both \"any of these\" and \"all of these\" would apply there "
+                        "without its conditions. Upgrade them before editing rules or services."
+                        % ", ".join(old))
+
     # Do the nodes hold the same configuration? A node that was unreachable
     # when a change was applied keeps the old one indefinitely, and until this
     # was reported it looked exactly like a healthy node -- until it took the

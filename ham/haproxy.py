@@ -7,8 +7,8 @@ import re
 
 from .base import CERT_DIR, PORT
 from .config import merged
-from .util import _by_id, _sec, cert_path
-from . import access, oauth
+from .util import _by_id, _sec, cert_path, rule_cond_ids
+from . import access, crowdsec, errorpages, oauth
 
 # --------------------------------------------------------------------------
 
@@ -48,20 +48,70 @@ COND_MAP = {
     "source_ip":        lambda c: "src %s" % c.get("value", ""),
     "ssl_sni":          lambda c: "req.ssl_sni -i %s" % c.get("value", ""),
     "custom":           lambda c: c.get("value", ""),
+    # "source_list" is not here: it names an address list, which takes the
+    # configuration to look up, and may need more than one line.
 }
+
+# HAProxy reads at most 64 words from a line. A list of addresses longer than
+# this is declared as a named ACL over several lines -- the same name declared
+# again adds to the set -- rather than inline, where it cannot be split.
+SRC_PER_LINE = 40
+
+
+def _src_acl(name, nets):
+    """The acl lines declaring `name` as "the source is one of these".
+
+    An empty list matches nobody, stated as such: `src` with no pattern is
+    a parse error, and leaving the ACL out would make every rule that names
+    it fail to parse instead.
+    """
+    if not nets:
+        return ["acl %s always_false" % name]
+    return ["acl %s src %s" % (name, " ".join(nets[i:i + SRC_PER_LINE]))
+            for i in range(0, len(nets), SRC_PER_LINE)]
+
+
+def _src_test(declared, name, nets):
+    """The test "the source is one of these", for use inside a condition.
+
+    A short list is tested inline, as it always was. A long one is declared
+    first as a named ACL -- the lines go on `declared`, for the caller to
+    write ahead of the test -- and the test names it.
+    """
+    if len(nets) <= SRC_PER_LINE:
+        return "{ src %s }" % " ".join(nets)
+    declared.extend(_src_acl(name, nets))
+    return name
+
+
+def _rule_test(rule, conds):
+    """The " if ..." a rule's line ends with, or "" for one that always applies.
+
+    A rule tests two lists: `any_of`, of which one must hold, and
+    `conditions`, which must all hold. HAProxy has no parentheses, so
+    "(A or B) and X" is written out as the alternatives it is: "A X || B X".
+    Before 2.0 a rule had one list and an operator; "or" over that list is
+    read as alternatives alone, so such a rule renders as it did.
+    """
+    def name(cid):
+        c = conds.get(cid)
+        return (("!" if c.get("negate") else "") + "acl_" + _sec(c["name"])) if c else None
+
+    any_of = [n for n in map(name, rule.get("any_of") or []) if n]
+    all_of = [n for n in map(name, rule.get("conditions") or []) if n]
+    if rule.get("operator") == "or":
+        any_of, all_of = any_of + all_of, []
+    if any_of:
+        expr = " || ".join(" ".join([a] + all_of) for a in any_of)
+    elif all_of:
+        expr = " ".join(all_of)
+    else:
+        return ""
+    return " %s %s" % (rule.get("test", "if"), expr)
 
 
 def _rule_line(rule, conds, backends):
-    suffix = ""
-    cond_ids = rule.get("conditions") or []
-    names = []
-    for cid in cond_ids:
-        c = conds.get(cid)
-        if c:
-            names.append(("!" if c.get("negate") else "") + "acl_" + _sec(c["name"]))
-    if names:
-        joiner = " or " if rule.get("operator") == "or" else " "
-        suffix = " %s %s" % (rule.get("test", "if"), joiner.join(names))
+    suffix = _rule_test(rule, conds)
     t = rule.get("type")
     # param1/param2 hold values (a URL, a header name and value), so control
     # characters are stripped but the text is kept -- except a "custom" rule,
@@ -169,6 +219,8 @@ def render_haproxy(cfg):
         A("    ssl-default-bind-options ssl-min-ver %s" % st["ssl_min_ver"])
     if st.get("ssl_ciphers"):
         A("    ssl-default-bind-ciphers %s" % st["ssl_ciphers"])
+    for ln in crowdsec.global_lines(cfg):
+        A("    " + ln)
     for ln in (st.get("custom_global") or "").splitlines():
         if ln.strip():
             A("    " + ln.strip())
@@ -182,6 +234,11 @@ def render_haproxy(cfg):
     A("    timeout connect %s" % (st.get("timeout_connect") or "5s"))
     A("    timeout client %s" % (st.get("timeout_client") or "50s"))
     A("    timeout server %s" % (st.get("timeout_server") or "50s"))
+    # The error pages every service answers with; a pool may still pick its
+    # own. The files are written by the node that applies this, from the
+    # same configuration, so naming them here is safe on every node.
+    for ln in errorpages.directives(errorpages.everywhere(cfg)):
+        A("    " + ln)
     for ln in (st.get("custom_defaults") or "").splitlines():
         if ln.strip():
             A("    " + ln.strip())
@@ -239,6 +296,13 @@ def render_haproxy(cfg):
         # request rules, then routing.
         acls, requests, routes = [], [], []
 
+        # CrowdSec first: a banned address is answered before anything else
+        # is done for it. HTTP only -- the answer is a page.
+        if mode == "http":
+            decl, asks = crowdsec.frontend_lines(cfg, _src_acl)
+            acls.extend(decl)
+            requests.extend(asks)
+
         if mode == "http" and fe.get("ssl_enabled"):
             requests.append("http-request set-header X-Forwarded-Proto https if { ssl_fc }")
         if acme_on and mode == "http":
@@ -265,12 +329,16 @@ def render_haproxy(cfg):
         used = []
         for rid in fe.get("rules") or []:
             r = rules.get(rid)
-            for cid in (r.get("conditions") or []) if r else []:
+            for cid in rule_cond_ids(r) if r else []:
                 if cid in conds and cid not in used:
                     used.append(cid)
         need_inspect = False
         for cid in used:
             c = conds[cid]
+            if c.get("type") == "source_list":
+                nets, _bad = access.list_networks(cfg, [c.get("list")])
+                acls.extend(_src_acl("acl_" + _sec(c["name"]), nets))
+                continue
             expr = _line_safe(COND_MAP.get(c.get("type", "custom"), COND_MAP["custom"])(c))
             acls.append("acl acl_%s %s" % (_sec(c["name"]), expr))
             if mode == "tcp" and c.get("type") == "ssl_sni":
@@ -355,29 +423,46 @@ def render_haproxy(cfg):
             # "tcp" needs nothing here: `check` on the server line is a connect test
         if be.get("log_health_checks"):
             A("    option log-health-checks")
+        # This pool's own error pages, over the ones every service has.
+        if mode == "http":
+            for ln in errorpages.directives(errorpages.chosen(cfg, be.get("error_pages"))):
+                A("    " + ln)
         # Maintenance: every request answered 503, cleanly, while the servers
         # and their health checks stay exactly as they were -- pausing a
         # service must not look like the service breaking, and resuming must
         # not wait for checks to pass again. First among the rules, so it
-        # wins over the allow-list and the sign-in.
+        # wins over the allow-list and the sign-in. The 503 page, when there
+        # is one, is what a visitor sees here too.
         if be.get("maintenance"):
             if mode == "http":
-                A('    http-request return status 503 content-type "text/plain" '
-                  'string "This service is down for maintenance."')
+                page = errorpages.page_for(cfg, be, 503)
+                if page:
+                    A('    http-request return status 503 content-type "text/html; charset=utf-8" '
+                      'file %s' % errorpages.path(page, 503, "html"))
+                else:
+                    A('    http-request return status 503 content-type "text/plain" '
+                      'string "This service is down for maintenance."')
             else:
                 A("    tcp-request content reject")
         # Who may reach this pool by source address. Works for TCP too --
         # unlike the sign-in, an address needs no place in the protocol to
         # carry it. A list where every entry is malformed refuses everyone:
         # dropping the list because it could not be read would open the
-        # service to exactly the people it names by not naming them.
-        if (be.get("allow_src") or "").strip():
+        # service to exactly the people it names by not naming them. The
+        # typed networks and the named address lists count together.
+        if (be.get("allow_src") or "").strip() or be.get("allow_lists"):
             nets, bad = access.networks(be.get("allow_src"))
-            for token in bad:
+            more, more_bad = access.list_networks(cfg, be.get("allow_lists"))
+            nets += [n for n in more if n not in nets]
+            for token in bad + more_bad:
                 A("    # not a valid network, left out: %s" % _sec(token))
             deny = "http-request deny" if mode == "http" else "tcp-request content reject"
             if nets:
-                A("    %s unless { src %s }" % (deny, " ".join(nets)))
+                declared = []
+                test = _src_test(declared, "allowed_src", nets)
+                for ln in declared:
+                    A("    " + ln)
+                A("    %s unless %s" % (deny, test))
             else:
                 A("    # every allowed network is malformed, so nobody is")
                 A("    " + deny)
@@ -470,7 +555,13 @@ def render_haproxy(cfg):
             # of the time. They go in front of both halves below: they skip
             # the prompt, and they still get in when nobody else could.
             exempt, _bad = access.networks(be.get("auth_exempt_src") or "")
-            skip = ("{ src %s } or " % " ".join(exempt)) if exempt else ""
+            more, _bad = access.list_networks(cfg, be.get("auth_exempt_lists"))
+            exempt += [n for n in more if n not in exempt]
+            declared = []
+            trusted = _src_test(declared, "exempt_src", exempt) if exempt else ""
+            for ln in declared:
+                A("    " + ln)
+            skip = (trusted + " or ") if exempt else ""
             if not access.users_with_passwords(cfg) or (wanted and not allowed):
                 # Either nobody can give the sign-in this service asks for, or
                 # the only groups it admits no longer exist. Refusing every
@@ -478,7 +569,7 @@ def render_haproxy(cfg):
                 # a missing user or a deleted group into no protection at all.
                 A("    # a sign-in is required here and nobody can satisfy it")
                 if exempt:
-                    A("    http-request deny unless { src %s }" % " ".join(exempt))
+                    A("    http-request deny unless %s" % trusted)
                 else:
                     A("    http-request deny")
             else:
@@ -560,11 +651,38 @@ def render_haproxy(cfg):
             if use_cookie:
                 parts.append("cookie %s" % _sec(sv["name"]))
             A("    " + " ".join(parts))
+        # Rules this pool holds for itself, picked on the Services page: acted
+        # on inside the backend, so they reach this service alone and never
+        # its neighbours on the same port. A routing rule means nothing here
+        # and is left out.
+        own = [rules[r] for r in (be.get("rules") or [])
+               if r in rules and rules[r].get("type") != "use_backend"]
+        if own:
+            declared = []
+            for r in own:
+                for cid in rule_cond_ids(r):
+                    if cid in conds and cid not in declared:
+                        declared.append(cid)
+            for cid in declared:
+                c = conds[cid]
+                if c.get("type") == "source_list":
+                    nets, _bad = access.list_networks(cfg, [c.get("list")])
+                    for ln in _src_acl("acl_" + _sec(c["name"]), nets):
+                        A("    " + ln)
+                else:
+                    expr = _line_safe(COND_MAP.get(c.get("type", "custom"), COND_MAP["custom"])(c))
+                    A("    acl acl_%s %s" % (_sec(c["name"]), expr))
+            for r in own:
+                ln = _rule_line(r, conds, backends)
+                if ln:
+                    A("    " + ln)
         for ln in (be.get("custom") or "").splitlines():
             if ln.strip():
                 A("    " + ln.strip())
         A("")
 
+    for ln in crowdsec.backend_lines(cfg):
+        A(ln)
     return "\n".join(L).rstrip() + "\n"
 
 

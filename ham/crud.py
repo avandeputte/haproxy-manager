@@ -7,11 +7,35 @@ import uuid
 
 import copy
 
-from .base import _lock, app
+from .base import _lock, app, log
 from .config import VALID_COLLECTIONS, load_config, merged, save_config
-from .util import _by_id, _sec
+from .util import _by_id, _sec, rule_cond_ids
 from .validate import check_pool, check_setting_types
-from . import apply, haproxy, oauth
+from . import access, apply, errorpages, haproxy, oauth
+
+
+def _check_item(sec, col, cfg, item):
+    """What a collection refuses before storing it. Raises ValueError with why."""
+    if sec != "haproxy":
+        return
+    if col == "backends":
+        check_pool(item)
+        oauth.validate_pool_oauth(cfg, item)
+    elif col == "addresslists":
+        access.check_list(item)
+    elif col == "errorpages":
+        errorpages.check(item)
+
+
+def _after_save(sec, col, cfg):
+    """Error pages live on disk as well as in the configuration, and go there
+    the moment they change: haproxy -c reads the files, and a settings check
+    made before the next Apply has to find them."""
+    if sec == "haproxy" and col == "errorpages":
+        try:
+            errorpages.write_files(cfg)
+        except OSError as e:
+            log.warning("the error pages could not be written: %s", e)
 
 # --------------------------------------------------------------------------
 
@@ -108,15 +132,14 @@ def collection(sec, col):
             return jsonify({"error": "name is required"}), 400
         with _lock:
             cfg = load_config()
-            if sec == "haproxy" and col == "backends":
-                try:
-                    check_pool(item)
-                    oauth.validate_pool_oauth(cfg, item)
-                except ValueError as e:
-                    return jsonify({"error": str(e)}), 400
+            try:
+                _check_item(sec, col, cfg, item)
+            except ValueError as e:
+                return jsonify({"error": str(e)}), 400
             item["id"] = str(uuid.uuid4())
             cfg[sec][col].append(item)
             save_config(cfg)
+            _after_save(sec, col, cfg)
         return jsonify(item)
     abort(405)
 
@@ -140,18 +163,27 @@ def collection_item(sec, col, iid):
                 continue
             if request.method == "PUT":
                 data = request.get_json(force=True) or {}
-                if sec == "haproxy" and col == "backends":
-                    try:
-                        check_pool(data)
-                        oauth.validate_pool_oauth(cfg, data)
-                    except ValueError as e:
-                        return jsonify({"error": str(e)}), 400
+                try:
+                    _check_item(sec, col, cfg, data)
+                except ValueError as e:
+                    return jsonify({"error": str(e)}), 400
                 data["id"] = iid
                 items[i] = data
                 save_config(cfg)
+                _after_save(sec, col, cfg)
                 return jsonify(data)
+            # A condition a rule still tests cannot go: the rule would render
+            # without it -- a deny for everyone, a route for everything.
+            if sec == "haproxy" and col == "conditions":
+                users = [r.get("name") or "?" for r in merged(cfg)["haproxy"]["rules"]
+                         if iid in rule_cond_ids(r)]
+                if users:
+                    return jsonify({"error": "\"%s\" is still tested by %s. Take it off the rule "
+                                             "first, or delete the rule."
+                                             % (x.get("name", iid), ", ".join(users))}), 409
             items.pop(i)
             save_config(cfg)
+            _after_save(sec, col, cfg)
             return jsonify({"ok": True})
     abort(404)
 
@@ -191,7 +223,8 @@ def _object_token(col, item):
     return {"frontends": "frontend fe_" + name,
             "backends": "backend be_" + name,
             "servers": "server " + name + " ",
-            "conditions": "acl_" + name}.get(col, "\x00never")
+            "conditions": "acl_" + name,
+            "errorpages": "/" + name + "-"}.get(col, "\x00never")
 
 
 @app.post("/api/haproxy/preview-object")

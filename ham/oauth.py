@@ -367,7 +367,7 @@ def _vet_claims(s, claims, nonce=None):
         # warning where the switch is, for providers that cannot say so.
         return ("the provider says that email address is unverified -- mark it "
                 "verified at the provider, or allow unverified claims under "
-                "Sign-in > Single sign-on")
+                "Access > Single sign-on")
     return ""
 
 

@@ -38,6 +38,25 @@ def _by_id(items):
     return {i["id"]: i for i in items if "id" in i}
 
 
+def rule_cond_ids(rule):
+    """Every condition a rule tests, whichever half of the test it is in.
+
+    Since 2.0 a rule holds two lists: `any_of`, of which one must match, and
+    `conditions`, which must all match. Anything that asks "which conditions
+    does this rule use" -- ownership, deletion, the ACLs a listener declares --
+    wants both, and reading one list is how a condition in the other would be
+    deleted from under a rule still testing it.
+    """
+    out = []
+    for cid in (rule or {}).get("any_of") or []:
+        if cid not in out:
+            out.append(cid)
+    for cid in (rule or {}).get("conditions") or []:
+        if cid not in out:
+            out.append(cid)
+    return out
+
+
 def cert_path(cert):
     return CERT_DIR / (_sec(cert.get("name")) + ".pem")
 

@@ -23,6 +23,8 @@ from . import (
     twofactor,
     validate,
     crud,
+    crowdsec,
+    errorpages,
     haproxy,
     history,
     keepalived,
@@ -48,6 +50,7 @@ from . import (
     dnsapi,
     webui,
     recipes,
+    rules,
     backup,
     static,
 )
@@ -61,5 +64,6 @@ __all__ = [
     "watchdog",
     "sync", "setup", "peering", "probe", "vrrp", "cluster", "stats", "traffic",
     "mqtt", "hass", "oauth", "logs",
-    "updates", "wizard", "dnsapi", "webui", "recipes", "backup", "static"
+    "updates", "wizard", "dnsapi", "webui", "recipes", "rules", "backup", "static",
+    "errorpages", "crowdsec",
 ]
