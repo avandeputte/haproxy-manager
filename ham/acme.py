@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from datetime import timezone
+from flask import Response
 from flask import abort
 from flask import jsonify
 from flask import request
@@ -9,6 +10,7 @@ from pathlib import Path
 import os
 import tempfile
 import time
+import uuid
 
 from .base import ACME_HOME, ACME_SH, CERT_DIR, _lock, app, log
 from .config import load_config, merged, save_config
@@ -91,6 +93,11 @@ def propagate_certificate(cfg, cert):
     if r.get("ok"):
         return "sent to %d other node(s)" % len(peers)
     return "could not send it to the other nodes: %s" % r.get("error")
+
+
+def is_custom(cert):
+    """A certificate brought here rather than issued: nothing to renew."""
+    return (cert or {}).get("source") == "custom"
 
 
 def acme_issue(cfg, cert, force=False):
@@ -218,6 +225,9 @@ def api_acme_issue(cid):
     cert = _by_id(merged(cfg)["acme"]["certificates"]).get(cid)
     if not cert:
         abort(404)
+    if is_custom(cert):
+        return jsonify({"ok": False, "error": "this certificate was uploaded, not issued: "
+                                               "upload a new one to replace it"}), 400
     force = bool((request.get_json(silent=True) or {}).get("force"))
     return jsonify(acme_issue(cfg, cert, force=force))
 
@@ -239,7 +249,7 @@ def api_acme_renew():
         return jsonify({"ok": False, "error": why}), 409
     results = {}
     for cert in merged(cfg)["acme"]["certificates"]:
-        if cert.get("auto_renew", True):
+        if cert.get("auto_renew", True) and not is_custom(cert):
             results[cert["name"]] = acme_issue(cfg, cert)
     return jsonify({"ok": all(r.get("ok") for r in results.values()) if results else True,
                     "results": results})
@@ -287,12 +297,131 @@ def _renew_loop():
             if time.time() - _last_renew >= interval:
                 _last_renew = time.time()
                 for cert in merged(cfg)["acme"]["certificates"]:
-                    if cert.get("auto_renew", True):
+                    if cert.get("auto_renew", True) and not is_custom(cert):
                         acme_issue(cfg, cert)
         except Exception:
             # The loop must survive anything, but not silently: a renewal
             # loop that dies quietly is discovered as an expired certificate.
             log.exception("the renewal round failed; it runs again in 10 minutes")
+
+
+# --------------------------------------------------------------------------
+# certificates brought here: uploaded, and taken away again
+
+PEM_BLOCK = re.compile(r"-----BEGIN ([A-Z0-9 ]+)-----.*?-----END \1-----", re.S)
+
+
+def _pem_blocks(text):
+    """(kind, block) for every PEM block in the text, in order."""
+    return [(m.group(1), m.group(0)) for m in PEM_BLOCK.finditer(text or "")]
+
+
+def _openssl_out(args, data):
+    with tempfile.NamedTemporaryFile("w", suffix=".pem", delete=False) as f:
+        f.write(data)
+        path = f.name
+    try:
+        os.chmod(path, 0o600)
+        return run(["openssl"] + args + ["-in", path], timeout=30)
+    finally:
+        os.unlink(path)
+
+
+def check_upload(cert_text, key_text, chain_text):
+    """The combined PEM HAProxy reads, and the names it covers; raises
+    ValueError with what is wrong."""
+    certs = [b for k, b in _pem_blocks(cert_text) if k == "CERTIFICATE"]
+    chain = [b for k, b in _pem_blocks(chain_text) if k == "CERTIFICATE"]
+    keys = [(k, b) for k, b in _pem_blocks(key_text) if k.endswith("PRIVATE KEY")]
+    if not certs:
+        raise ValueError("no certificate found: paste the PEM, -----BEGIN CERTIFICATE----- and all")
+    if not keys:
+        raise ValueError("no private key found: paste the PEM, -----BEGIN PRIVATE KEY----- and all")
+    if keys[0][0].startswith("ENCRYPTED"):
+        raise ValueError("the private key is encrypted; HAProxy needs it without a passphrase")
+    leaf, extra = certs[0], certs[1:] + chain
+    rc, cert_pub = _openssl_out(["x509", "-noout", "-pubkey"], leaf)
+    if rc != 0:
+        raise ValueError("the certificate could not be read: %s" % cert_pub.strip()[-200:])
+    rc, key_pub = _openssl_out(["pkey", "-pubout"], keys[0][1])
+    if rc != 0:
+        raise ValueError("the private key could not be read: %s" % key_pub.strip()[-200:])
+    if cert_pub.strip() != key_pub.strip():
+        raise ValueError("the private key does not belong to this certificate")
+    rc, text = _openssl_out(["x509", "-noout", "-ext", "subjectAltName", "-subject"], leaf)
+    names = re.findall(r"DNS:([^,\s]+)", text)
+    if not names:
+        m = re.search(r"CN\s*=\s*([^,/\n]+)", text)
+        names = [m.group(1).strip()] if m else []
+    pem = "\n".join([leaf] + extra + [keys[0][1]]) + "\n"
+    return pem, names
+
+
+@app.post("/api/acme/certificates/upload")
+def api_certificate_upload():
+    """A certificate issued elsewhere -- a commercial one, an internal CA's --
+    stored like an issued one: a combined PEM in the certificate directory,
+    sent to the other nodes with it, attached and matched by its names. It is
+    never renewed here; uploading again replaces it."""
+    body = request.get_json(force=True, silent=True) or {}
+    name = (body.get("name") or "").strip()
+    try:
+        pem, names = check_upload(body.get("cert") or "", body.get("key") or "", body.get("chain") or "")
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    with _lock:
+        cfg = load_config()
+        certs = cfg["acme"]["certificates"]
+        cert = _by_id(certs).get(body.get("id") or "")
+        if body.get("id") and cert is None:
+            return jsonify({"ok": False, "error": "the certificate being replaced no longer exists"}), 400
+        if cert is not None and not is_custom(cert):
+            return jsonify({"ok": False, "error": "%s is issued by ACME; upload under a new name"
+                                                   % cert.get("name")}), 400
+        if cert is None:
+            if not name:
+                return jsonify({"ok": False, "error": "the certificate needs a name"}), 400
+            if any(c.get("name") == name for c in certs):
+                return jsonify({"ok": False, "error": "a certificate named %s already exists" % name}), 400
+            cert = {"id": str(uuid.uuid4()), "name": name}
+            certs.append(cert)
+        cert.update({"source": "custom", "domains": " ".join(names), "auto_renew": False})
+        path = cert_path(cert)
+        CERT_DIR.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=str(CERT_DIR), prefix=".upload-")
+        with os.fdopen(fd, "w") as f:
+            f.write(pem)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+        save_config(cfg)
+    log.info("certificate %s uploaded, covering %s", cert["name"], ", ".join(names) or "no names")
+    sent = propagate_certificate(load_config(), cert)
+    return jsonify({"ok": True, "certificate": {"id": cert["id"], "name": cert["name"]},
+                    "names": names, "note": ("Apply to serve it." + (" " + sent if sent else ""))})
+
+
+@app.get("/api/acme/certificates/<cid>/download")
+def api_certificate_download(cid):
+    """The certificate and its chain, or its private key, as files: to move a
+    certificate to another server, or to keep a copy of an uploaded one."""
+    cert = _by_id(merged(load_config())["acme"]["certificates"]).get(cid)
+    if not cert:
+        abort(404)
+    try:
+        blocks = _pem_blocks(cert_path(cert).read_text())
+    except OSError:
+        return jsonify({"ok": False, "error": "there is no file for this certificate yet"}), 404
+    part = request.args.get("part") or "chain"
+    if part == "key":
+        body = "\n".join(b for k, b in blocks if k.endswith("PRIVATE KEY")) + "\n"
+        filename = "%s.key" % cert["name"]
+        log.warning("the private key of %s was downloaded", cert["name"])
+    else:
+        body = "\n".join(b for k, b in blocks if k == "CERTIFICATE") + "\n"
+        filename = "%s.crt" % cert["name"]
+    return Response(body, mimetype="application/x-pem-file",
+                    headers={"Content-Disposition": 'attachment; filename="%s"' % filename,
+                             "Cache-Control": "no-store"})
 
 
 # --------------------------------------------------------------------------

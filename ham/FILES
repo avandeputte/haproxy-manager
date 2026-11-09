@@ -17,6 +17,7 @@ oauth.py
 history.py
 keepalived.py
 logs.py
+mcp.py
 metrics.py
 mqtt.py
 notify.py

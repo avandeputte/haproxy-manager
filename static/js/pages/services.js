@@ -14,6 +14,8 @@ import { sparkCaption, trafficSpark } from "../sparkline.js";
    are not stored: whether a section is on is read off what it holds. */
 export const WIZ_SECTIONS=[
  {title:"Service",fields:[
+  {k:"action",l:"What it does",t:"select",d:"forward",o:[{value:"forward",label:"forward to servers"},{value:"redirect",label:"redirect to another address"}],
+   h:"A redirect has no servers: every request is answered with a redirect to the address below."},
   {k:"url",l:"Public URLs",t:"textarea",
    h:"One per line. Several names are alternatives that all reach the same servers, e.g. "+
      "https://app.example.com and https://www.example.com. Ports may differ: "+
@@ -21,6 +23,9 @@ export const WIZ_SECTIONS=[
      "A path like /api is allowed on a single URL, and tcp://0.0.0.0:3306 forwards a raw TCP port."},
   {k:"target",l:"Forward to",t:"text",
    h:"e.g. http://192.168.1.100:1781. Several (comma separated) are load balanced, and each may be named: galera1=192.168.1.81:3306"},
+  {k:"redirect_to",l:"Redirect to",t:"text",h:"e.g. https://new.example.com"},
+  {k:"redirect_code",l:"Redirect code",t:"select",d:301,o:[{value:301,label:"301 moved permanently"},{value:302,label:"302 found"},{value:307,label:"307 temporary, same method"},{value:308,label:"308 permanent, same method"}]},
+  {k:"redirect_keep_path",l:"Keep the path",t:"bool",d:true,h:"/a?b here arrives as /a?b there; off sends every request to the address as given."},
   {k:"name",l:"Name",t:"text",h:"Optional -- derived from the host name or port when left empty"},
   {k:"apply",l:"Apply immediately",t:"bool",d:true,h:"Write haproxy.cfg and reload once the objects are created"},
  ]},
@@ -32,8 +37,10 @@ export const WIZ_SECTIONS=[
   {k:"account",l:"ACME account",t:"ref",ref:"acme/accounts",h:"For a new certificate; only needed when you have more than one"},
   {k:"challenge",l:"Challenge type",t:"ref",ref:"acme/challenges"},
   {k:"http_redirect",l:"Redirect HTTP to HTTPS",t:"bool",d:true,h:"Also listens on port 80 and sends visitors to HTTPS"},
+  {k:"hsts",l:"Send HSTS",t:"bool",h:"Strict-Transport-Security: browsers that have been here come back over HTTPS for two years without trying HTTP first. Only turn it on once HTTPS works for good."},
+  {k:"hsts_subdomains",l:"HSTS for subdomains too",t:"bool",h:"Adds includeSubDomains: every name under this one must then work over HTTPS."},
  ]},
- {title:"Health check",toggle:"health_enabled",fields:[
+ {title:"Health check",toggle:"health_enabled",forward:true,fields:[
   {k:"health_enabled",l:"Check the servers' health",t:"bool",d:true,
    h:"A server that fails the check is taken out of rotation and put back when it answers again. Without a check every server is always considered up."},
   {k:"health",l:"Check type",t:"select",d:"http",o:["tcp","http","ssl","pgsql","mysql"],
@@ -52,7 +59,7 @@ export const WIZ_SECTIONS=[
   {k:"notify_mode",l:"Alert when",t:"select",d:"servers",o:["servers","outage","off"],
    h:"What losing a server means here. For a pool where only one server is meant to pass -- a Patroni leader, a primary with standbys -- the rest failing is normal running, so alert only when no server is left."},
  ]},
- {title:"Balancing and timeouts",fields:[
+ {title:"Balancing and timeouts",forward:true,fields:[
   {k:"balance",l:"Load balancing",t:"select",d:"roundrobin",o:["roundrobin","leastconn","source","static-rr","uri"],
    h:"source keeps a client on one server by IP; the default for tcp:// services"},
   {k:"persistence",l:"Stickiness",t:"select",d:"none",o:["none","source","cookie"],
@@ -235,20 +242,20 @@ export function openWizard(prefill){
 
   const frm=document.createElement("div");frm.className="frm";
   const rows={},heads={};
-  /* which certificate the first name will get: said under the Certificate
-     section, where the choice is made */
-  const note=document.createElement("div");note.className="hint";note.style.margin="2px 0 0";
+  /* which certificate the first name will get: said first thing under the
+     Certificate heading, so it does not read as part of the row above it */
+  const note=document.createElement("div");note.className="hint";note.style.margin="0 0 4px";
   const noteRow=document.createElement("div");noteRow.appendChild(note);
   const noteCells=[document.createElement("div"),noteRow];
   WIZ_SECTIONS.forEach(sec=>{
     const h=document.createElement("div");h.className="fsec";h.textContent=t(sec.title);
     heads[sec.title]=h;frm.appendChild(h);
+    if(sec.title==="Certificate"){rows.cert_note=noteCells;noteCells.forEach(el=>frm.appendChild(el));}
     sec.fields.forEach(f=>{
       const cells=fieldRow(f,prefill?prefill[f.k]:undefined);
       rows[f.k]=cells;
       cells.forEach(el=>frm.appendChild(el));
     });
-    if(sec.title==="Certificate"){rows.cert_note=noteCells;noteCells.forEach(el=>frm.appendChild(el));}
   });
   wrap.appendChild(frm);
   // friendlier labels than the raw option values
@@ -268,8 +275,9 @@ export function openWizard(prefill){
        redirect, and nowhere to carry a sign-in. Those sections go, heading
        and all, rather than being offered and refused. */
     const isTcp=val("url").trim().toLowerCase().startsWith("tcp");
+    const redirecting=!isTcp&&chosen(fieldEl("action"))==="redirect";
     WIZ_SECTIONS.forEach(sec=>{
-      const shown=!(sec.http&&isTcp);
+      const shown=!(sec.http&&isTcp)&&!(sec.forward&&redirecting);
       heads[sec.title].style.display=shown?"":"none";
       const open=shown&&(!sec.toggle||on(sec.toggle));
       sec.fields.forEach(f=>setRow(f.k,f.k===sec.toggle?shown:open));
@@ -280,6 +288,11 @@ export function openWizard(prefill){
     ["health_interval","health_uri","health_status","health_user","health_method",
      "health_version","health_host"].forEach(k=>setRow(k,show.includes(k)));
     ["stick_type","stick_size","stick_expire"].forEach(k=>setRow(k,val("persistence")==="source"));
+    /* forward or redirect: the target, or where to and how */
+    setRow("action",!isTcp);
+    setRow("target",!redirecting);
+    ["redirect_to","redirect_code","redirect_keep_path"].forEach(k=>setRow(k,redirecting));
+    setRow("hsts_subdomains",!isTcp&&on("hsts"));
     /* a raw TCP port has no HTTP for a rule to act on */
     const box=fieldEl("rules");
     if(box)[...box.querySelectorAll("label")].forEach(l=>{
@@ -301,6 +314,12 @@ export function openWizard(prefill){
     const d=readForm(WIZ_FIELDS);
     /* an unticked section is off, whatever its hidden fields still say */
     if(!d.health_enabled)d.health="none";
+    if(d.action==="redirect"&&!String(d.url||"").trim().toLowerCase().startsWith("tcp")){
+      d.redirect={to:d.redirect_to,code:Number(d.redirect_code)||301,keep_path:!!d.redirect_keep_path};
+      d.target="";
+    }
+    ["action","redirect_to","redirect_code","redirect_keep_path"].forEach(k=>delete d[k]);
+    if(!d.hsts)d.hsts_subdomains=false;
     if(!d.allow_enabled){d.allow_src="";d.allow_lists=[];}
     if(!d.rate_enabled)d.rate_limit="";
     SECTION_ONLY.forEach(k=>delete d[k]);
@@ -361,7 +380,7 @@ export function openWizard(prefill){
      rows that should appear and disappear as the URL changes stayed as they
      were first drawn. */
   if(hsel)hsel.addEventListener("change",syncRows);
-  ["url","persistence","auth_enabled","oauth_enabled",...SECTION_ONLY].forEach(k=>{
+  ["url","persistence","auth_enabled","oauth_enabled","action","hsts",...SECTION_ONLY].forEach(k=>{
     const el=fieldEl(k);
     if(el){el.addEventListener("change",syncRows);el.addEventListener("input",syncRows);
            el.addEventListener("blur",syncRows);}
@@ -440,7 +459,8 @@ export async function servicesCard(){
           ((s.rule_names||[]).length?'<div class=sub>'+t("rules {names}",{names:esc(s.rule_names.join(", "))})+"</div>":"")+
           (s.maintenance?'<div><span class="pill warn">'+t("paused &mdash; answering 503")+'</span></div>':"")+
           (s.enabled?"":"<div class=sub>"+t("disabled")+"</div>")+"</td>"+
-        "<td class=mono>"+(s.targets.length?s.targets.map(esc).join("<br>"):"<span class=sub>"+t("no server")+"</span>")+
+        "<td class=mono>"+(s.redirect?t("redirects to {to}",{to:esc(s.redirect.to)})+"<div class=sub>"+esc(s.redirect.code)+(s.redirect.keep_path?" \u00b7 "+t("path kept"):"")+"</div>"
+           :s.targets.length?s.targets.map(esc).join("<br>"):"<span class=sub>"+t("no server")+"</span>")+
           "<div class=sub>"+t("pool {name}",{name:esc(s.pool||"—")})+"</div></td>"+
         /* Requests a minute over the last day, with server errors over them.
            Answers "when did this start", which the live figures cannot. */
@@ -477,6 +497,10 @@ export async function servicesCard(){
         oauth_forward:(s.oauth||{}).forward,
         allow_src:s.allow_src,allow_lists:s.allow_lists,
         error_pages:s.error_pages,rules:s.rules,
+        hsts:s.hsts,hsts_subdomains:s.hsts_subdomains,
+        action:s.redirect?"redirect":"forward",
+        redirect_to:(s.redirect||{}).to,redirect_code:(s.redirect||{}).code,
+        redirect_keep_path:s.redirect?s.redirect.keep_path:true,
         rate_limit:s.rate_limit,rate_window:s.rate_window,
         certificate_id:s.certificate_id,
       })));

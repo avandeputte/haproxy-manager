@@ -108,7 +108,10 @@ def api_wizard_publish():
             seen.add((p["host"].lower(), p["port"]))
 
     raw_targets = [t for t in re.split(r"[\s,]+", body.get("target") or "") if t]
-    if not raw_targets:
+    redirect = body.get("redirect") if isinstance(body.get("redirect"), dict) else None
+    if redirect is not None:
+        raw_targets = []                    # a redirect has no servers
+    elif not raw_targets:
         return jsonify({"ok": False, "error": "The target address is required"}), 400
     tgts = []
     for raw in raw_targets:
@@ -150,6 +153,9 @@ def api_wizard_publish():
                 allow_lists=body.get("allow_lists") if isinstance(body.get("allow_lists"), list) else None,
                 error_pages=body.get("error_pages") if isinstance(body.get("error_pages"), list) else None,
                 rules=body.get("rules") if isinstance(body.get("rules"), list) else None,
+                hsts=body.get("hsts") if "hsts" in body else None,
+                hsts_subdomains=body.get("hsts_subdomains") if "hsts_subdomains" in body else None,
+                redirect=redirect,
                 notify_mode=body.get("notify_mode") or None,
                 rate_limit=body.get("rate_limit") if "rate_limit" in body else None,
                 rate_window=body.get("rate_window") if "rate_window" in body else None,

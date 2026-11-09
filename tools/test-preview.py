@@ -57,7 +57,9 @@ ok("10.0.0.9:8080" in r["text"] and "backend be_shop" in r["text"],
 
 r = prev("frontends", {"name": "brand-new", "mode": "http", "binds": "0.0.0.0:8088",
                        "enabled": True, "rules": []})
-ok("frontend fe_brand-new" in r["text"] and "bind 0.0.0.0:8088" in r["text"],
+# with IPv6 on (the default) 0.0.0.0 listens on both families, as :::8088 v4v6
+ok("frontend fe_brand-new" in r["text"]
+   and ("bind 0.0.0.0:8088" in r["text"] or "bind :::8088 v4v6" in r["text"]),
    "an object that does not exist yet previews as what it would create")
 
 r = prev("conditions", {"name": "lonely", "type": "host_matches", "value": "x.example.com"})

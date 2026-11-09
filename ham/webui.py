@@ -436,6 +436,11 @@ def api_services():
             "error_pages": list(pool.get("error_pages") or []),
             "error_page_names": errorpages.names(cfg, pool.get("error_pages")),
             "rules": list(pool.get("rules") or []),
+            "hsts": bool(pool.get("hsts")),
+            "hsts_subdomains": bool(pool.get("hsts_subdomains")),
+            "redirect": ({"to": pool.get("redirect_to"), "code": int(pool.get("redirect_code") or 301),
+                          "keep_path": pool.get("redirect_keep_path", True)}
+                         if (pool.get("redirect_to") or "").strip() else None),
             "rule_names": [rules[r]["name"] for r in (pool.get("rules") or []) if r in rules and rules[r].get("name")],
             "rate_limit": pool.get("rate_limit") or "",
             "rate_window": pool.get("rate_window") or 10,

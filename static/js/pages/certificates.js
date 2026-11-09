@@ -1,4 +1,4 @@
-import { $, api, btn, closeDlg, esc, fieldRow, list, lists, localTime, openDlg, readForm, showText } from "../core.js";
+import { $, api, btn, closeDlg, esc, fieldRow, list, lists, localTime, openDlg, readForm, showText, download } from "../core.js";
 import { E, renderEntity } from "../entities.js";
 import { t, tn } from "../i18n.js";
 import { refreshStatus, route } from "../shell.js";
@@ -262,6 +262,7 @@ export function certExpiryCell(r){
   return h;
 }
 export function certLastCell(r){
+  if(r.source==="custom")return '<span class="pill off">'+t("uploaded")+'</span><div class=sub>'+t("never renewed here")+"</div>";
   const li=(certStat[r.id]||{}).last_issue;
   if(!li)return '<span class=sub>'+t("never attempted")+'</span>';
   let h='<span class="pill '+(li.ok?"up":"down")+'">'+(li.ok?t("succeeded"):t("failed"))+"</span>"+
@@ -288,6 +289,67 @@ export async function issueCert(row,force){
   // navigation in flight rather than painting straight over it.
   if(location.hash==="#/acme/certificates")route();
   refreshStatus();
+}
+/* A certificate issued elsewhere: the PEMs pasted or read from files, checked
+   on the server (the key must belong to the certificate), stored like an
+   issued one and sent to the other nodes. Replacing names the one to replace. */
+export function openUpload(row){
+  const wrap=document.createElement("div");
+  const frm=document.createElement("div");frm.className="frm";
+  const field=(id,label,el,hint)=>{
+    const lab=document.createElement("label");lab.className="fl";lab.textContent=label;lab.htmlFor=id;
+    const cell=document.createElement("div");el.id=id;cell.appendChild(el);
+    if(hint){const h=document.createElement("div");h.className="hint";h.textContent=hint;cell.appendChild(h);}
+    frm.appendChild(lab);frm.appendChild(cell);return el;
+  };
+  const pem=(id,label,hint)=>{
+    const ta=document.createElement("textarea");ta.className="mono";ta.rows=5;
+    const el=field(id,label,ta,hint);
+    const file=document.createElement("input");file.type="file";file.accept=".pem,.crt,.cer,.key,.txt";
+    file.style.marginTop="6px";file.setAttribute("aria-label",t("Load from file"));
+    file.addEventListener("change",()=>{const f=file.files&&file.files[0];if(!f)return;
+      const rd=new FileReader();rd.onload=()=>{ta.value=String(rd.result||"");};rd.readAsText(f);});
+    el.parentNode.insertBefore(file,el.nextSibling);
+    return ta;
+  };
+  const name=document.createElement("input");name.type="text";
+  if(row){name.value=row.name;name.disabled=true;}
+  field("f_up_name",t("Name"),name,t("Also the file name in the certificate directory"));
+  const cert=pem("f_up_cert",t("Certificate"),t("PEM, -----BEGIN CERTIFICATE----- and all. Intermediates may follow it here or go below."));
+  const key=pem("f_up_key",t("Private key"),t("PEM, unencrypted: HAProxy reads it without a passphrase."));
+  const chain=pem("f_up_chain",t("Chain (optional)"),t("The intermediate certificates, if not already above."));
+  wrap.appendChild(frm);
+  const err=document.createElement("div");err.className="err";
+  const out=document.createElement("div");out.className="hint";out.style.marginTop="12px";wrap.appendChild(out);
+  const closeBtn=btn(t("Close"),"",closeDlg);
+  const save=btn(t("Upload"),"pri",async()=>{
+    err.textContent="";save.disabled=true;
+    try{
+      const r=await api("acme/certificates/upload","POST",{id:row?row.id:undefined,name:name.value,
+        cert:cert.value,key:key.value,chain:chain.value});
+      out.textContent=t("Stored, covering {names}.",{names:(r.names||[]).join(", ")||"—"})+" "+(r.note||"");
+      closeBtn.textContent=t("Done");
+      if(location.hash==="#/acme/certificates")route();
+      refreshStatus();
+    }catch(e){err.textContent=e.message;save.disabled=false;}
+  });
+  openDlg(row?t("Replace: {name}",{name:row.name}):t("Upload a certificate"),wrap,[err,closeBtn,save]);
+}
+/* The certificate and its chain, or the private key: two files, two
+   clicks, so the key is never downloaded by accident. */
+export function openDownload(row){
+  const wrap=document.createElement("div");
+  const p=document.createElement("p");p.className="hint";
+  p.textContent=t("The certificate with its chain is safe to share. The private key is not: whoever has it can pose as these names.");
+  wrap.appendChild(p);
+  const bar=document.createElement("div");bar.style.cssText="display:flex;gap:8px;flex-wrap:wrap";
+  bar.appendChild(btn(t("Certificate and chain (.crt)"),"pri",()=>download("acme/certificates/"+row.id+"/download?part=chain")));
+  bar.appendChild(btn(t("Private key (.key)"),"dngr",()=>{
+    if(confirm(t("Download the private key of {name}?",{name:row.name})))
+      download("acme/certificates/"+row.id+"/download?part=key");
+  }));
+  wrap.appendChild(bar);
+  openDlg(t("Download: {name}",{name:row.name}),wrap,[btn(t("Close"),"",closeDlg)]);
 }
 export async function showCertLog(row){
   try{

@@ -8,6 +8,7 @@ import { renderBackup } from "./pages/backup.js";
 import { renderCluster } from "./pages/cluster.js";
 import { renderHistory } from "./pages/history.js";
 import { renderLogs } from "./pages/logs.js";
+import { renderMcp } from "./pages/mcp.js";
 import { renderNotify } from "./pages/notify.js";
 import { renderOverview } from "./pages/overview.js";
 import { renderServices } from "./pages/services.js";
@@ -30,7 +31,8 @@ translateStatic();
 
 const P={acme:renderAcmeSettings,services:renderServices,stats:renderStats,backup:renderBackup,
          updates:renderUpdates,webui:renderWebui,cluster:renderCluster,logs:renderLogs,history:renderHistory,
-         watchdog:renderWatchdog,notify:renderNotify,sso:renderSso,crowdsec:renderCrowdsec};
+         watchdog:renderWatchdog,notify:renderNotify,sso:renderSso,crowdsec:renderCrowdsec,
+         mcp:renderMcp};
 
 /* Collapsed groups are remembered, so the nav stays how you left it. */
 
