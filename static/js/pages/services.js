@@ -242,20 +242,20 @@ export function openWizard(prefill){
 
   const frm=document.createElement("div");frm.className="frm";
   const rows={},heads={};
-  /* which certificate the first name will get: said under the Certificate
-     section, where the choice is made */
-  const note=document.createElement("div");note.className="hint";note.style.margin="2px 0 0";
+  /* which certificate the first name will get: said first thing under the
+     Certificate heading, so it does not read as part of the row above it */
+  const note=document.createElement("div");note.className="hint";note.style.margin="0 0 4px";
   const noteRow=document.createElement("div");noteRow.appendChild(note);
   const noteCells=[document.createElement("div"),noteRow];
   WIZ_SECTIONS.forEach(sec=>{
     const h=document.createElement("div");h.className="fsec";h.textContent=t(sec.title);
     heads[sec.title]=h;frm.appendChild(h);
+    if(sec.title==="Certificate"){rows.cert_note=noteCells;noteCells.forEach(el=>frm.appendChild(el));}
     sec.fields.forEach(f=>{
       const cells=fieldRow(f,prefill?prefill[f.k]:undefined);
       rows[f.k]=cells;
       cells.forEach(el=>frm.appendChild(el));
     });
-    if(sec.title==="Certificate"){rows.cert_note=noteCells;noteCells.forEach(el=>frm.appendChild(el));}
   });
   wrap.appendChild(frm);
   // friendlier labels than the raw option values

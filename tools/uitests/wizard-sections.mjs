@@ -77,6 +77,10 @@ const order = [...document.querySelectorAll("#dlgbody .fsec, #dlgbody [data-fiel
 ok(order.indexOf("#Rate limiting") < order.indexOf("rate_enabled") &&
    order.indexOf("rate_enabled") < order.indexOf("rate_limit") &&
    order.indexOf("rate_limit") < order.indexOf("#Sign-in"), "a section's checkbox comes first, its settings after, under its heading");
+const certHead = headings().find(h => h.textContent === "Certificate");
+ok(certHead.nextElementSibling.nextElementSibling.querySelector(".hint") &&
+   order.indexOf("#Certificate") + 1 === order.indexOf("cert_mode"),
+   "which certificate a host gets is said under the Certificate heading, before its fields");
 ok(WIZ_SECTIONS.filter(s => s.toggle).map(s => s.toggle).join(",") ===
    "health_enabled,allow_enabled,rate_enabled,auth_enabled,oauth_enabled",
    "five sections are optional, each opened by one checkbox");
