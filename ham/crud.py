@@ -269,11 +269,15 @@ def api_preview_object():
               if base.get(head) != block or token in block]
     if not blocks:
         blocks = [block for block in now.values() if token in block]
-    return jsonify({"ok": True,
-                    "text": "\n\n".join(blocks),
-                    "note": "" if blocks else
-                            "This object renders nothing on its own yet -- a condition or "
-                            "server appears once a rule or pool uses it."})
+    out = {"ok": True,
+           "text": "\n\n".join(blocks),
+           "note": "" if blocks else
+                   "This object renders nothing on its own yet -- a condition or "
+                   "server appears once a rule or pool uses it."}
+    if body.get("check"):          # haproxy -c on the whole file with it in, as a save would
+        ok, message = apply.check_rendered(draft)
+        out["validation"] = {"ok": ok, "message": message}
+    return jsonify(out)
 
 
 # --------------------------------------------------------------------------

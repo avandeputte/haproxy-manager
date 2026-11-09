@@ -14,7 +14,9 @@ server's own settings.
 Off until it is turned on under Settings > MCP server, and read-only until
 changes are allowed there too. It answers only a token of its own, not the
 API key: the key also authorises the other nodes, and a token handed to an
-assistant should be revocable without touching the cluster.
+assistant should be revocable without touching the cluster. The token is kept
+beside its hash, as the API key is, so the settings page can show it again
+for setting up the next client; a request is checked against the hash.
 
 In a cluster it behaves as one server. Its settings and token are copied to
 every node, so a client pointed at the virtual IP keeps working through a
@@ -61,7 +63,7 @@ INSTRUCTIONS = (
     "of a passive node is made on the node holding the virtual IP, and the answer says so.")
 # What every node of a cluster holds the same of, so any of them answers the
 # same client the same way.
-SHARED_KEYS = ("enabled", "allow_writes", "token_hash", "token_fp", "token_created")
+SHARED_KEYS = ("enabled", "allow_writes", "token", "token_hash", "token_fp", "token_created")
 
 
 def settings(cfg):
@@ -70,6 +72,16 @@ def settings(cfg):
 
 def _token_hash(token):
     return hashlib.sha256((token or "").strip().encode()).hexdigest()
+
+
+def shown_token(cfg):
+    """The token, for showing again; "" when only its hash is known (made
+    before tokens were kept) or the two disagree."""
+    s = settings(cfg)
+    token = s.get("token") or ""
+    if token and hmac.compare_digest(s.get("token_hash") or "", _token_hash(token)):
+        return token
+    return ""
 
 
 def token_matches(cfg, presented):
@@ -230,6 +242,18 @@ def t_get_service(args):
     return redact(_find_service(args.get("id")))
 
 
+def _preview_object(args, item):
+    """A dry run of an object change: the haproxy.cfg blocks it writes, and
+    haproxy -c on the whole file with it in. Stores nothing."""
+    sec, _, col = _collection(args)[len("/api/"):].partition("/")
+    if sec != "haproxy":
+        raise Refused("dry_run shows what a haproxy/ object renders to; %s objects render "
+                      "nothing to haproxy.cfg" % args.get("collection"))
+    out = _ok(*_api("POST", "/api/haproxy/preview-object", {"col": col, "item": item, "check": True}))
+    return redact({"lines": out.get("text", ""), "note": out.get("note", ""),
+                   "validation": out.get("validation")})
+
+
 def t_update_object(args):
     path = _item_path(args)
     item = args.get("item")
@@ -242,6 +266,8 @@ def t_update_object(args):
     item = unredact(item, stored)
     for k in ("managed_by", "node_local", "id"):       # annotations, not fields
         item.pop(k, None)
+    if args.get("dry_run"):
+        return _preview_object(args, dict(item, id=stored["id"]))
     return _send("PUT", path, item)
 
 
@@ -249,7 +275,15 @@ def t_create_object(args):
     item = args.get("item")
     if not isinstance(item, dict):
         raise Refused("item must be an object")
+    if args.get("dry_run"):
+        return _preview_object(args, item)
     return _send("POST", _collection(args), item)
+
+
+def t_find_certificate(args):
+    host = str(args.get("host") or "").strip()
+    host = urlsplit(host).hostname or host if "://" in host else host
+    return _get("/api/acme/cover", {"host": host})
 
 
 def t_logs(args):
@@ -379,6 +413,32 @@ TOOLS = [
          "What differs between a history snapshot and the configuration now.",
          _schema({"name": S}, ["name"]),
          lambda a: _get("/api/history/%s/diff" % _id(a, "name"))),
+    tool("get_vip_status", "Why this node does or does not hold the virtual IP",
+         "Keepalived on this node: its VRRP state and where that was read from, the virtual "
+         "IPs and which it holds, the interface, keepalived -t on what Apply would write, and "
+         "the journal's last lines. Ask each node for its own.",
+         _schema(), lambda a: _get("/api/keepalived/status")),
+    tool("check_certificate_setup", "Can this node get certificates",
+         "Whether acme.sh is installed, runs and can store keys and certificates here, with "
+         "the problem and the fix when it cannot. Worth asking before request_certificate.",
+         _schema(), lambda a: _get("/api/acme/health")),
+    tool("find_certificate", "Which certificate covers a host",
+         "The configured certificate, if any, that already covers a host name -- exactly or by "
+         "a wildcard -- with its status and days left. publish_service reuses it; when none "
+         "covers the name, a new one is requested.",
+         _schema({"host": {"type": "string", "description": "A host name or URL: app.example.com"}},
+                 ["host"]), t_find_certificate),
+    tool("list_recipes", "Service recipes",
+         "Ready-made settings for common applications (health check, timeouts, headers, "
+         "WebSockets...). Each recipe's fields can be passed to publish_service along with "
+         "the url and target.",
+         _schema(), lambda a: _get("/api/recipes")),
+    tool("run_probes", "Probe the published URLs now",
+         "Check every published URL the way a browser would -- DNS, connection, certificate, "
+         "status -- now instead of at the next minute, and return the results, as get_probes "
+         "does. Useful right after apply_changes. Runs on the node holding the virtual IP (or "
+         "a standalone one); a passive node says so. Changes no configuration.",
+         _schema(), lambda a: _send("POST", "/api/probes/run", {})),
     tool("get_certificate_log", "Certificate issue log",
          "acme.sh's output from the last time a certificate was issued or renewed.",
          _schema({"id": S}, ["id"]),
@@ -468,15 +528,23 @@ TOOLS = [
          _schema({"id": S, "force": B}, ["id"]),
          lambda a: _send("POST", "/api/acme/issue/%s" % _id(a), {"force": bool(a.get("force"))}),
          write=True),
+    tool("renew_certificates", "Renew the certificates that are due",
+         "What the daily renewal does, now: every auto-renewing certificate that is due is "
+         "renewed through ACME. Uploaded certificates are never renewed. Runs on the node "
+         "holding the virtual IP.",
+         _schema(), lambda a: _send("POST", "/api/acme/renew", {}), write=True),
     tool("create_object", "Create an object",
          "Add an object to a collection, with the fields list_objects shows. Prefer "
-         "publish_service, save_rule and save_condition, which build the related objects too.",
-         _schema({"collection": COLL, "item": {"type": "object"}}, ["collection", "item"]),
+         "publish_service, save_rule and save_condition, which build the related objects too. "
+         "dry_run (haproxy/ collections) returns the lines it renders to and HAProxy's verdict.",
+         _schema({"collection": COLL, "item": {"type": "object"}, "dry_run": DRY},
+                 ["collection", "item"]),
          t_create_object, write=True),
     tool("update_object", "Replace an object",
          "Replace an object with item, the whole object as list_objects shows it, changed. "
-         "[redacted] values keep what is stored.",
-         _schema({"collection": COLL, "id": S, "item": {"type": "object"}},
+         "[redacted] values keep what is stored. dry_run (haproxy/ collections) returns the "
+         "lines it renders to and HAProxy's verdict.",
+         _schema({"collection": COLL, "id": S, "item": {"type": "object"}, "dry_run": DRY},
                  ["collection", "id", "item"]),
          t_update_object, write=True, destructive=True),
     tool("delete_object", "Delete an object",
@@ -643,7 +711,7 @@ def push_settings(cfg):
 
 @app.post("/api/mcp/receive")
 def api_mcp_receive():
-    """Take the MCP settings and token hash from another node."""
+    """Take the MCP settings and token from another node."""
     cfg = load_config()
     if not auth.key_matches(cfg["local"].get("api_key"), request.headers.get("X-API-Key")):
         return jsonify({"ok": False, "error": "the MCP settings can only be set by a node "
@@ -654,6 +722,8 @@ def api_mcp_receive():
     with _lock:
         cfg = load_config()
         s = cfg["local"].setdefault("mcp", {})
+        if "token_hash" in rec and "token" not in rec:
+            s.pop("token", None)             # a node that sends only the hash: the old token is gone
         for k in SHARED_KEYS:
             if k in rec:
                 s[k] = bool(rec[k]) if k in ("enabled", "allow_writes") else str(rec[k] or "")
@@ -760,9 +830,11 @@ def mcp_endpoint():
 
 @app.get("/api/mcp")
 def api_mcp():
-    s = settings(load_config())
+    cfg = load_config()
+    s = settings(cfg)
     return jsonify({"enabled": bool(s.get("enabled")), "allow_writes": bool(s.get("allow_writes")),
                     "has_token": bool(s.get("token_hash")), "token_fp": s.get("token_fp") or "",
+                    "token_shown": bool(shown_token(cfg)),
                     "token_created": s.get("token_created") or "",
                     "tools": [{"name": t["name"], "title": t["title"], "write": t["write"]}
                               for t in TOOLS]})
@@ -782,14 +854,27 @@ def api_mcp_settings():
     return jsonify({"ok": True, "pushed": push_settings(cfg)})
 
 
+@app.get("/api/mcp/token")
+def api_mcp_token_show():
+    """The token again, to set up another client. The administrator's session
+    can see it, as it can the API key; the MCP tools have no route to it."""
+    cfg = load_config()
+    token = shown_token(cfg)
+    if not token:
+        return jsonify({"ok": False, "error": "This token was made before tokens were kept, so it "
+                                              "cannot be shown. Replace it to get one that can."}), 404
+    log.info("mcp: the token was shown (%s)", settings(cfg).get("token_fp"))
+    return jsonify({"ok": True, "token": token, "token_fp": settings(cfg).get("token_fp") or ""})
+
+
 @app.post("/api/mcp/token")
 def api_mcp_token():
-    """A new token, shown this once. Only its hash is kept, and the old one
-    stops working the moment this returns."""
+    """A new token. The old one stops working the moment this returns."""
     token = "ham_mcp_" + secrets.token_urlsafe(32)
     with _lock:
         cfg = load_config()
         s = cfg["local"].setdefault("mcp", {})
+        s["token"] = token
         s["token_hash"] = _token_hash(token)
         s["token_fp"] = s["token_hash"][:8]
         s["token_created"] = datetime.now(timezone.utc).isoformat(timespec="seconds")

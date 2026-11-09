@@ -74,8 +74,8 @@ client.put("/api/mcp", json={"enabled": True}, headers=K)
 ok(rpc("initialize").status_code == 401, "on, but without a token nothing gets in")
 ok(rpc("initialize", token="mcp-test-key").status_code == 401, "and the API key is not the token")
 tok = client.post("/api/mcp/token", headers=K).get_json()["token"]
-ok(tok.startswith("ham_mcp_") and tok not in json.dumps(load_config()["local"]),
-   "a token is shown once and only its hash is kept")
+ok(tok.startswith("ham_mcp_") and tok != load_config()["local"]["mcp"]["token_hash"],
+   "a token is made, and requests are checked against its hash")
 r = rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
                        "clientInfo": {"name": "claude-code", "version": "2"}}, token=tok)
 init = r.get_json()["result"]
@@ -95,6 +95,9 @@ old = tok
 tok = client.post("/api/mcp/token", headers=K).get_json()["token"]
 ok(rpc("ping", token=old).status_code == 401 and rpc("ping", token=tok).status_code == 200,
    "a new token ends the old one")
+shown = client.get("/api/mcp/token", headers=K).get_json()
+ok(shown.get("token") == tok and client.get("/api/mcp", headers=K).get_json()["token_shown"],
+   "the token can be shown again, to set up the next client")
 
 # -- the tools ----------------------------------------------------------------------
 tools = rpc("tools/list", token=tok).get_json()["result"]["tools"]
@@ -139,6 +142,31 @@ res, text = call("update_settings", {"section": "haproxy", "values": {"maxconn":
                                      "dry_run": True}, token=tok)
 ok(res["isError"] and load_config()["haproxy"]["settings"].get("maxconn") != 1234,
    "nor are settings changed under a dry_run they do not have")
+res, text = call("create_object", {"collection": "haproxy/backends", "dry_run": True,
+                                   "item": {"name": "drypool", "servers": ["s9"]}}, token=tok)
+ok(not res["isError"] and "backend be_drypool" in text and "10.0.0.9:80" in text
+   and '"haproxy -c accepts it"' in text
+   and not any(x["name"] == "drypool" for x in load_config()["haproxy"]["backends"]),
+   "create_object has a dry run: the lines and HAProxy's verdict, nothing stored: %s" % text[:200])
+res, text = call("update_object", {"collection": "haproxy/servers", "id": "s9", "dry_run": True,
+                                   "item": {"name": "keep-me", "address": "10.0.0.9", "port": 8081}},
+                 token=tok)
+ok(not res["isError"] and '"validation"' in text
+   and next(x for x in load_config()["haproxy"]["servers"] if x["id"] == "s9")["port"] == 80,
+   "so has update_object: %s" % text[:200])
+res, text = call("create_object", {"collection": "acme/accounts", "dry_run": True,
+                                   "item": {"name": "x", "email": "a@example.com"}}, token=tok)
+ok(res["isError"] and not any(x.get("name") == "x" for x in load_config()["acme"]["accounts"]),
+   "a dry run of an object haproxy.cfg does not show is refused, and nothing is stored")
+res, text = call("renew_certificates", token=tok)
+ok(res["isError"] and "Allow changes" in text, "renewing certificates is a change, refused while they are off")
+for name, args, want in [("get_vip_status", {}, '"vrrp_state"'),
+                         ("check_certificate_setup", {}, '"problem"'),
+                         ("find_certificate", {"host": "https://app.example.com/x"}, '"covered": false'),
+                         ("list_recipes", {}, '"recipes"'),
+                         ("run_probes", {}, '"results"')]:
+    res, text = call(name, args, token=tok)
+    ok(not res["isError"] and want in text, "%s answers while changes are off: %s" % (name, text[:120]))
 r = client.post("/api/mcp/forward", json={"tool": "delete_object", "arguments":
                 {"collection": "haproxy/servers", "id": "s9", "dry_run": True}}, headers=K)
 ok(r.get_json()["isError"] and any(x["id"] == "s9" for x in load_config()["haproxy"]["servers"]),
@@ -203,6 +231,11 @@ res, text = call("apply_changes", token=tok)
 ok(res["isError"] and "no other node answered" in text, "with no active node, it says so")
 res, text = call("get_status", token=tok)
 ok(not res["isError"], "reading stays on the node asked")
+real_role = auth.node_role
+auth.node_role = lambda cfg: ("passive", [])
+res, text = call("run_probes", token=tok)
+ok(res["isError"] and "virtual IP" in text, "a passive node does not probe: the names lead elsewhere")
+auth.node_role = real_role
 auth.readonly_state, mcp._active_peer, mcp._requests = real_ro, real_peer, real_req
 
 r = client.post("/api/mcp/forward", json={"tool": "apply_changes", "arguments": {}})
@@ -210,6 +243,18 @@ ok(r.status_code == 401, "only a node with the API key can pass a call on")
 r = client.post("/api/mcp/receive", json={"mcp": {"enabled": True, "token_hash": "x" * 64}},
                 headers={"X-API-Key": "wrong"})
 ok(r.status_code == 401, "and only such a node can set the token")
+ok(not any(tok in call(n, a, token=tok)[1] for n, a in
+           [("get_status", {}), ("get_cluster", {}), ("get_settings", {"section": "haproxy"}),
+            ("get_haproxy_config", {})]),
+   "no tool shows the token it was called with")
+keep = dict(load_config()["local"]["mcp"])
+r = client.post("/api/mcp/receive", json={"mcp": {"token_hash": "f" * 64, "token_fp": "ffffffff"}}, headers=K)
+ok(r.status_code == 200 and client.get("/api/mcp/token", headers=K).status_code == 404
+   and not client.get("/api/mcp", headers=K).get_json()["token_shown"],
+   "a hash from a node that does not send the token drops the one kept: it is not the token any more")
+cfg = load_config()
+cfg["local"]["mcp"] = keep
+save_config(cfg)
 ok(mcp.push_settings(load_config()) == [], "with no peers there is nothing to copy to")
 
 # -- turned off again ---------------------------------------------------------------------

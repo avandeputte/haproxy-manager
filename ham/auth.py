@@ -181,6 +181,7 @@ LOCAL_WRITE_PREFIXES = (
     "/api/unlock",         # lifting the lock cannot itself be blocked by it
     "/api/crowdsec/install",   # this node's own bouncer package
     "/api/mcp",            # this node's MCP server and its token
+    "/api/probes/run",     # probing from this node, which says itself why a passive one does not
 )
 
 

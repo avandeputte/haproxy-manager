@@ -286,6 +286,34 @@ def poll(cfg):
                      name="url-probe").start()
 
 
+@app.post("/api/probes/run")
+def api_probes_run():
+    """Probe every published URL now rather than at the next minute, and
+    answer with the results. Only where poll() would: a passive node's
+    answers would be about a machine it is not."""
+    cfg = load_config()
+    if auth.node_role(cfg)[0] == "passive":
+        return jsonify({"ok": False, "error": "this node is passive: the published names resolve to "
+                                              "the virtual IP, which it does not hold, so it does not "
+                                              "probe them; ask the node that holds it"}), 409
+    with _state_lock:
+        if _state["busy"]:
+            return jsonify({"ok": False, "error": "a round of probes is already running; "
+                                                  "ask again in a few seconds"}), 409
+        _state["busy"] = True
+    try:
+        entries = published_urls(cfg)
+        if entries:
+            _run(cfg, entries)
+        else:
+            with _state_lock:
+                _state["results"], _state["at"] = [], time.time()
+    finally:
+        with _state_lock:
+            _state["busy"] = False
+    return api_probes()
+
+
 @app.get("/api/probes")
 def api_probes():
     """The last round of URL probes, and when it ran."""

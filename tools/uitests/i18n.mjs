@@ -91,8 +91,9 @@ const english = Object.entries(de)
   .map(([k]) => [k, pattern(k)])
   .filter(([, re]) => !re.test(germanText));
 /* Only what a person sees or hears: markup attributes are English by
-   construction (class="pill up", data-event="service"). */
-const visible = text => text.replace(/\s([\w-]+)=("[^"]*"|'[^']*'|[^\s>]+)/g,
+   construction (class="pill up", data-event="service"), and a <pre> holds
+   a command or a file to paste as it is ("claude mcp add --scope user ..."). */
+const visible = text => text.replace(/<pre\b[\s\S]*?<\/pre>/g, " ").replace(/\s([\w-]+)=("[^"]*"|'[^']*'|[^\s>]+)/g,
   (m, name) => ["title", "placeholder", "aria-label", "alt"].includes(name) ? m : " ");
 ok(english.length > 500, "the German dictionary is large enough to be worth sweeping (" + english.length + ")");
 
@@ -216,7 +217,9 @@ const content = document.querySelector("#content");
 /* Everything under an element, one part per line. The stub's own .text glues
    adjacent nodes together ("zz-reason" + "Edit here anyway"), which would hide
    a word boundary from the search below. */
-const textOf = n => [n.innerHTML, n.textContent, ...n.children.map(textOf)].filter(Boolean).join("\n");
+const isPre = n => String(n.tagName || "").toLowerCase() === "pre";
+const ownText = n => n.nodeType === 3 ? n.textContent : isPre(n) ? " " : Array.from(n.childNodes || []).map(ownText).join("");
+const textOf = n => isPre(n) ? "" : [n.innerHTML, ownText(n), ...n.children.map(textOf)].filter(Boolean).join("\n");
 const dlg = () => document.querySelector("#dlgtitle").textContent + "\n" +
   textOf(document.querySelector("#dlgbody")) + "\n" + textOf(document.querySelector("#dlgfoot"));
 const page = () => textOf(content);
