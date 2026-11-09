@@ -15,7 +15,18 @@ NUMERIC_SETTINGS = {
     "acme": {"challenge_port": (1, 65535), "renew_hours": (1, 8760)},
 }
 TIME_SETTINGS = {"haproxy": ["timeout_client", "timeout_connect", "timeout_server",
-                             "hard_stop_after"]}
+                             "hard_stop_after", "timeout_tunnel"]}
+DEFAULT_SITES = ("503", "404", "drop", "redirect")
+
+
+def plain_url(value):
+    """An http(s) address with nothing in it that could end a directive:
+    no space, no quote."""
+    value = str(value or "").strip()
+    return bool(re.match(r"^https?://\S+$", value)) and not any(q in value for q in "\"'")
+
+
+_plain_url = plain_url
 TIME_RE = re.compile(r"^\d+(us|ms|s|m|h|d)?$")
 
 
@@ -35,6 +46,12 @@ def check_setting_types(sec, proposed):
             continue
         if not lo <= val <= hi:
             problems.append("%s must be between %d and %d." % (key, lo, hi))
+    if sec == "haproxy" and "default_site" in proposed:
+        if proposed["default_site"] not in DEFAULT_SITES:
+            problems.append("default_site must be one of %s." % ", ".join(DEFAULT_SITES))
+        elif proposed["default_site"] == "redirect" and \
+                not _plain_url(str(proposed.get("default_site_url") or "").strip()):
+            problems.append("a redirect for unknown hosts needs an address starting with http:// or https://.")
     for key in TIME_SETTINGS.get(sec, []):
         raw = proposed.get(key)
         if raw in ("", None):

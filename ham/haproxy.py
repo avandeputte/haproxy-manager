@@ -3,7 +3,9 @@
 from datetime import datetime
 from datetime import timezone
 import base64
+import functools
 import re
+import socket
 
 from .base import CERT_DIR, PORT
 from .config import merged
@@ -35,8 +37,24 @@ def _line_safe(value):
 # it, so starts-with needs none of this.
 HOST = "hdr(host),regsub(':[0-9]+$','')"
 
+def _host_test(c):
+    """host_matches: the names as given, or -- when one of them is a wildcard
+    -- all of them as anchored patterns. *.example.com stands for one label,
+    as a wildcard certificate does: a.example.com, not example.com, not
+    a.b.example.com, so a name is never routed where its certificate cannot
+    follow."""
+    values = c.get("value", "").split()
+    if not any(v.startswith("*.") for v in values):
+        return "%s -i %s" % (HOST, c.get("value", ""))
+    def pattern(v):
+        if v.startswith("*."):
+            return "^[^.]+" + re.escape(v[1:]) + "$"
+        return "^" + re.escape(v) + "$"
+    return "%s -m reg -i %s" % (HOST, " ".join(pattern(v) for v in values))
+
+
 COND_MAP = {
-    "host_matches":     lambda c: "%s -i %s" % (HOST, c.get("value", "")),
+    "host_matches":     _host_test,
     "host_starts_with": lambda c: "hdr_beg(host) -i %s" % c.get("value", ""),
     "host_ends_with":   lambda c: "%s -m end -i %s" % (HOST, c.get("value", "")),
     "path_matches":     lambda c: "path %s" % c.get("value", ""),
@@ -147,6 +165,53 @@ def _rule_line(rule, conds, backends):
 MAX_INLINE_CERTS = 20
 
 
+@functools.lru_cache(maxsize=1)
+def ipv6_available():
+    """Can this node listen on IPv6? Asked once per process by binding the
+    unspecified address, dual-stack, to a spare port. A kernel without IPv6
+    refuses the socket outright, and a listener that cannot bind would stop
+    HAProxy from starting at all."""
+    try:
+        s = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+        try:
+            s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+            s.bind(("::", 0))
+            return True
+        finally:
+            s.close()
+    except OSError:
+        return False
+
+
+def _bind_address(addr, st):
+    """A listener's address as HAProxy is given it: every IPv4 address
+    becomes every address, both families, where IPv6 is wanted and works.
+    A specific address -- a virtual IP -- is left exactly as it is."""
+    if addr.startswith("0.0.0.0:") and st.get("ipv6", True) and ipv6_available():
+        return ":::%s v4v6" % addr.split(":", 1)[1]
+    return addr
+
+
+DEFAULT_SITE_BACKEND = "bk_default_site"
+
+
+def _default_site_lines(st):
+    """The backend that answers hosts no service answers, or [] for HAProxy's
+    own 503, as before."""
+    kind = st.get("default_site") or "503"
+    if kind == "404":
+        # No payload: HAProxy answers with the 404 error page when there is
+        # one, its own otherwise.
+        action = "http-request return status 404"
+    elif kind == "drop":
+        action = "http-request silent-drop"
+    elif kind == "redirect" and (st.get("default_site_url") or "").strip():
+        action = "http-request redirect location %s code 302" % _line_safe(st["default_site_url"])
+    else:
+        return []
+    return ["backend " + DEFAULT_SITE_BACKEND, "    mode http", "    " + action, ""]
+
+
 def _rate_limit(be):
     """A pool's ceiling per client address: (requests, window in seconds).
 
@@ -234,6 +299,8 @@ def render_haproxy(cfg):
     A("    timeout connect %s" % (st.get("timeout_connect") or "5s"))
     A("    timeout client %s" % (st.get("timeout_client") or "50s"))
     A("    timeout server %s" % (st.get("timeout_server") or "50s"))
+    if (st.get("timeout_tunnel") or "").strip():
+        A("    timeout tunnel %s" % _sec(st["timeout_tunnel"].strip()))
     # The error pages every service answers with; a pool may still pick its
     # own. The files are written by the node that applies this, from the
     # same configuration, so naming them here is safe on every node.
@@ -285,11 +352,16 @@ def render_haproxy(cfg):
                 ssl_suffix += " alpn h2,http/1.1"
         for b in (fe.get("binds") or "").splitlines():
             if b.strip():
-                A("    bind %s%s" % (b.strip(), ssl_suffix))
+                A("    bind %s%s" % (_bind_address(b.strip(), st), ssl_suffix))
         A("    mode %s" % mode)
         A("    option httplog" if mode == "http" else "    option tcplog")
         if mode == "http" and fe.get("forwardfor", True):
             A("    option forwardfor")
+            # The names some applications read instead: the visitor's address
+            # on its own, and the host it asked for. Set, not added, so a copy
+            # a client sends never survives.
+            A("    http-request set-header X-Real-IP %[src]")
+            A("    http-request set-header X-Forwarded-Host %[req.hdr(host)]")
         # HAProxy runs every http-request rule before any use_backend, whatever
         # order they appear in, and warns on each reload when the file does not
         # say so. Group them the way it will actually evaluate them: ACLs, then
@@ -364,6 +436,8 @@ def render_haproxy(cfg):
         db = backends.get(fe.get("default_backend"))
         if db:
             A("    default_backend be_%s" % _sec(db["name"]))
+        elif mode == "http" and _default_site_lines(st):
+            A("    default_backend " + DEFAULT_SITE_BACKEND)
         for ln in (fe.get("custom") or "").splitlines():
             if ln.strip():
                 A("    " + ln.strip())
@@ -621,6 +695,21 @@ def render_haproxy(cfg):
             A("    stick-table type %s size %s expire %s%s" % (table + (store,)))
             if not use_cookie and be.get("persistence") == "source":
                 A("    stick on src")
+        # HSTS: browsers that have been here over HTTPS come back over HTTPS
+        # for two years, without trying plain HTTP first. Only ever sent over
+        # TLS, where it means something.
+        if mode == "http" and be.get("hsts"):
+            A('    http-response set-header Strict-Transport-Security "max-age=63072000%s" if { ssl_fc }'
+              % ("; includeSubDomains" if be.get("hsts_subdomains") else ""))
+        # A service that redirects: no servers, the answer is the redirect.
+        # After the allow-list and the sign-in, so those still hold. With the
+        # path kept, /a?b on this name arrives as /a?b on the other.
+        if mode == "http" and (be.get("redirect_to") or "").strip():
+            to = _line_safe(be["redirect_to"]).rstrip("/") if be.get("redirect_keep_path", True) \
+                else _line_safe(be["redirect_to"])
+            code = int(be.get("redirect_code") or 301)
+            A("    http-request redirect %s %s code %d"
+              % ("prefix" if be.get("redirect_keep_path", True) else "location", to, code))
         for sid in be.get("servers") or []:
             sv = servers.get(sid)
             if not sv or not sv.get("enabled", True):
@@ -682,6 +771,8 @@ def render_haproxy(cfg):
         A("")
 
     for ln in crowdsec.backend_lines(cfg):
+        A(ln)
+    for ln in _default_site_lines(st):
         A(ln)
     return "\n".join(L).rstrip() + "\n"
 

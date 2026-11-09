@@ -1,7 +1,7 @@
 import { $, HEALTH_LABEL, PROXY_KEYWORD, PROXY_OPTIONS, api, btn, closeDlg, esc, fieldRow, list, lists, nameOf, openDlg, readForm, showText, trimHaproxy } from "./core.js";
 import { t } from "./i18n.js";
 import { refreshStatus, route } from "./shell.js";
-import { certificateNotices, certExpiryCell, certLastCell, certStatusCell, dnsApiByHook, dnsApiOptions, dnsCredentialHelp, issueCert, loadAcmeHealth, loadCertStatus, loadDnsApis, openCertWizard, showCertLog } from "./pages/certificates.js";
+import { certificateNotices, certExpiryCell, certLastCell, certStatusCell, dnsApiByHook, dnsApiOptions, dnsCredentialHelp, issueCert, loadAcmeHealth, loadCertStatus, loadDnsApis, openCertWizard, openDownload, openUpload, showCertLog } from "./pages/certificates.js";
 import { ACTION_LABEL, COND_LABEL, openRuleWizard } from "./pages/rules.js";
 import { openConditionWizard } from "./pages/conditions.js";
 import { state } from "./state.js";
@@ -104,6 +104,11 @@ export const E={
    {k:"oauth_forward",l:"Pass the signed-in email to the servers",t:"bool",
     h:"X-Auth-Request-Email and Remote-User, set from the verified session; client-sent copies are stripped everywhere."},
    {k:"error_pages",l:"Error pages",t:"refmulti",ref:"haproxy/errorpages",describe:describePage,h:"Pages for this pool alone, over the ones that stand for every service. HTTP mode only."},
+   {k:"hsts",l:"Send HSTS",t:"bool",h:"Strict-Transport-Security, over HTTPS only: browsers that have been here come back over HTTPS for two years without trying HTTP first. HTTP mode only."},
+   {k:"hsts_subdomains",l:"HSTS for subdomains too",t:"bool",h:"Adds includeSubDomains: every name under this one must then work over HTTPS."},
+   {k:"redirect_to",l:"Redirect to",t:"text",h:"Optional. An address starting with http:// or https://: every request is answered with a redirect there instead of reaching the servers."},
+   {k:"redirect_code",l:"Redirect code",t:"select",o:[{value:301,label:"301 moved permanently"},{value:302,label:"302 found"},{value:307,label:"307 temporary, same method"},{value:308,label:"308 permanent, same method"}],d:301},
+   {k:"redirect_keep_path",l:"Keep the path",t:"bool",d:true,h:"/a?b here arrives as /a?b there; off sends every request to the address as given."},
    {k:"rules",l:"Rules",t:"refmulti",ref:"haproxy/rules",filter:r=>r.type!=="use_backend",describe:describeRule,
     h:"Rules acted on inside this pool, so they reach this service alone: deny, headers, redirects, raw lines. Routing rules belong on the listener and are not offered."},
    {k:"custom",l:"Extra directives",t:"textarea",h:"Advanced. Raw lines added inside this backend, for anything the fields above do not cover -- for example \"http-reuse safe\". One per line. See the HAProxy configuration manual: https://docs.haproxy.org/2.6/configuration.html"}]},
@@ -285,9 +290,11 @@ export const E={
   pre:async()=>{await loadCertStatus();await loadAcmeHealth();},
   notice:certificateNotices,
   rowActions:[
-   {label:"Issue",fn:r=>issueCert(r,false),title:"Request the certificate from the CA now"},
-   {label:"Force",fn:r=>issueCert(r,true),cls:"dngr",title:"Reissue even if not due for renewal"},
-   {label:"Log",fn:r=>showCertLog(r),title:"acme.sh output of the last attempt"}],
+   {label:"Issue",fn:r=>issueCert(r,false),when:r=>r.source!=="custom",title:"Request the certificate from the CA now"},
+   {label:"Force",fn:r=>issueCert(r,true),cls:"dngr",when:r=>r.source!=="custom",title:"Reissue even if not due for renewal"},
+   {label:"Log",fn:r=>showCertLog(r),when:r=>r.source!=="custom",title:"acme.sh output of the last attempt"},
+   {label:"Replace",fn:r=>openUpload(r),when:r=>r.source==="custom",title:"Upload a new certificate and key under this name"},
+   {label:"Download",fn:r=>openDownload(r),title:"The certificate and chain, or the private key"}],
   fields:[
    {k:"name",l:"Name",t:"text",h:"Also used as the PEM file name"},
    {k:"domains",l:"Domain names",t:"textarea",h:"One per line; the first is the certificate's primary name"},
@@ -321,6 +328,13 @@ export const S={
    {k:"timeout_connect",l:"Connect timeout",t:"text"},
    {k:"timeout_client",l:"Client timeout",t:"text"},
    {k:"timeout_server",l:"Server timeout",t:"text"},
+   {k:"timeout_tunnel",l:"WebSocket idle timeout",t:"text",d:"1h",
+    h:"How long an upgraded connection -- a WebSocket, a terminal -- may sit idle before it is closed (timeout tunnel). Empty falls back to the client and server timeouts, which cut an idle WebSocket after 50 seconds."},
+   {k:"ipv6",l:"Listen on IPv6 too",t:"bool",d:true,
+    h:"Services that listen on every address answer over IPv6 as well (bind ::: v4v6). Skipped by itself on a node without IPv6; turn it off where IPv6 exists but is broken."},
+   {k:"default_site",l:"Unknown hosts",t:"select",o:[{value:"503",label:"503 -- HAProxy's own answer"},{value:"404",label:"404 not found -- the 404 error page when there is one"},{value:"drop",label:"drop the connection, say nothing"},{value:"redirect",label:"redirect to an address"}],d:"503",
+    h:"What a request for a host name no service answers gets, on every HTTP listener without a default Backend Pool."},
+   {k:"default_site_url",l:"Unknown hosts redirect to",t:"text",h:"Only for redirect: an address starting with http:// or https://"},
    {k:"retries",l:"Retries",t:"number"},
    {k:"redispatch",l:"Redispatch on failure",t:"bool",d:true},
    {k:"stats_enabled",l:"Enable statistics page",t:"bool"},
@@ -362,6 +376,8 @@ export async function renderEntity(key,into){
     if(key==="acme/certificates"){
       hd.appendChild(btn(t("Request a certificate"),"pri sm",()=>openCertWizard()));
       hd.appendChild(document.createTextNode(" "));
+      hd.appendChild(btn(t("Upload a certificate"),"sm",()=>openUpload()));
+      hd.appendChild(document.createTextNode(" "));
       hd.appendChild(btn(t(def.add),"sm",()=>openEditor(key)));
     }else if(def.wizard){
       /* the wizard is the editor: it asks for everything the fields hold */
@@ -402,7 +418,7 @@ export async function renderEntity(key,into){
         tr.appendChild(td);
       });
       const act=document.createElement("td");act.style.textAlign="right";act.style.whiteSpace="nowrap";
-      (state.readOnly?[]:(def.rowActions||[])).forEach(a=>{
+      (state.readOnly?[]:(def.rowActions||[])).filter(a=>!a.when||a.when(row)).forEach(a=>{
         const b=btn(t(a.label),"sm "+(a.cls||""),()=>a.fn(row));
         if(a.title)b.title=t(a.title);
         act.appendChild(b);act.appendChild(document.createTextNode(" "));

@@ -23,7 +23,7 @@ import time
 
 from .base import app, log
 from .config import load_config, merged
-from .util import _by_id, _sec
+from .util import _by_id, _sec, rule_cond_ids
 from . import auth, notify, wizard
 
 PROBE_SECONDS = 60
@@ -107,13 +107,18 @@ def published_urls(cfg):
             pool = backends.get(rule.get("backend"))
             if not pool or not pool.get("enabled", True):
                 continue
+            # A redirect answers with a redirect by design; there is nothing
+            # behind it to be up or down.
+            if (pool.get("redirect_to") or "").strip():
+                continue
             path = ""
             hosts = []
-            for cid in rule.get("conditions") or []:
+            for cid in rule_cond_ids(rule):
                 c = conds.get(cid)
                 if not c:
                     continue
-                if c.get("type") == "host_matches" and c.get("value"):
+                # A wildcard is a pattern, not an address anyone can ask for.
+                if c.get("type") == "host_matches" and c.get("value") and not c["value"].startswith("*."):
                     hosts.append(c["value"])
                 elif c.get("type") == "path_starts_with" and c.get("value"):
                     path = c["value"]

@@ -14,6 +14,7 @@ from .base import ACME_HOME, ACME_SH, _lock, app
 from .config import load_config, save_config
 from .util import _by_id, _sec, cert_details, cert_path, parse_domains, rule_cond_ids, run
 from . import access, acme, errorpages, validate, wizard, oauth
+from .validate import plain_url as _plain_url
 
 # --------------------------------------------------------------------------
 
@@ -308,21 +309,46 @@ def _drop_orphan_wizard_servers(hp, candidate_ids, acts):
             acts.append({"action": "removed", "type": "Real Server", "name": srv.get("name")})
 
 
+def _is_wildcard(hp, rule):
+    """Does this rule route by a wildcard host name?"""
+    conds = _by_id(hp["conditions"])
+    return any((conds.get(c) or {}).get("type") == "host_matches"
+               and any(v.startswith("*.") for v in (conds[c].get("value") or "").split())
+               for c in rule_cond_ids(rule))
+
+
 def _place_rule(hp, rule_ids, rule):
     """Position a rule among a frontend's rules by how specific it is.
 
     HAProxy takes the first matching use_backend, so a rule for
     host + /api must come before the host-only rule it refines -- otherwise
     the broader one swallows the traffic and the narrower one never fires.
+    For the same reason a named host comes before a wildcard that would
+    also match it: app.example.com before *.example.com.
     """
     rules = _by_id(hp["rules"])
     ids = [r for r in rule_ids if r != rule["id"]]
     mine = set(rule_cond_ids(rule))
+    wild = _is_wildcard(hp, rule)
     for i, rid in enumerate(ids):
         other = rules.get(rid)
-        if other and set(rule_cond_ids(other)) < mine:
+        if not other:
+            continue
+        if set(rule_cond_ids(other)) < mine or (not wild and _is_wildcard(hp, other)):
             return ids[:i] + [rule["id"]] + ids[i:]
     return ids + [rule["id"]]
+
+
+def _label(host):
+    """The first label of a host name, for naming: the one after the * of a
+    wildcard, marked as one."""
+    parts = host.split(".")
+    if parts[0] == "*" and len(parts) > 1:
+        return "wildcard-" + parts[1]
+    return parts[0]
+
+
+REDIRECT_CODES = (301, 302, 307, 308)
 
 
 def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
@@ -333,7 +359,8 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
                    timeout_connect=None, timeout_server=None, service_id=None,
                    auth=None, oauth_opts=None, allow_src=None, notify_mode=None,
                    rate_limit=None, rate_window=None, proxy_protocol=None,
-                   allow_lists=None, error_pages=None, rules=None):
+                   allow_lists=None, error_pages=None, rules=None,
+                   hsts=None, hsts_subdomains=None, redirect=None):
     """Create (or update) everything needed to serve `pub` from `tgts`.
 
     Re-running for the same public host updates that mapping instead of adding
@@ -383,8 +410,24 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
     elif is_tcp:
         base = "tcp-%d" % pub["port"]
     else:
-        base = pub["host"].split(".")[0] + \
+        base = _label(pub["host"]) + \
             ("-" + _sec(pub["path"].strip("/")).replace("/", "-") if pub["path"] else "")
+    # A service that redirects somewhere else rather than forwarding: it has
+    # no servers, and nothing to check.
+    if redirect is not None:
+        if is_tcp:
+            raise ValueError("a tcp:// service forwards a port; it cannot redirect")
+        to = str(redirect.get("to") or "").strip()
+        if not _plain_url(to):
+            raise ValueError("a redirect needs an address starting with http:// or https://")
+        try:
+            code = int(redirect.get("code") or 301)
+        except (TypeError, ValueError):
+            code = 0
+        if code not in REDIRECT_CODES:
+            raise ValueError("a redirect is answered with 301, 302, 307 or 308")
+        redirect = {"to": to, "code": code, "keep_path": bool(redirect.get("keep_path", True))}
+        tgts, health = [], {"type": "none"}
 
     # -- Real Servers -----------------------------------------------------
     # The targets given here ARE the pool's servers: publishing the same URL
@@ -449,7 +492,16 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
         # Patroni pool is designed to have one server passing, so "some are
         # down" is its healthy state and only a full outage is worth a word.
         "notify_mode": notify_mode if notify_mode in ("servers", "outage", "off") else "servers",
+        "redirect_to": redirect["to"] if redirect else "",
+        "redirect_code": redirect["code"] if redirect else 301,
+        "redirect_keep_path": redirect["keep_path"] if redirect else True,
     }
+    if redirect:
+        pool_opts["notify_mode"] = "off"         # no servers to lose
+    # HSTS, sent over HTTPS only. Silence leaves the pool as it is.
+    if hsts is not None:
+        pool_opts["hsts"] = bool(hsts) and not is_tcp
+        pool_opts["hsts_subdomains"] = bool(hsts_subdomains) and bool(hsts) and not is_tcp
     # Who may reach it by source address. Same contract as auth: silence
     # leaves the pool as it is, an empty string switches it off. Refused here
     # when an entry does not parse -- at the form, where the typo can be
@@ -649,7 +701,7 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
         if host_cond:
             act("reused", "Condition", host_cond["name"])
         else:
-            suffix = base if len(hosts) == 1 else _sec(h.split(".")[0])
+            suffix = base if len(hosts) == 1 else _sec(_label(h))
             host_cond = {"id": str(uuid.uuid4()),
                          "name": wizard._uniq_name({c["name"] for c in hp["conditions"]}, "host-" + suffix),
                          "type": "host_matches", "value": h,
@@ -788,6 +840,12 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
                     warns.append("The certificate for %s was kept: it has been issued, so it is not "
                                  "repointed automatically. Remove it under Certificates if it is no "
                                  "longer wanted." % old_hosts[0])
+            wild = [h for h in hosts if h.startswith("*.")]
+            chosen_ch = _by_id(challenges).get(cert.get("challenge") or "")
+            if wild and chosen_ch and chosen_ch.get("method") != "dns01":
+                warns.append("A wildcard certificate (%s) can only be issued with a DNS challenge; "
+                             "the one chosen is HTTP. Pick a DNS challenge type for it under "
+                             "Certificates." % ", ".join(wild))
             if not acc_id or not ch_id:
                 warns.append("The certificate has no %s yet, so it cannot be issued. Apply installs a "
                              "self-signed placeholder meanwhile; add one under ACME and press Issue."
@@ -825,8 +883,9 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
         if cert and cert["id"] not in (fe.get("certificates") or []):
             fe.setdefault("certificates", []).append(cert["id"])
         if not fe.get("default_backend"):
-            warns.append("Public Service \"%s\" has no default Backend Pool, so requests for any other host "
-                         "get a 503. That is usually what you want." % fe["name"])
+            warns.append("Public Service \"%s\" has no default Backend Pool, so a request for any other "
+                         "host gets what Unknown hosts says under Advanced \u00b7 HAProxy \u203a Settings."
+                         % fe["name"])
     # Editing a service: the URLs on the form are all of them, so a port that
     # is no longer listed stops serving it. Without an edit (a publish that
     # happens to match an existing service's names) nothing is taken away --

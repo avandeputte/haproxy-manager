@@ -308,7 +308,9 @@ def matches(cfg, spec, sample):
     host = host.rsplit(":", 1)[0] if host.count(":") == 1 else host
     path = (sample.get("path") or "").strip()
     if t == "host_matches":
-        hit = host in {v.lower() for v in patterns}
+        hit = any(host == v.lower() or (v.startswith("*.") and host.endswith(v[1:].lower())
+                                        and "." not in host[:-len(v) + 1])
+                  for v in patterns)
     elif t == "host_starts_with":
         hit = any(host.startswith(v.lower()) for v in patterns)
     elif t == "host_ends_with":
