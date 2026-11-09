@@ -28,13 +28,21 @@ from . import auth, notify, sync
 
 # --------------------------------------------------------------------------
 
+# The public CAs, by the short names acme.sh knows (its CA_NAMES). acme.sh
+# takes a name it does not know for a directory URL, so a CA it drops has to
+# go here too: Buypass stopped issuing on 31 October 2025 and left acme.sh in
+# 3.1.2. The ones in EAB_REQUIRED will not register an account without it.
 CA_SERVERS = {
     "letsencrypt": "letsencrypt",
     "letsencrypt_test": "letsencrypt_test",
     "zerossl": "zerossl",
-    "buypass": "buypass",
     "google": "google",
+    "google_test": "google_test",
+    "sslcom": "sslcom",
+    "actalis": "actalis",
 }
+EAB_REQUIRED = {"google": "Google", "google_test": "Google", "sslcom": "SSL.com",
+                "actalis": "Actalis"}
 KEYLEN = {"ec-256": "ec-256", "ec-384": "ec-384", "rsa-2048": "2048", "rsa-4096": "4096"}
 
 
@@ -77,7 +85,16 @@ SYSTEM_BUNDLES = ("/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-b
 
 def check_account(acc):
     """What an ACME account refuses before it is stored. Raises ValueError with why."""
-    if acc.get("ca") != "custom":
+    ca = acc.get("ca") or "letsencrypt"
+    if ca == "buypass":
+        raise ValueError("Buypass stopped issuing certificates on 31 October 2025: "
+                         "choose another certificate authority for this account")
+    if ca != "custom" and ca not in CA_SERVERS:
+        raise ValueError("unknown certificate authority %r" % ca)
+    if ca in EAB_REQUIRED and not (acc.get("eab_kid") or "").strip():
+        raise ValueError("%s needs External Account Binding: fill in the EAB key ID and "
+                         "HMAC key from your account with them" % EAB_REQUIRED[ca])
+    if ca != "custom":
         return
     url = (acc.get("server") or "").strip()
     if not re.match(r"^https?://[^\s/?#]+(/\S*)?$", url):
@@ -394,6 +411,45 @@ def renewal_runs_here(cfg):
 _last_renew = time.time()
 
 
+RETRY_AFTER = 3600
+
+
+def renewal_due(cfg, cert, now=None):
+    """Whether acme.sh's own schedule says this certificate is due, between rounds.
+
+    The rounds run every renew_hours, a day by default. A CA of your own may
+    issue certificates for a day (step-ca does by default), which acme.sh
+    plans to renew an hour before they end, so a daily round can miss that
+    hour; the 10-minute tick reads the plan instead. A failed attempt is not
+    repeated for an hour, so a CA that is down is not asked every 10 minutes.
+    """
+    now = now or time.time()
+    doms = parse_domains(cert)
+    if not doms:
+        return False
+    nxt = None
+    for sub in (doms[0] + "_ecc", doms[0]):
+        try:
+            text = (Path(ACME_HOME) / sub / (doms[0] + ".conf")).read_text()
+        except OSError:
+            continue
+        m = re.search(r"^Le_NextRenewTime='?(\d+)'?\s*$", text, re.M)
+        if m:
+            nxt = int(m.group(1))
+            break
+    if nxt is None or nxt > now:
+        return False
+    last = (cfg.get("_meta", {}).get("issue_log") or {}).get(cert.get("id")) or {}
+    if last and not last.get("ok"):
+        try:
+            at = datetime.fromisoformat(last["time"]).timestamp()
+        except (KeyError, TypeError, ValueError):
+            at = 0
+        if now - at < RETRY_AFTER:
+            return False
+    return True
+
+
 def _renew_loop():
     global _last_renew
     while True:
@@ -413,11 +469,13 @@ def _renew_loop():
                     save_config(cur)
                 continue
             interval = max(1, int(st.get("renew_hours") or 24)) * 3600
-            if time.time() - _last_renew >= interval:
+            full = time.time() - _last_renew >= interval
+            if full:
                 _last_renew = time.time()
-                for cert in merged(cfg)["acme"]["certificates"]:
-                    if cert.get("auto_renew", True) and not is_custom(cert):
-                        acme_issue(cfg, cert)
+            for cert in merged(cfg)["acme"]["certificates"]:
+                if cert.get("auto_renew", True) and not is_custom(cert) \
+                        and (full or renewal_due(cfg, cert)):
+                    acme_issue(cfg, cert)
         except Exception:
             # The loop must survive anything, but not silently: a renewal
             # loop that dies quietly is discovered as an expired certificate.

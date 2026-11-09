@@ -75,7 +75,7 @@ export const CERT_WIZ=[
   h:"letsencrypt_test issues untrusted certificates but has no rate limits -- ideal while setting things up"},
  {k:"acc_server",l:"ACME directory URL",t:"text",h:"Your own ACME server's directory, such as https://ca.example.lan/directory -- for example acme2certifier in front of Active Directory Certificate Services, step-ca or Vault"},
  {k:"acc_ca_bundle",l:"CA certificate to trust",t:"textarea",h:"Optional. The PEM certificate of the CA that signed the ACME server's own HTTPS certificate, if this node does not trust it already"},
- {k:"acc_eab_kid",l:"EAB key ID",t:"text",h:"Only for ZeroSSL, Google, or your own CA if it asks for one"},
+ {k:"acc_eab_kid",l:"EAB key ID",t:"text",h:"Google, SSL.com and Actalis need one, from your account with them, and so may your own CA. ZeroSSL gets its own from the e-mail address."},
  {k:"acc_eab_hmac",l:"EAB HMAC key",t:"password"},
  {k:"challenge_id",l:"Challenge type",t:"select",o:[]},
  {k:"ch_name",l:"New challenge name",t:"text"},

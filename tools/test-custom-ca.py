@@ -106,6 +106,27 @@ r = client.put("/api/acme/accounts/" + accs["internal"]["id"], headers=H,
                json=dict(accs["internal"], server=""))
 ok(r.status_code == 400, "editing away the address is refused (%d)" % r.status_code)
 
+print("the public CAs")
+_, err = add_account({"name": "old-buypass", "ca": "buypass"}, 400)
+ok("31 October 2025" in err, "Buypass, which stopped issuing, is refused with why")
+_, err = add_account({"name": "typo", "ca": "letsencrypt-prod"}, 400)
+ok("unknown certificate authority" in err, "a CA name acme.sh does not know is refused")
+for ca, who in (("google", "Google"), ("google_test", "Google"), ("sslcom", "SSL.com"), ("actalis", "Actalis")):
+    _, err = add_account({"name": "no-eab-" + ca, "ca": ca}, 400)
+    ok(who + " needs External Account Binding" in err, "%s without EAB says it needs it" % ca)
+add_account({"name": "gts", "ca": "google", "eab_kid": "kid", "eab_hmac": "hmac"}, 200)
+add_account({"name": "zero", "ca": "zerossl", "email": "z@example.com"}, 200)
+for ca in ("google", "google_test", "sslcom", "actalis", "zerossl", "letsencrypt_test"):
+    ok(acme.server_args({"ca": ca}) == ["--server", ca], "%s is passed to acme.sh by its short name" % ca)
+known = subprocess.run(["sh", "-c", "sed -n '/^CA_NAMES=/,/^\"/p' /opt/acme.sh/acme.sh"],
+                       capture_output=True, text=True).stdout.lower()
+if known:
+    names = {n for line in known.splitlines() for n in line.split(",")[1:]}
+    ok(set(acme.CA_SERVERS) <= names, "every CA offered is one this acme.sh knows: %s"
+       % sorted(set(acme.CA_SERVERS) - names))
+else:
+    print("  SKIP  no acme.sh at /opt/acme.sh to compare the names with")
+
 print("what acme.sh is given")
 ok(acme.server_args(accs["le"]) == ["--server", "letsencrypt"], "Let's Encrypt keeps its short name")
 ok(acme.server_args(accs["plain"]) == ["--server", "http://a2c.example.lan/directory"],
@@ -207,6 +228,39 @@ before = len(pathlib.Path(RUNS).read_text().splitlines())
 res = acme.acme_issue(cfg, certs["c-internal"])
 ok(not res["ok"] and "ACME directory" in res["error"], "issuing with no address says why: %s" % res["error"][:80])
 ok(len(pathlib.Path(RUNS).read_text().splitlines()) == before, "and acme.sh was not run")
+
+print("renewing on acme.sh's schedule between rounds")
+import time   # noqa: E402
+from datetime import datetime, timezone   # noqa: E402
+home = pathlib.Path(os.environ["HAM_ACME_HOME"])
+now = time.time()
+
+
+def plan(main, when, ecc=True):
+    d = home / (main + ("_ecc" if ecc else ""))
+    d.mkdir(parents=True, exist_ok=True)
+    (d / (main + ".conf")).write_text("Le_Domain='%s'\nLe_NextRenewTime='%d'\nLe_NextRenewTimeStr='x'\n" % (main, when))
+
+
+def at(seconds_ago):
+    return datetime.fromtimestamp(now - seconds_ago, timezone.utc).isoformat(timespec="seconds")
+
+
+plan("day.example.lan", now - 60)
+plan("later.example.lan", now + 3600)
+plan("rsa.example.lan", now - 60, ecc=False)
+c = lambda cid, dom: {"id": cid, "domains": dom}   # noqa: E731
+meta = {"_meta": {"issue_log": {}}}
+ok(acme.renewal_due(meta, c("d", "day.example.lan"), now), "a certificate acme.sh planned to renew by now is due")
+ok(not acme.renewal_due(meta, c("l", "later.example.lan"), now), "one planned for later is not")
+ok(acme.renewal_due(meta, c("r", "rsa.example.lan"), now), "an RSA certificate's plan is read too (no _ecc folder)")
+ok(not acme.renewal_due(meta, c("n", "never.example.lan"), now), "one acme.sh has no plan for is left to the rounds")
+meta["_meta"]["issue_log"]["d"] = {"time": at(600), "ok": False}
+ok(not acme.renewal_due(meta, c("d", "day.example.lan"), now), "a failure ten minutes ago waits an hour before trying again")
+meta["_meta"]["issue_log"]["d"] = {"time": at(3700), "ok": False}
+ok(acme.renewal_due(meta, c("d", "day.example.lan"), now), "after an hour it is tried again")
+meta["_meta"]["issue_log"]["d"] = {"time": at(600), "ok": True}
+ok(acme.renewal_due(meta, c("d", "day.example.lan"), now), "a success does not hold the next renewal back")
 
 print("the certificate wizard")
 r = client.post("/api/wizard/certificate", headers=H, json={

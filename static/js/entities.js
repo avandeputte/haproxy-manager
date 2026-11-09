@@ -256,7 +256,9 @@ export const E={
  "acme/accounts":{title:"ACME Accounts",one:"ACME Account",add:"Add account",
   intro:"ACME accounts used to request certificates.",
   cols:[["name","Name"],["email","E-mail"],
-        ["ca","CA",r=>r.ca==="custom"?"custom<div class=sub>"+esc(r.server||"")+"</div>":esc(r.ca||"letsencrypt")]],
+        ["ca","CA",r=>r.ca==="custom"?"custom<div class=sub>"+esc(r.server||"")+"</div>"
+          :r.ca==="buypass"?"buypass<div class=sub>"+t("Buypass stopped issuing on 31 October 2025: choose another CA")+"</div>"
+          :esc(r.ca||"letsencrypt")]],
   editorExtra:customCaRows,
   fields:[
    {k:"name",l:"Name",t:"text"},
@@ -264,7 +266,7 @@ export const E={
    {k:"ca",l:"Certificate authority",t:"select",o:CA_CHOICES,d:"letsencrypt",h:"Use letsencrypt_test while setting things up to avoid rate limits"},
    {k:"server",l:"ACME directory URL",t:"text",h:"Your own ACME server's directory, such as https://ca.example.lan/directory -- for example acme2certifier in front of Active Directory Certificate Services, step-ca or Vault"},
    {k:"ca_bundle",l:"CA certificate to trust",t:"textarea",h:"Optional. The PEM certificate of the CA that signed the ACME server's own HTTPS certificate, if this node does not trust it already"},
-   {k:"eab_kid",l:"EAB key ID",t:"text",h:"Only for ZeroSSL, Google, or your own CA if it asks for one"},
+   {k:"eab_kid",l:"EAB key ID",t:"text",h:"Google, SSL.com and Actalis need one, from your account with them, and so may your own CA. ZeroSSL gets its own from the e-mail address."},
    {k:"eab_hmac",l:"EAB HMAC key",t:"password"}]},
 
  "acme/challenges":{title:"Challenge Types",one:"Challenge Type",add:"Add challenge type",
