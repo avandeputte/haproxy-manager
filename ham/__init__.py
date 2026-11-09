@@ -33,6 +33,7 @@ from . import (
     acme,
     notify,
     watchdog,
+    mcp,
     sync,
     setup,
     peering,

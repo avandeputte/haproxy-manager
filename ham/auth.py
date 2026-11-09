@@ -180,6 +180,7 @@ LOCAL_WRITE_PREFIXES = (
     "/api/webui",          # this node's own UI address, not shared
     "/api/unlock",         # lifting the lock cannot itself be blocked by it
     "/api/crowdsec/install",   # this node's own bouncer package
+    "/api/mcp",            # this node's MCP server and its token
 )
 
 
@@ -214,7 +215,8 @@ def _audit(resp):
     if request.path.startswith("/api/") and request.method in ("POST", "PUT", "DELETE", "PATCH"):
         if request.path not in ("/api/login", "/api/whoami"):
             try:
-                who = current_user() or ("api-key" if request.headers.get("X-API-Key") else "anonymous")
+                who = request.environ.get("ham.mcp") or current_user() or \
+                    ("api-key" if request.headers.get("X-API-Key") else "anonymous")
             except Exception:
                 who = "?"
             what = ""
@@ -260,7 +262,9 @@ def _auth():
                         "This node has no administrator yet. Open it in a browser and create "
                         "one; until then only setup is available."}), 401
 
-    authorised = bool(current_user(cfg))
+    # A tool call from the MCP server, made in-process after it checked its
+    # own token: the mark is in the WSGI environ, where no client can put it.
+    authorised = bool(request.environ.get("ham.mcp")) or bool(current_user(cfg))
     if not authorised:
         authorised = key_matches(cfg["local"].get("api_key"), request.headers.get("X-API-Key"))
     if not authorised:

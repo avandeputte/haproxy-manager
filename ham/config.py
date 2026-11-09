@@ -214,6 +214,10 @@ DEFAULT_CONFIG = {
             # active node. The one check that sees the whole chain.
             "probe_urls": True,
         },
+        # The MCP server at /mcp: off, and read-only, until turned on. Its own
+        # token, kept only as a hash -- see ham/mcp.py.
+        "mcp": {"enabled": False, "allow_writes": False, "token_hash": "", "token_fp": "",
+                "token_created": ""},
         "sync": {
             # One entry per other node: {id, name, url, api_key, verify_tls, enabled}
             "peers": [],
