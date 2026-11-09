@@ -124,8 +124,9 @@ ok(clip && clip.includes("Bearer ham_mcp_SECRET") && $("#mcp_cmd").textContent.i
 
 state.token_shown = false;
 await renderMcp();
-ok(!findButton("Show the token") && text().includes("made before tokens were kept"),
-   "a token made before they were kept cannot be shown, and the page says to replace it");
+ok(!findButton("Show the token") && text().includes("made before tokens were kept")
+   && text().includes("Replace the token, above") && !text().includes("Show the token to fill it in"),
+   "a token made before they were kept cannot be shown, and both cards say to replace it");
 await findButton("Replace the token").onclick();
 ok(asked === 1, "replacing a token asks first: clients using it stop working");
 

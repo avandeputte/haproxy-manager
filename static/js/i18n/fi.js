@@ -500,6 +500,7 @@ export default {
 "This token was made before tokens were kept, so it cannot be shown. Replace it to get one that can.": "Tämä tunniste luotiin ennen kuin tunnisteita säilytettiin, joten sitä ei voi näyttää. Korvaa se, niin saat sellaisen, jonka voi.",
 "this node is passive: the published names resolve to the virtual IP, which it does not hold, so it does not probe them; ask the node that holds it": "tämä solmu on passiivinen: julkaistut nimet osoittavat virtuaaliseen IP-osoitteeseen, joka ei ole sillä, joten se ei tarkista niitä; kysy solmulta, jolla se on",
 "a round of probes is already running; ask again in a few seconds": "tarkistuskierros on jo käynnissä; kysy uudelleen muutaman sekunnin päästä",
+"This token cannot be shown, so it is not filled in here: Replace the token, above, to get one that can be shown and copied.": "Tätä tunnistetta ei voi näyttää, joten sitä ei täytetä tähän: korvaa tunniste yllä saadaksesi sellaisen, jonka voi näyttää ja kopioida.",
 "Load from file": "Lataa tiedostosta",
 "Reads a local .html file into the field above. Nothing is uploaded: the page is saved with the configuration.": "Lukee paikallisen .html-tiedoston yllä olevaan kenttään. Mitään ei ladata palvelimelle: sivu tallennetaan asetusten mukana.",
 "Value": "Arvo",

@@ -500,6 +500,7 @@ export default {
 "This token was made before tokens were kept, so it cannot be shown. Replace it to get one that can.": "Este token se creó antes de que los tokens se guardaran, así que no se puede mostrar. Reemplázalo para obtener uno que sí.",
 "this node is passive: the published names resolve to the virtual IP, which it does not hold, so it does not probe them; ask the node that holds it": "este nodo es pasivo: los nombres publicados apuntan a la IP virtual, que no tiene, así que no los sondea; pregunta al nodo que la tiene",
 "a round of probes is already running; ask again in a few seconds": "ya hay una ronda de sondeos en marcha; vuelve a pedirlo en unos segundos",
+"This token cannot be shown, so it is not filled in here: Replace the token, above, to get one that can be shown and copied.": "Este token no se puede mostrar, así que no se rellena aquí: reemplaza el token, arriba, para obtener uno que se pueda mostrar y copiar.",
 "Load from file": "Cargar desde archivo",
 "Reads a local .html file into the field above. Nothing is uploaded: the page is saved with the configuration.": "Lee un archivo .html local en el campo de arriba. No se sube nada: la página se guarda con la configuración.",
 "Value": "Valor",

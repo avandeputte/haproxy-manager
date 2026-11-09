@@ -188,6 +188,7 @@ export async function renderMcp(fresh_token){
       (x.h?" "+t(x.h):"");
     pre.textContent=x.text(endpoint,shown?token:HIDDEN);
     warn.textContent=!s.has_token?t("Make a token first."):
+      !s.token_shown?t("This token cannot be shown, so it is not filled in here: Replace the token, above, to get one that can be shown and copied."):
       shown?t("The token is in this text: keep it out of repositories, screenshots and shared files.")
            :t("Show the token to fill it in, or copy: the copy has the token in it.");
   }

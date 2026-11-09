@@ -500,6 +500,7 @@ export default {
 "This token was made before tokens were kept, so it cannot be shown. Replace it to get one that can.": "Den här token skapades innan tokens sparades, så den kan inte visas. Ersätt den för att få en som kan.",
 "this node is passive: the published names resolve to the virtual IP, which it does not hold, so it does not probe them; ask the node that holds it": "den här noden är passiv: de publicerade namnen pekar på den virtuella IP-adressen, som den inte har, så den kontrollerar dem inte; fråga noden som har den",
 "a round of probes is already running; ask again in a few seconds": "en kontrollrunda pågår redan; fråga igen om några sekunder",
+"This token cannot be shown, so it is not filled in here: Replace the token, above, to get one that can be shown and copied.": "Den här token kan inte visas, så den fylls inte i här: ersätt token ovan för att få en som kan visas och kopieras.",
 "Load from file": "Läs in från fil",
 "Reads a local .html file into the field above. Nothing is uploaded: the page is saved with the configuration.": "Läser in en lokal .html-fil i fältet ovan. Inget laddas upp: sidan sparas med konfigurationen.",
 "Value": "Värde",

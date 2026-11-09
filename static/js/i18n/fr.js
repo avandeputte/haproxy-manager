@@ -500,6 +500,7 @@ export default {
 "This token was made before tokens were kept, so it cannot be shown. Replace it to get one that can.": "Ce jeton a été créé avant que les jetons soient conservés, il ne peut donc pas être affiché. Remplacez-le pour en obtenir un qui le peut.",
 "this node is passive: the published names resolve to the virtual IP, which it does not hold, so it does not probe them; ask the node that holds it": "ce nœud est passif : les noms publiés pointent vers l'IP virtuelle, qu'il ne détient pas, il ne les sonde donc pas ; demandez au nœud qui la détient",
 "a round of probes is already running; ask again in a few seconds": "une série de sondes est déjà en cours ; redemandez dans quelques secondes",
+"This token cannot be shown, so it is not filled in here: Replace the token, above, to get one that can be shown and copied.": "Ce jeton ne peut pas être affiché, il n'est donc pas rempli ici : remplacez le jeton, plus haut, pour en obtenir un qui peut être affiché et copié.",
 "Load from file": "Charger depuis un fichier",
 "Reads a local .html file into the field above. Nothing is uploaded: the page is saved with the configuration.": "Lit un fichier .html local dans le champ ci-dessus. Rien n'est téléversé : la page est enregistrée avec la configuration.",
 "Value": "Valeur",

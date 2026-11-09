@@ -500,6 +500,7 @@ export default {
 "This token was made before tokens were kept, so it cannot be shown. Replace it to get one that can.": "Dette token blev lavet, før tokens blev gemt, så det kan ikke vises. Erstat det for at få et, der kan.",
 "this node is passive: the published names resolve to the virtual IP, which it does not hold, so it does not probe them; ask the node that holds it": "denne node er passiv: de udgivne navne peger på den virtuelle IP, som den ikke har, så den tjekker dem ikke; spørg noden, der har den",
 "a round of probes is already running; ask again in a few seconds": "en runde tjek kører allerede; spørg igen om nogle sekunder",
+"This token cannot be shown, so it is not filled in here: Replace the token, above, to get one that can be shown and copied.": "Dette token kan ikke vises, så det udfyldes ikke her: erstat tokenet ovenfor for at få et, der kan vises og kopieres.",
 "Load from file": "Indlæs fra fil",
 "Reads a local .html file into the field above. Nothing is uploaded: the page is saved with the configuration.": "Læser en lokal .html-fil ind i feltet ovenfor. Intet uploades: siden gemmes sammen med konfigurationen.",
 "Value": "Værdi",
