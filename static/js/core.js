@@ -62,6 +62,10 @@ export function closeDlg(){$("#ovl").classList.remove("show");}
 $("#dlgclose").onclick=closeDlg;   // the markup cannot call into a module
 $("#ovl").addEventListener("click",e=>{if(e.target.id==="ovl")closeDlg();});
 document.addEventListener("keydown",e=>{if(e.key==="Escape")closeDlg();});
+/* "custom" is any ACME server of your own, by its directory URL: acme2certifier
+   in front of Active Directory Certificate Services, step-ca, Vault. */
+export const CA_CHOICES=["letsencrypt","letsencrypt_test","zerossl","buypass","google","custom"];
+
 export function btn(label,cls,fn){const b=document.createElement("button");b.className="btn "+(cls||"");b.textContent=label;b.onclick=fn;return b;}
 export function showText(title,text){const p=document.createElement("pre");p.textContent=text;openDlg(title,p,[btn(t("Close"),"",closeDlg)]);}
 

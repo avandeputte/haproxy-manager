@@ -38,20 +38,131 @@ CA_SERVERS = {
 KEYLEN = {"ec-256": "ec-256", "ec-384": "ec-384", "rsa-2048": "2048", "rsa-4096": "4096"}
 
 
+def _forget_ca_bundle():
+    """Take a saved CA_BUNDLE out of acme.sh's account.conf.
+
+    acme.sh saves --ca-bundle there after an issue, and reads account.conf
+    after its command line, so a bundle saved for a custom CA would go on
+    replacing the system's trust for every CA after it. Each run passes the
+    bundle it needs instead.
+    """
+    conf = Path(ACME_HOME) / "account.conf"
+    try:
+        lines = conf.read_text().splitlines(keepends=True)
+    except OSError:
+        return
+    keep = [l for l in lines if not re.match(r"\s*(export\s+)?CA_BUNDLE=", l)]
+    if keep != lines:
+        conf.write_text("".join(keep))
+
+
 def acme_run(args, env_extra=None):
     if not Path(ACME_SH).exists():
         return 127, "acme.sh not found at %s -- run install.sh or set HAM_ACME_SH" % ACME_SH
     env = os.environ.copy()
     env.update(env_extra or {})
+    _forget_ca_bundle()
     # --log makes acme.sh keep its own log in ACME_HOME, which is what the log
     # viewer reads back. Left at the default level: level 2 traces the DNS hook
     # calls, and those carry API credentials.
     return run([ACME_SH, "--home", str(ACME_HOME), "--log"] + args, env=env)
 
 
+# --------------------------------------------------------------------------
+# a certificate authority of your own: any ACME server, by its directory URL
+
+SYSTEM_BUNDLES = ("/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt",
+                  "/etc/ssl/cert.pem")
+
+
+def check_account(acc):
+    """What an ACME account refuses before it is stored. Raises ValueError with why."""
+    if acc.get("ca") != "custom":
+        return
+    url = (acc.get("server") or "").strip()
+    if not re.match(r"^https?://[^\s/?#]+(/\S*)?$", url):
+        raise ValueError("a custom certificate authority needs the address of its ACME "
+                         "directory, such as https://ca.example.lan/directory")
+    bundle = (acc.get("ca_bundle") or "").strip()
+    if bundle:
+        blocks = _pem_blocks(bundle)
+        if not blocks or any(kind != "CERTIFICATE" for kind, _ in blocks):
+            raise ValueError("the CA certificate to trust must be one or more PEM "
+                             "certificates (-----BEGIN CERTIFICATE-----)")
+        for _, block in blocks:
+            rc, _ = _openssl_out(["x509", "-noout"], block)
+            if rc != 0:
+                raise ValueError("the CA certificate to trust is not a certificate "
+                                 "openssl can read")
+
+
+def _bundle_file(acc):
+    """The system's trusted CAs plus the account's own, as a file for --ca-bundle.
+
+    The system's are kept because the bundle is all curl trusts for the run,
+    and a DNS hook calls its provider's public API in the same run.
+    """
+    import ssl
+    system = ssl.get_default_verify_paths().cafile
+    found = [p for p in ((system,) if system else ()) + SYSTEM_BUNDLES if Path(p).is_file()]
+    text = Path(found[0]).read_text() if found else ""
+    path = Path(ACME_HOME) / "ca-bundles" / ("%s.pem" % re.sub(r"[^A-Za-z0-9_-]", "_",
+                                                              acc.get("id") or "account"))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text.rstrip("\n") + "\n" + acc["ca_bundle"].strip() + "\n")
+    return path
+
+
+def check_directory(acc):
+    """Read a custom CA's ACME directory before acme.sh does. Returns why not, or "".
+
+    acme.sh does not give up on a server it cannot reach or does not trust:
+    it asks again for a nonce every 20 seconds until run() times it out ten
+    minutes later, and says only that it timed out.
+    """
+    if acc.get("ca") != "custom":
+        return ""
+    import json
+    import ssl
+    import urllib.error
+    import urllib.request
+    url = (acc.get("server") or "").strip()
+    ctx = ssl.create_default_context()
+    # Python 3.13 adds RFC 5280 strictness that curl does not, and internal
+    # CAs often lack an extension it wants; trust what acme.sh will trust.
+    ctx.verify_flags &= ~getattr(ssl, "VERIFY_X509_STRICT", 0)
+    if (acc.get("ca_bundle") or "").strip():
+        ctx.load_verify_locations(cadata=acc["ca_bundle"])
+    try:
+        with urllib.request.urlopen(url, timeout=15, context=ctx) as r:
+            body = json.loads(r.read(200000) or b"null")
+    except urllib.error.URLError as e:
+        if isinstance(e.reason, ssl.SSLCertVerificationError):
+            return ("this node does not trust the HTTPS certificate of %s (%s). Paste the "
+                    "certificate of the CA that signed it into the account's CA certificate "
+                    "to trust." % (url, e.reason.verify_message or e.reason))
+        if isinstance(e, urllib.error.HTTPError):
+            return "%s answered HTTP %d: is that the address of the ACME directory?" % (url, e.code)
+        return "could not reach the ACME server at %s: %s" % (url, e.reason)
+    except (OSError, ValueError) as e:
+        return "could not read an ACME directory at %s: %s" % (url, e)
+    if not (isinstance(body, dict) and body.get("newNonce") and body.get("newAccount")):
+        return "%s is not an ACME directory: it has no newNonce and newAccount" % url
+    return ""
+
+
+def server_args(acc):
+    """--server, and --ca-bundle when the account brings one, for acme.sh."""
+    if acc.get("ca") != "custom":
+        return ["--server", CA_SERVERS.get(acc.get("ca", "letsencrypt"), "letsencrypt")]
+    args = ["--server", (acc.get("server") or "").strip()]
+    if (acc.get("ca_bundle") or "").strip():
+        args += ["--ca-bundle", str(_bundle_file(acc))]
+    return args
+
+
 def ensure_account(acc):
-    args = ["--register-account", "-m", acc.get("email", ""),
-            "--server", CA_SERVERS.get(acc.get("ca", "letsencrypt"), "letsencrypt")]
+    args = ["--register-account", "-m", acc.get("email", "")] + server_args(acc)
     if acc.get("eab_kid"):
         args += ["--eab-kid", acc["eab_kid"], "--eab-hmac-key", acc.get("eab_hmac", "")]
     return acme_run(args)
@@ -138,13 +249,21 @@ def _acme_issue(cfg, cert, force=False):
     if not doms:
         return {"ok": False, "error": "certificate has no domain names"}
 
+    try:
+        check_account(acc)
+    except ValueError as e:
+        return {"ok": False, "error": "ACME account %s: %s" % (acc.get("name") or "", e)}
+    why = check_directory(acc)
+    if why:
+        return {"ok": False, "error": why}
+
     trace = []
     rc, out = ensure_account(acc)
     trace.append(out)
     if rc != 0:
         return {"ok": False, "error": "ACME account registration failed", "log": "\n".join(trace)}
 
-    args = ["--issue", "--server", CA_SERVERS.get(acc.get("ca", "letsencrypt"), "letsencrypt")]
+    args = ["--issue"] + server_args(acc)
     for d in doms:
         args += ["-d", d]
     args += ["--keylength", KEYLEN.get(cert.get("key_type", "ec-256"), "ec-256")]

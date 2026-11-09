@@ -1,4 +1,4 @@
-import { $, api, btn, closeDlg, esc, fieldRow, list, lists, localTime, openDlg, readForm, showText, download } from "../core.js";
+import { $, CA_CHOICES, api, btn, closeDlg, esc, fieldRow, list, lists, localTime, openDlg, readForm, showText, download } from "../core.js";
 import { E, renderEntity } from "../entities.js";
 import { t, tn } from "../i18n.js";
 import { refreshStatus, route } from "../shell.js";
@@ -53,15 +53,29 @@ export function dnsCredentialHelp(frm){
 
 /* ---- certificate wizard ---- */
 export const NEWOPT="__new__";
+const caLabel=a=>a.ca==="custom"?(String(a.server||"").replace(/^https?:\/\//,"").split("/")[0]||"custom"):(a.ca||"letsencrypt");
+/* The directory URL and the CA certificate rows mean something for a custom CA
+   only; the account editor hides them otherwise. */
+export function customCaRows(frm){
+  const sel=frm.querySelector("#f_ca");if(!sel)return;
+  const els=["server","ca_bundle"].flatMap(k=>{
+    let cell=frm.querySelector("#f_"+k);if(!cell)return [];
+    while(cell.parentNode&&cell.parentNode!==frm)cell=cell.parentNode;
+    return [frm.querySelector('label[for="f_'+k+'"]'),cell].filter(Boolean);});
+  const sync=()=>els.forEach(el=>{el.style.display=sel.value==="custom"?"":"none";});
+  sel.addEventListener("change",sync);sync();
+}
 export const CERT_WIZ=[
  {k:"domains",l:"Domain names",t:"textarea",h:"One per line. The first is the certificate's primary name. A wildcard such as *.example.com needs DNS-01."},
  {k:"name",l:"Certificate name",t:"text",h:"Optional -- taken from the first domain when left empty"},
  {k:"account_id",l:"ACME account",t:"select",o:[]},
  {k:"acc_name",l:"New account name",t:"text"},
  {k:"acc_email",l:"E-mail address",t:"text",h:"Where the CA sends expiry warnings"},
- {k:"acc_ca",l:"Certificate authority",t:"select",o:["letsencrypt","letsencrypt_test","zerossl","buypass","google"],d:"letsencrypt",
+ {k:"acc_ca",l:"Certificate authority",t:"select",o:CA_CHOICES,d:"letsencrypt",
   h:"letsencrypt_test issues untrusted certificates but has no rate limits -- ideal while setting things up"},
- {k:"acc_eab_kid",l:"EAB key ID",t:"text",h:"Only for ZeroSSL and Google"},
+ {k:"acc_server",l:"ACME directory URL",t:"text",h:"Your own ACME server's directory, such as https://ca.example.lan/directory -- for example acme2certifier in front of Active Directory Certificate Services, step-ca or Vault"},
+ {k:"acc_ca_bundle",l:"CA certificate to trust",t:"textarea",h:"Optional. The PEM certificate of the CA that signed the ACME server's own HTTPS certificate, if this node does not trust it already"},
+ {k:"acc_eab_kid",l:"EAB key ID",t:"text",h:"Only for ZeroSSL, Google, or your own CA if it asks for one"},
  {k:"acc_eab_hmac",l:"EAB HMAC key",t:"password"},
  {k:"challenge_id",l:"Challenge type",t:"select",o:[]},
  {k:"ch_name",l:"New challenge name",t:"text"},
@@ -77,7 +91,7 @@ export async function openCertWizard(){
   await Promise.all([list("acme/accounts",true),list("acme/challenges",true),loadDnsApis()]);
   const accounts=lists["acme/accounts"]||[],challenges=lists["acme/challenges"]||[];
   const fields=CERT_WIZ.map(f=>{
-    if(f.k==="account_id")return Object.assign({},f,{o:accounts.map(a=>({value:a.id,label:a.name+" ("+(a.ca||"letsencrypt")+")"})).concat([{value:NEWOPT,label:"Create a new account..."}])});
+    if(f.k==="account_id")return Object.assign({},f,{o:accounts.map(a=>({value:a.id,label:a.name+" ("+caLabel(a)+")"})).concat([{value:NEWOPT,label:"Create a new account..."}])});
     if(f.k==="challenge_id")return Object.assign({},f,{o:challenges.map(c=>({value:c.id,label:c.name+" ("+(c.method||"http01")+")"})).concat([{value:NEWOPT,label:"Create a new challenge type..."}])});
     return f;
   });
@@ -95,12 +109,14 @@ export async function openCertWizard(){
   const sync=()=>{
     const newAcc=frm.querySelector("#f_account_id").value===NEWOPT;
     ["acc_name","acc_email","acc_ca","acc_eab_kid","acc_eab_hmac"].forEach(k=>setRow(k,newAcc));
+    const custom=frm.querySelector("#f_acc_ca").value==="custom";
+    ["acc_server","acc_ca_bundle"].forEach(k=>setRow(k,newAcc&&custom));
     const newCh=frm.querySelector("#f_challenge_id").value===NEWOPT;
     const method=frm.querySelector("#f_ch_method").value;
     ["ch_name","ch_method"].forEach(k=>setRow(k,newCh));
     ["dns_provider","dns_credentials"].forEach(k=>setRow(k,newCh&&method==="dns01"));
   };
-  ["f_account_id","f_challenge_id","f_ch_method"].forEach(id=>{
+  ["f_account_id","f_acc_ca","f_challenge_id","f_ch_method"].forEach(id=>{
     const el=frm.querySelector("#"+id);if(el)el.addEventListener("change",sync);});
   dnsCredentialHelp(frm);
   sync();
@@ -111,6 +127,7 @@ export async function openCertWizard(){
                 auto_renew:d.auto_renew,issue:d.issue};
     body.account=d.account_id===NEWOPT
       ? {name:d.acc_name||("account-"+(d.acc_ca||"letsencrypt")),email:d.acc_email,ca:d.acc_ca,
+         server:d.acc_ca==="custom"?d.acc_server:"",ca_bundle:d.acc_ca==="custom"?d.acc_ca_bundle:"",
          eab_kid:d.acc_eab_kid,eab_hmac:d.acc_eab_hmac}
       : {id:d.account_id};
     body.challenge=d.challenge_id===NEWOPT

@@ -228,7 +228,9 @@ def api_wizard_certificate():
 
         try:
             account = pick("accounts", body.get("account"),
-                           {"name": "", "email": "", "ca": "letsencrypt", "eab_kid": "", "eab_hmac": ""})
+                           {"name": "", "email": "", "ca": "letsencrypt", "server": "",
+                            "ca_bundle": "", "eab_kid": "", "eab_hmac": ""})
+            acme.check_account(account)
             challenge = pick("challenges", body.get("challenge"),
                              {"name": "", "method": "http01", "dns_provider": "", "dns_credentials": ""})
         except ValueError as e:

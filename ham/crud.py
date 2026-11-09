@@ -11,11 +11,13 @@ from .base import _lock, app, log
 from .config import VALID_COLLECTIONS, load_config, merged, save_config
 from .util import _by_id, _sec, rule_cond_ids
 from .validate import check_pool, check_setting_types
-from . import access, apply, errorpages, haproxy, oauth
+from . import access, acme, apply, errorpages, haproxy, oauth
 
 
 def _check_item(sec, col, cfg, item):
     """What a collection refuses before storing it. Raises ValueError with why."""
+    if sec == "acme" and col == "accounts":
+        acme.check_account(item)
     if sec != "haproxy":
         return
     if col == "backends":
