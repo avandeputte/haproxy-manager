@@ -58,7 +58,10 @@ INSTRUCTIONS = (
     "stored but not live: HAProxy is rewritten and reloaded only by apply_changes, and "
     "get_status says whether anything is waiting (\"dirty\"). Prefer dry_run first where a "
     "tool offers it: it returns the configuration lines a change would produce and HAProxy's "
-    "verdict on them, without storing anything. Values shown as [redacted] are secrets; "
+    "verdict on them, without storing anything. Ask the user before apply_changes, "
+    "restore_history or deleting anything, unless they have already said to go ahead; when "
+    "a request leaves out what to change something to, ask rather than guess. Values shown "
+    "as [redacted] are secrets; "
     "send [redacted] back unchanged to keep the stored value. In a cluster, a change asked "
     "of a passive node is made on the node holding the virtual IP, and the answer says so.")
 # What every node of a cluster holds the same of, so any of them answers the

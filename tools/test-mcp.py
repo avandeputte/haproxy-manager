@@ -82,6 +82,8 @@ init = r.get_json()["result"]
 ok(r.status_code == 200 and init["protocolVersion"] == "2025-06-18"
    and init["capabilities"] == {"tools": {"listChanged": False}}
    and init["serverInfo"]["name"] == "haproxy-manager", "initialize: the version asked for, tools only")
+ok("Ask the user before apply_changes" in init["instructions"],
+   "and instructions that say to ask before Apply, a restore or a delete")
 sid = r.headers.get("Mcp-Session-Id")
 ok(bool(sid), "with a session id, so the log can name the client")
 SESSION["Mcp-Session-Id"] = sid
