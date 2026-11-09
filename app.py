@@ -43,7 +43,7 @@ from ham.auth import bad_username, key_fingerprint, set_admin
 from ham.acme import _renew_loop
 from ham.updates import _update_loop
 from ham.watchdog import _watchdog_loop
-from ham import crowdsec, sync, traffic
+from ham import adcs, crowdsec, sync, traffic
 
 
 def _cli(argv):
@@ -205,6 +205,7 @@ if __name__ == "__main__":
     # The CrowdSec bouncer: put on this node if it is missing (a package
     # install cannot fetch it), and brought up when CrowdSec is on.
     threading.Thread(target=crowdsec.startup, daemon=True).start()
+    threading.Thread(target=adcs.startup, daemon=True).start()
     # The traffic history is written every ten minutes, so stopping must write
     # the rest. systemd and supervisord stop with SIGTERM, which by default
     # ends Python without running anything registered here; made an ordinary

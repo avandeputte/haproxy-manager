@@ -1,4 +1,4 @@
-import { $, CA_CHOICES, api, btn, closeDlg, esc, fieldRow, list, lists, localTime, openDlg, readForm, showText, download } from "../core.js";
+import { $, ADCS_FIELDS, CA_CHOICES, api, btn, closeDlg, esc, fieldRow, list, lists, localTime, openDlg, readForm, showText, download } from "../core.js";
 import { E, renderEntity } from "../entities.js";
 import { t, tn } from "../i18n.js";
 import { refreshStatus, route } from "../shell.js";
@@ -53,17 +53,74 @@ export function dnsCredentialHelp(frm){
 
 /* ---- certificate wizard ---- */
 export const NEWOPT="__new__";
-const caLabel=a=>a.ca==="custom"?(String(a.server||"").replace(/^https?:\/\//,"").split("/")[0]||"custom"):(a.ca||"letsencrypt");
-/* The directory URL and the CA certificate rows mean something for a custom CA
-   only; the account editor hides them otherwise. */
-export function customCaRows(frm){
-  const sel=frm.querySelector("#f_ca");if(!sel)return;
-  const els=["server","ca_bundle"].flatMap(k=>{
-    let cell=frm.querySelector("#f_"+k);if(!cell)return [];
-    while(cell.parentNode&&cell.parentNode!==frm)cell=cell.parentNode;
-    return [frm.querySelector('label[for="f_'+k+'"]'),cell].filter(Boolean);});
-  const sync=()=>els.forEach(el=>{el.style.display=sel.value==="custom"?"":"none";});
-  sel.addEventListener("change",sync);sync();
+/* What an account's CA is called in a picker: a public CA by its short name,
+   your own by the server that runs it. */
+const caLabel=a=>a.ca==="custom"?(String(a.server||"").replace(/^https?:\/\//,"").split("/")[0]||"custom")
+  :a.ca==="adcs"?(a.adcs_host||"adcs"):(a.ca||"letsencrypt");
+/* Which rows an account's CA calls for beyond the common ones: a custom CA its
+   address and certificate; AD CS its server and credentials, with the CA name
+   and the domain for MS-ICPR and the CA certificate to trust for web enrollment
+   over HTTPS. EAB is a public CA's thing, or a custom one's. */
+export const CA_EXTRA=["server","ca_bundle",...ADCS_FIELDS.map(f=>f.k),"eab_kid","eab_hmac"];
+export function caFieldsShown(ca,method){
+  if(ca==="custom")return ["server","ca_bundle","eab_kid","eab_hmac"];
+  if(ca!=="adcs")return ["eab_kid","eab_hmac"];
+  const keys=ADCS_FIELDS.map(f=>f.k).filter(k=>method!=="certsrv"||!["adcs_ca_name","adcs_domain","adcs_dc"].includes(k));
+  return method==="certsrv"?keys.concat(["ca_bundle"]):keys;
+}
+/* Show the rows the chosen CA calls for, keep the authentication to what the
+   enrollment method takes, and offer to try the connection to the CA. `p` is
+   the field prefix ("" in the editor, "acc_" in the wizard); `when` says
+   whether the account rows are on at all. Returns the function that syncs. */
+export function caRows(frm,p,when){
+  p=p||"";when=when||(()=>true);
+  const sel=frm.querySelector("#f_"+p+"ca");if(!sel)return ()=>{};
+  const rowOf=k=>{let cell=frm.querySelector("#f_"+p+k);if(!cell)return [];
+    while(cell.parentNode&&cell.parentNode!==frm&&!(cell.parentNode.classList&&cell.parentNode.classList.contains("frm")))cell=cell.parentNode;
+    return [frm.querySelector('label[for="f_'+p+k+'"]'),cell].filter(Boolean);};
+  const method=frm.querySelector("#f_"+p+"adcs_method"),auth=frm.querySelector("#f_"+p+"adcs_auth");
+  adcsTestRow(frm,p);
+  const sync=()=>{
+    const on=when()?caFieldsShown(sel.value,method?method.value:"msicpr"):[];
+    CA_EXTRA.forEach(k=>rowOf(k).forEach(el=>{el.style.display=on.includes(k)?"":"none";}));
+    if(auth&&method){
+      const takes=method.value==="certsrv"?["ntlm","basic"]:["kerberos","ntlm"];
+      [...auth.querySelectorAll("option")].forEach(o=>{o.disabled=!takes.includes(o.value);});
+      if(!takes.includes(auth.value))auth.value=takes[0];
+    }
+  };
+  sel.addEventListener("change",sync);if(method)method.addEventListener("change",sync);sync();
+  return sync;
+}
+/* Under the extra settings: "Test the connection", which asks the CA for
+   nothing but a connection with the account as typed, so a wrong name or
+   password shows before the first certificate is requested; and "Show the
+   configuration", the acme_srv.cfg acme2certifier would be given, password
+   masked. In the last AD CS cell, so they show and hide with the rows. */
+function adcsTestRow(frm,p){
+  const last=frm.querySelector("#f_"+p+"adcs_extra");if(!last)return;
+  const box=document.createElement("div");box.style.marginTop="8px";
+  const out=document.createElement("div");out.className="hint";out.style.cssText="margin-top:6px;white-space:pre-wrap";
+  const typed=()=>{
+    const body={};
+    ADCS_FIELDS.forEach(f=>{const el=frm.querySelector("#f_"+p+f.k);if(el)body[f.k]=el.value;});
+    const cb=frm.querySelector("#f_"+p+"ca_bundle");if(cb)body.ca_bundle=cb.value;
+    return body;
+  };
+  const test=btn(t("Test the connection to the CA"),"sm",async()=>{
+    test.disabled=true;out.textContent=t("Asking the CA...");
+    try{const r=await api("acme/adcs/test","POST",typed());
+      out.innerHTML='<span class="pill '+(r.ok?"up":"down")+'">'+(r.ok?t("reachable"):t("failed"))+"</span> "+esc(r.message||"");}
+    catch(e){out.textContent=e.message;}
+    test.disabled=false;
+  });
+  const show=btn(t("Show the configuration"),"sm",async()=>{
+    try{const r=await api("acme/adcs/config","POST",typed());
+      if(r.ok)showText("acme_srv.cfg",r.config);else out.textContent=r.error||"";}
+    catch(e){out.textContent=e.message;}
+  });
+  show.style.marginLeft="6px";
+  box.appendChild(test);box.appendChild(show);box.appendChild(out);last.parentNode.appendChild(box);
 }
 export const CERT_WIZ=[
  {k:"domains",l:"Domain names",t:"textarea",h:"One per line. The first is the certificate's primary name. A wildcard such as *.example.com needs DNS-01."},
@@ -75,6 +132,7 @@ export const CERT_WIZ=[
   h:"letsencrypt_test issues untrusted certificates but has no rate limits -- ideal while setting things up"},
  {k:"acc_server",l:"ACME directory URL",t:"text",h:"Your own ACME server's directory, such as https://ca.example.lan/directory -- for example acme2certifier in front of Active Directory Certificate Services, step-ca or Vault"},
  {k:"acc_ca_bundle",l:"CA certificate to trust",t:"textarea",h:"Optional. The PEM certificate of the CA that signed the ACME server's own HTTPS certificate, if this node does not trust it already"},
+ ...ADCS_FIELDS.map(f=>Object.assign({},f,{k:"acc_"+f.k})),
  {k:"acc_eab_kid",l:"EAB key ID",t:"text",h:"Google, SSL.com and Actalis need one, from your account with them, and so may your own CA. ZeroSSL gets its own from the e-mail address."},
  {k:"acc_eab_hmac",l:"EAB HMAC key",t:"password"},
  {k:"challenge_id",l:"Challenge type",t:"select",o:[]},
@@ -106,17 +164,17 @@ export async function openCertWizard(){
   const err=document.createElement("div");err.className="err";
 
   const setRow=(k,on)=>{(rows[k]||[]).forEach(el=>{el.style.display=on?"":"none";});};
+  const caSync=caRows(frm,"acc_",()=>frm.querySelector("#f_account_id").value===NEWOPT);
   const sync=()=>{
     const newAcc=frm.querySelector("#f_account_id").value===NEWOPT;
-    ["acc_name","acc_email","acc_ca","acc_eab_kid","acc_eab_hmac"].forEach(k=>setRow(k,newAcc));
-    const custom=frm.querySelector("#f_acc_ca").value==="custom";
-    ["acc_server","acc_ca_bundle"].forEach(k=>setRow(k,newAcc&&custom));
+    ["acc_name","acc_email","acc_ca"].forEach(k=>setRow(k,newAcc));
+    caSync();
     const newCh=frm.querySelector("#f_challenge_id").value===NEWOPT;
     const method=frm.querySelector("#f_ch_method").value;
     ["ch_name","ch_method"].forEach(k=>setRow(k,newCh));
     ["dns_provider","dns_credentials"].forEach(k=>setRow(k,newCh&&method==="dns01"));
   };
-  ["f_account_id","f_acc_ca","f_challenge_id","f_ch_method"].forEach(id=>{
+  ["f_account_id","f_challenge_id","f_ch_method"].forEach(id=>{
     const el=frm.querySelector("#"+id);if(el)el.addEventListener("change",sync);});
   dnsCredentialHelp(frm);
   sync();
@@ -126,9 +184,11 @@ export async function openCertWizard(){
     const body={domains:d.domains,name:d.name,key_type:d.key_type,
                 auto_renew:d.auto_renew,issue:d.issue};
     body.account=d.account_id===NEWOPT
-      ? {name:d.acc_name||("account-"+(d.acc_ca||"letsencrypt")),email:d.acc_email,ca:d.acc_ca,
-         server:d.acc_ca==="custom"?d.acc_server:"",ca_bundle:d.acc_ca==="custom"?d.acc_ca_bundle:"",
-         eab_kid:d.acc_eab_kid,eab_hmac:d.acc_eab_hmac}
+      ? Object.assign({name:d.acc_name||("account-"+(d.acc_ca||"letsencrypt")),email:d.acc_email,ca:d.acc_ca,
+         server:d.acc_ca==="custom"?d.acc_server:"",
+         ca_bundle:d.acc_ca==="custom"||d.acc_ca==="adcs"?d.acc_ca_bundle:"",
+         eab_kid:d.acc_ca==="adcs"?"":d.acc_eab_kid,eab_hmac:d.acc_ca==="adcs"?"":d.acc_eab_hmac},
+         d.acc_ca==="adcs"?Object.fromEntries(ADCS_FIELDS.map(f=>[f.k,d["acc_"+f.k]])):{})
       : {id:d.account_id};
     body.challenge=d.challenge_id===NEWOPT
       ? {name:d.ch_name||(d.ch_method==="dns01"?("dns-"+(d.dns_provider||"01")):"http-01"),
@@ -207,9 +267,33 @@ export function acmeSetupNotice(){
   return card;
 }
 
-/* Both notices the certificates page can show, in the order they matter. */
+/* The notices the certificates page can show, in the order they matter. */
 export function certificateNotices(){
-  return [acmeSetupNotice(), acmeNotice()];
+  return [acmeSetupNotice(), acmeNotice(), adcsNotice()];
+}
+
+/* Active Directory Certificate Services needs acme2certifier on the node that
+   issues. The image has it; a node installed from a package or install.sh
+   fetches it at the first issuance -- or now, from here. */
+export function adcsNotice(){
+  const a=acmeHealth&&acmeHealth.adcs;
+  if(!a||!a.wanted||(a.installed&&a.impacket))return null;
+  const card=document.createElement("div");card.className="card";card.style.borderColor="#e3cfa8";
+  card.innerHTML='<div class=hd><h2>'+(a.installed?t("Impacket is not installed on this node")
+                                                   :t("acme2certifier is not installed on this node"))+'</h2></div>'+
+    '<div class=bd><p>'+(a.installed
+      ?t("An account enrolls with Active Directory Certificate Services over MS-ICPR, which needs Impacket (python3-impacket), and this node does not have it.")
+      :t("An account enrolls with Active Directory Certificate Services through acme2certifier, which this node does not have yet. It is installed at the first issuance, or now."))+"</p>"+
+    (a.install_error?'<p class=hint style="margin-top:8px">'+t("The last install failed:")+' <span class=mono>'+
+       esc(a.install_error.split("\n").slice(-3).join(" "))+"</span></p>":"")+"</div>";
+  if(!a.installed){
+    const foot=document.createElement("div");foot.className="bd";foot.style.cssText="border-top:1px solid var(--hair)";
+    const b=btn(t("Install acme2certifier now"),"pri",async()=>{
+      b.disabled=true;b.textContent=t("Installing -- this can take a few minutes...");
+      try{await api("acme/adcs/install","POST",{});await route();}catch(e){b.textContent=e.message;}});
+    foot.appendChild(b);card.appendChild(foot);
+  }
+  return card;
 }
 
 export function acmeNotice(){

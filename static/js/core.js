@@ -64,7 +64,27 @@ $("#ovl").addEventListener("click",e=>{if(e.target.id==="ovl")closeDlg();});
 document.addEventListener("keydown",e=>{if(e.key==="Escape")closeDlg();});
 /* "custom" is any ACME server of your own, by its directory URL: acme2certifier
    in front of Active Directory Certificate Services, step-ca, Vault. */
-export const CA_CHOICES=["letsencrypt","letsencrypt_test","zerossl","google","google_test","sslcom","actalis","custom"];
+export const CA_CHOICES=["letsencrypt","letsencrypt_test","zerossl","google","google_test","sslcom","actalis","custom",
+  {value:"adcs",label:"Active Directory Certificate Services"}];
+/* The fields an account for Active Directory Certificate Services has: in the
+   account editor as they are, in the wizard with acc_ in front. Here rather
+   than with the wizard because the entities and the certificates page import
+   each other, and a const read across that cycle is not yet initialized. */
+export const ADCS_FIELDS=[
+ {k:"adcs_method",l:"Enrollment",t:"select",d:"msicpr",
+  o:[{value:"msicpr",label:"MS-ICPR -- the RPC interface certreq uses; needs only the Certification Authority role"},
+     {value:"certsrv",label:"Web enrollment -- the CA's /certsrv pages"}]},
+ {k:"adcs_host",l:"CA server",t:"text",h:"The server running the certification authority, such as ca01.corp.example.lan. For web enrollment, the server with the /certsrv pages."},
+ {k:"adcs_ca_name",l:"CA name",t:"text",h:"The certification authority's name as certutil shows it, such as Corp Issuing CA"},
+ {k:"adcs_template",l:"Certificate template",t:"text",d:"WebServer",h:"A template the service account may enroll in, and that issues without a CA manager's approval"},
+ {k:"adcs_auth",l:"Authentication",t:"select",o:["kerberos","ntlm","basic"],d:"kerberos",h:"Kerberos for MS-ICPR, as Microsoft recommends; web enrollment takes NTLM or basic"},
+ {k:"adcs_domain",l:"Active Directory domain",t:"text",h:"Such as corp.example.lan. Kerberos needs it."},
+ {k:"adcs_dc",l:"Domain controller",t:"text",h:"Optional. A domain controller's name or address, when the domain's name does not resolve to one from this node"},
+ {k:"adcs_user",l:"Service account",t:"text",h:"A user allowed to enroll in the template, such as svc-acme"},
+ {k:"adcs_password",l:"Password",t:"password"},
+ {k:"adcs_extra",l:"Extra acme2certifier settings",t:"textarea",
+  h:"Advanced. Any acme2certifier setting the fields above do not cover, as lines of its acme_srv.cfg with their section headers -- for example [CAhandler] timeout: 30, or [Challenge] dns_server_list: [\"10.0.0.53\"]. These are laid over the generated configuration, so a setting here replaces the one the fields produce. Show the configuration to see the result."},
+];
 
 export function btn(label,cls,fn){const b=document.createElement("button");b.className="btn "+(cls||"");b.textContent=label;b.onclick=fn;return b;}
 export function showText(title,text){const p=document.createElement("pre");p.textContent=text;openDlg(title,p,[btn(t("Close"),"",closeDlg)]);}

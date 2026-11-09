@@ -5,7 +5,8 @@
 <!-- /docs-site:skip -->
 
 A small self-hosted web UI to manage an **HAProxy** configuration, obtain
-**Let's Encrypt** certificates, and run a **cluster of any number of nodes with
+**Let's Encrypt** certificates (or your own CA's, Active Directory Certificate
+Services included), and run a **cluster of any number of nodes with
 Keepalived** on a shared virtual IP — one node active, the rest ready to take
 over, with settings and certificates syncing across all of them. Since 2.0 it
 also keeps named **address lists**, lets a service carry its own **rules** and

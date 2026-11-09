@@ -1,7 +1,7 @@
-import { $, CA_CHOICES, HEALTH_LABEL, PROXY_KEYWORD, PROXY_OPTIONS, api, btn, closeDlg, esc, fieldRow, list, lists, nameOf, openDlg, readForm, showText, trimHaproxy } from "./core.js";
+import { $, ADCS_FIELDS, CA_CHOICES, HEALTH_LABEL, PROXY_KEYWORD, PROXY_OPTIONS, api, btn, closeDlg, esc, fieldRow, list, lists, nameOf, openDlg, readForm, showText, trimHaproxy } from "./core.js";
 import { t } from "./i18n.js";
 import { refreshStatus, route } from "./shell.js";
-import { certificateNotices, certExpiryCell, certLastCell, certStatusCell, dnsApiByHook, dnsApiOptions, dnsCredentialHelp, issueCert, loadAcmeHealth, loadCertStatus, loadDnsApis, openCertWizard, openDownload, openUpload, showCertLog, customCaRows } from "./pages/certificates.js";
+import { caRows, certificateNotices, certExpiryCell, certLastCell, certStatusCell, dnsApiByHook, dnsApiOptions, dnsCredentialHelp, issueCert, loadAcmeHealth, loadCertStatus, loadDnsApis, openCertWizard, openDownload, openUpload, showCertLog } from "./pages/certificates.js";
 import { ACTION_LABEL, COND_LABEL, openRuleWizard } from "./pages/rules.js";
 import { openConditionWizard } from "./pages/conditions.js";
 import { state } from "./state.js";
@@ -257,15 +257,17 @@ export const E={
   intro:"ACME accounts used to request certificates.",
   cols:[["name","Name"],["email","E-mail"],
         ["ca","CA",r=>r.ca==="custom"?"custom<div class=sub>"+esc(r.server||"")+"</div>"
+          :r.ca==="adcs"?t("Active Directory")+"<div class=sub>"+esc(r.adcs_host||"")+(r.adcs_template?" &middot; "+esc(r.adcs_template):"")+"</div>"
           :r.ca==="buypass"?"buypass<div class=sub>"+t("Buypass stopped issuing on 31 October 2025: choose another CA")+"</div>"
           :esc(r.ca||"letsencrypt")]],
-  editorExtra:customCaRows,
+  editorExtra:frm=>caRows(frm),
   fields:[
    {k:"name",l:"Name",t:"text"},
    {k:"email",l:"E-mail address",t:"text"},
    {k:"ca",l:"Certificate authority",t:"select",o:CA_CHOICES,d:"letsencrypt",h:"Use letsencrypt_test while setting things up to avoid rate limits"},
    {k:"server",l:"ACME directory URL",t:"text",h:"Your own ACME server's directory, such as https://ca.example.lan/directory -- for example acme2certifier in front of Active Directory Certificate Services, step-ca or Vault"},
    {k:"ca_bundle",l:"CA certificate to trust",t:"textarea",h:"Optional. The PEM certificate of the CA that signed the ACME server's own HTTPS certificate, if this node does not trust it already"},
+   ...ADCS_FIELDS,
    {k:"eab_kid",l:"EAB key ID",t:"text",h:"Google, SSL.com and Actalis need one, from your account with them, and so may your own CA. ZeroSSL gets its own from the e-mail address."},
    {k:"eab_hmac",l:"EAB HMAC key",t:"password"}]},
 

@@ -13,7 +13,7 @@ import uuid
 from .base import ACME_HOME, ACME_SH, _lock, app
 from .config import load_config, save_config
 from .util import _by_id, _sec, cert_details, cert_path, parse_domains, rule_cond_ids, run
-from . import access, acme, errorpages, validate, wizard, oauth
+from . import access, acme, adcs, errorpages, validate, wizard, oauth
 from .validate import plain_url as _plain_url
 
 # --------------------------------------------------------------------------
@@ -162,6 +162,10 @@ def api_acme_health():
         out["problem"] = "acme.sh needs %s, which is not installed." % " and ".join(missing)
         out["hint"] = "apt-get install -y " + " ".join(missing)
         return jsonify(out)
+    # Whether the node can enroll with Active Directory Certificate Services,
+    # for the certificates page to say so when an account asks for it.
+    out["adcs"] = adcs.summary(load_config())
+
     if not shutil.which("socat"):
         out["ok"] = True
         out["problem"] = ""
@@ -228,8 +232,8 @@ def api_wizard_certificate():
 
         try:
             account = pick("accounts", body.get("account"),
-                           {"name": "", "email": "", "ca": "letsencrypt", "server": "",
-                            "ca_bundle": "", "eab_kid": "", "eab_hmac": ""})
+                           dict({"name": "", "email": "", "ca": "letsencrypt", "server": "",
+                                 "ca_bundle": "", "eab_kid": "", "eab_hmac": ""}, **adcs.FIELDS))
             acme.check_account(account)
             challenge = pick("challenges", body.get("challenge"),
                              {"name": "", "method": "http01", "dns_provider": "", "dns_credentials": ""})

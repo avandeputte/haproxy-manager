@@ -24,7 +24,7 @@ import re
 _SAFE_ENV = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _DANGEROUS_ENV = {"PATH", "IFS", "ENV", "BASH_ENV", "SHELLOPTS", "BASHOPTS",
                   "PS4", "PROMPT_COMMAND", "PYTHONPATH", "PERL5LIB"}
-from . import auth, notify, sync
+from . import adcs, auth, notify, sync
 
 # --------------------------------------------------------------------------
 
@@ -32,6 +32,9 @@ from . import auth, notify, sync
 # takes a name it does not know for a directory URL, so a CA it drops has to
 # go here too: Buypass stopped issuing on 31 October 2025 and left acme.sh in
 # 3.1.2. The ones in EAB_REQUIRED will not register an account without it.
+# Two more are not public CAs: "custom" is any ACME server by its directory
+# URL, and "adcs" is Active Directory Certificate Services through the
+# acme2certifier this node runs for it (see adcs.py).
 CA_SERVERS = {
     "letsencrypt": "letsencrypt",
     "letsencrypt_test": "letsencrypt_test",
@@ -89,11 +92,14 @@ def check_account(acc):
     if ca == "buypass":
         raise ValueError("Buypass stopped issuing certificates on 31 October 2025: "
                          "choose another certificate authority for this account")
-    if ca != "custom" and ca not in CA_SERVERS:
+    if ca not in ("custom", "adcs") and ca not in CA_SERVERS:
         raise ValueError("unknown certificate authority %r" % ca)
     if ca in EAB_REQUIRED and not (acc.get("eab_kid") or "").strip():
         raise ValueError("%s needs External Account Binding: fill in the EAB key ID and "
                          "HMAC key from your account with them" % EAB_REQUIRED[ca])
+    if ca == "adcs":
+        adcs.check_account(acc)
+        return
     if ca != "custom":
         return
     url = (acc.get("server") or "").strip()
@@ -170,6 +176,8 @@ def check_directory(acc):
 
 def server_args(acc):
     """--server, and --ca-bundle when the account brings one, for acme.sh."""
+    if acc.get("ca") == "adcs":
+        return ["--server", adcs.directory_url()]
     if acc.get("ca") != "custom":
         return ["--server", CA_SERVERS.get(acc.get("ca", "letsencrypt"), "letsencrypt")]
     args = ["--server", (acc.get("server") or "").strip()]
@@ -275,6 +283,27 @@ def _acme_issue(cfg, cert, force=False):
         return {"ok": False, "error": why}
 
     trace = []
+    if adcs.is_adcs(acc) and not adcs.installed():
+        # The first issuance on a node installed from a package or install.sh
+        # is the moment it gets acme2certifier; the image already has it.
+        ok, out = adcs.ensure_installed()
+        trace.append(out)
+        if not ok:
+            return {"ok": False, "error": "acme2certifier is not installed on this node and could not "
+                                          "be installed: %s" % out.strip()[-300:], "log": "\n".join(trace)}
+    with adcs.serving(acc, trace) as why:
+        if why:
+            return {"ok": False, "error": why, "log": "\n".join(trace)}
+        res = _acme_run_issue(cfg, cert, acc, ch, doms, force, trace)
+    if not res.get("ok") and adcs.is_adcs(acc) and "error" in res:
+        said = adcs.explain("\n".join(trace))
+        if said:
+            res["error"] = "%s -- acme2certifier: %s" % (res["error"], said)
+    return res
+
+
+def _acme_run_issue(cfg, cert, acc, ch, doms, force, trace):
+    """Register the account if need be, run acme.sh --issue, deploy the result."""
     rc, out = ensure_account(acc)
     trace.append(out)
     if rc != 0:

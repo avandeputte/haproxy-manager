@@ -32,6 +32,13 @@ CROWDSEC_HTML = Path(os.environ.get("HAM_CROWDSEC_HTML", "/var/lib/crowdsec-hapr
 KEEPALIVED_CFG = Path(os.environ.get("HAM_KEEPALIVED_CFG", "/etc/keepalived/keepalived.conf"))
 ACME_HOME = Path(os.environ.get("HAM_ACME_HOME", str(Path.home() / ".acme.sh")))
 ACME_SH = os.environ.get("HAM_ACME_SH", str(ACME_HOME / "acme.sh"))
+# acme2certifier, for certificates from Active Directory Certificate
+# Services: where its .deb puts it, the localhost port it is run on for an
+# issuance, and where its database and the configuration of a run live --
+# beside acme.sh's state, so the container's volume keeps them.
+A2C_DIR = Path(os.environ.get("HAM_A2C_DIR", "/var/www/acme2certifier"))
+A2C_PORT = int(os.environ.get("HAM_A2C_PORT", "9081"))
+A2C_STATE = Path(os.environ.get("HAM_A2C_STATE", str(ACME_HOME / "acme2certifier")))
 # One directory up: this module lives in ham/, the files it points at sit
 # beside app.py.
 ROOT_DIR = Path(__file__).resolve().parent.parent
