@@ -158,7 +158,6 @@ export const E={
         ["tgt","Target",r=>r.type==="use_backend"?esc(nameOf("haproxy/backends",r.backend)):esc([r.param1,r.param2].filter(Boolean).join(" "))||"—"]],
   refs:["haproxy/conditions","haproxy/backends","haproxy/frontends","haproxy/addresslists"],
   wizard:r=>openRuleWizard(r),
-  links:[["haproxy/conditions","Conditions"]],
   /* A rule saved before 2.0 held one list and an operator; shown here as the
      two lists it means, and saved that way. */
   prepare:r=>r.operator==="or"?Object.assign({},r,{any_of:(r.any_of||[]).concat(r.conditions||[]),conditions:[],operator:"and"}):r,
@@ -386,12 +385,6 @@ export async function renderEntity(key,into){
       hd.appendChild(btn(t(def.add),"pri sm",()=>openEditor(key)));
     }
   }
-  /* pages reached from here rather than from the menu */
-  (def.links||[]).forEach(([target,label])=>{
-    hd.appendChild(document.createTextNode(" "));
-    const a=btn(t(label),"sm",()=>{location.hash="#/"+target;});
-    hd.appendChild(a);
-  });
   if(false){
   }
   card.appendChild(hd);

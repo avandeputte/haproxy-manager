@@ -88,7 +88,9 @@ const head = $("#content").querySelector(".hd");
 ok(!!findButton(head, "New rule"), "the Rules page offers the wizard");
 ok(!findButton(head, "Raw fields"), "and no second editor beside it");
 ok(typeof E["haproxy/rules"].wizard === "function" && !E["haproxy/rules"].rowActions, "Edit opens the wizard");
-ok(!!findButton(head, "Conditions"), "and the Conditions page is reached from here");
+const navKeys = (await import(REPO + "/static/js/shell.js")).NAV.map(x => x[0]);
+ok(navKeys.indexOf("haproxy/conditions") === navKeys.indexOf("haproxy/rules") + 1 && !findButton(head, "Conditions"),
+   "Conditions has its own menu entry, under Rules, rather than a button here");
 ok(E["haproxy/rules"].refs.includes("haproxy/frontends"), "the page loads the listeners the wizard offers");
 
 // -- a new rule ------------------------------------------------------------------

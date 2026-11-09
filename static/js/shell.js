@@ -33,6 +33,7 @@ export const NAV=[
  ["haproxy/backends","Backend Pools"],
  ["haproxy/servers","Real Servers"],
  ["haproxy/rules","Rules"],
+ ["haproxy/conditions","Conditions"],
  ["haproxy/errorpages","Error Pages"],
  ["haproxy/healthchecks","Health Monitors"],
  ["s:haproxy-settings","Settings"],
