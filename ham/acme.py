@@ -294,8 +294,8 @@ def _acme_issue(cfg, cert, force=False):
 
     trace = []
     if adcs.is_adcs(acc) and not adcs.installed():
-        # The first issuance on a node installed from a package or install.sh
-        # is the moment it gets acme2certifier; the image already has it.
+        # Every node gets acme2certifier when the service starts. Where that
+        # failed, or is still running, this is the next try.
         ok, out = adcs.ensure_installed()
         trace.append(out)
         if not ok:

@@ -224,6 +224,7 @@ basic["WWW-Authenticate"] = 'Basic realm="x"'
 ok(not adcs.offers_ntlm(basic), "one that offers only basic does not")
 
 print("issuing")
+REAL = {k: getattr(adcs, k) for k in ("installed", "missing_for", "ensure_installed", "install")}
 # The stand-in stands in: acme2certifier counts as installed, Impacket too.
 adcs.installed = lambda: True
 adcs.missing_for = lambda acc: ""
@@ -338,6 +339,80 @@ ok(r.status_code == 200, "a complete one is created (%d %s)" % (r.status_code, (
 new = [a for a in load_config()["acme"]["accounts"] if a["name"] == "wiz"]
 ok(new and new[0]["adcs_host"] == "ca01.corp.example.lan" and new[0]["adcs_password"] == GOOD["adcs_password"]
    and new[0]["adcs_template"] == "WebServer", "with the CA server, template and credentials stored")
+
+print("getting it onto a node")
+# Every node gets it when the service starts, whether or not an account uses
+# it; nobody presses anything. The install itself is stood in for.
+import threading   # noqa: E402
+adcs.ensure_installed = REAL["ensure_installed"]
+adcs.STARTUP_TRIES = (0, 0, 0)
+state = {"there": False, "works": False, "runs": 0}
+adcs.installed = lambda: state["there"]
+
+
+def fake_install():
+    state["runs"] += 1
+    if state["works"]:
+        state["there"] = True
+        return True, "installed acme2certifier"
+    return False, "the install did not finish: could not resolve github.com"
+
+
+adcs.install = fake_install
+cfg = load_config()
+kept = cfg["acme"]["accounts"]
+cfg["acme"]["accounts"] = [a for a in kept if a.get("ca") != "adcs"]
+save_config(cfg)
+ok(not adcs.wanted(load_config()), "(no account uses AD CS)")
+adcs.startup()
+ok(state["runs"] == 3 and not state["there"],
+   "startup tries on a node no account needs it on, and again when it fails (%d tries)" % state["runs"])
+ok(adcs.TRIED.exists() and "github.com" in adcs.last_failure(), "what stopped it is kept")
+ok(adcs.ensure_installed()[0] is False and state["runs"] == 3,
+   "an issuance does not try again so soon after a failure")
+r = client.post("/api/acme/adcs/test", headers=H, json=GOOD).get_json()
+ok(r["ok"] is False and state["runs"] == 4 and "could not be installed" in r["message"]
+   and "github.com" in r["message"], "testing the connection does, and says why it could not: %s" % r["message"][:90])
+state["works"] = True
+state["runs"] = 0
+adcs.startup()
+ok(state["runs"] == 1 and state["there"] and not adcs.TRIED.exists(),
+   "the next start installs it, once, and forgets the failure")
+adcs.startup()
+ok(state["runs"] == 1, "a node that has it is left alone")
+# while one install runs, whoever else needs it waits for that one
+state.update(there=False, runs=0)
+gate = threading.Event()
+
+
+def slow_install():
+    state["runs"] += 1
+    gate.wait(10)
+    state["there"] = True
+    return True, "installed acme2certifier"
+
+
+adcs.install = slow_install
+first = threading.Thread(target=adcs.startup)
+first.start()
+for _ in range(100):
+    if adcs._installing.locked():
+        break
+    time.sleep(0.05)
+r = client.get("/api/acme/health", headers=H).get_json()
+ok(r["adcs"]["installing"] is True and r["adcs"]["installed"] is False, "the health check says an install is running")
+got = []
+second = threading.Thread(target=lambda: got.append(adcs.ensure_installed(force=True)))
+second.start()
+time.sleep(0.3)
+ok(not got, "a second caller waits for the install that is running")
+gate.set()
+first.join(10)
+second.join(10)
+ok(got and got[0][0] is True and state["runs"] == 1, "and finds it installed, without a second install")
+cfg = load_config()
+cfg["acme"]["accounts"] = kept
+save_config(cfg)
 
 print()
 print("FAILED: %d" % len(fails) if fails else "all passed")

@@ -274,10 +274,12 @@ export function certificateNotices(){
 
 /* Active Directory Certificate Services needs acme2certifier on the node that
    issues. The image has it; a node installed from a package or install.sh
-   fetches it at the first issuance -- or now, from here. */
+   fetches it when the service starts. This is for the node where that failed:
+   it says why, and tries again from here. Nothing is said while the install
+   is still running. */
 export function adcsNotice(){
   const a=acmeHealth&&acmeHealth.adcs;
-  if(!a||!a.wanted||(a.installed&&a.impacket))return null;
+  if(!a||!a.wanted||a.installing||(a.installed&&a.impacket))return null;
   const card=document.createElement("div");card.className="card";card.style.borderColor="#e3cfa8";
   card.innerHTML='<div class=hd><h2>'+(a.installed?t("Impacket is not installed on this node")
                                                    :t("acme2certifier is not installed on this node"))+'</h2></div>'+

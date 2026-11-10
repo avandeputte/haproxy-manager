@@ -183,6 +183,10 @@ health = { ok: true, adcs: { wanted: false, installed: false, impacket: false } 
 await loadAcmeHealth();
 ok(!certificateNotices().filter(Boolean).some(c => c.textContent.includes("acme2certifier")),
    "no AD CS account: nothing said either");
+health = { ok: true, adcs: { wanted: true, installed: false, impacket: false, installing: true } };
+await loadAcmeHealth();
+ok(!certificateNotices().filter(Boolean).some(c => c.textContent.includes("acme2certifier")),
+   "while the node is installing it by itself: nothing said, and no button to press");
 
 console.log(fail ? "\n" + fail + " failed" : "\nall passed");
 process.exit(fail ? 1 : 0);

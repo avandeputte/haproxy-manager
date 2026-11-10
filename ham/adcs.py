@@ -444,6 +444,14 @@ def api_adcs_test():
         check_account(acc)
     except ValueError as e:
         return jsonify({"ok": False, "message": str(e)})
+    if not installed():
+        # Normally there since the service first started. Where that install
+        # is still running this waits for it, and where it failed it is tried
+        # again: the test is somebody asking for it now.
+        done, out = ensure_installed(force=True)
+        if not done:
+            return jsonify({"ok": False, "message": "acme2certifier is not installed on this node and could "
+                                                    "not be installed: %s" % out.strip()[-300:]})
     why = missing_for(acc)
     if why:
         return jsonify({"ok": False, "message": why})
@@ -526,10 +534,22 @@ def _test_certsrv(acc):
 # --------------------------------------------------------------------------
 # putting it on a node that lacks it
 
+# Every node gets acme2certifier when the service starts and it is missing --
+# after an install, an update or a restart -- so an AD CS account works the
+# moment it is typed. A package cannot do this itself: acme2certifier is in no
+# distribution's repository to depend on, and a package's own scripts run
+# while the package manager is locked.
+#
 # When an install last failed, so a node that cannot reach GitHub is not made
 # to try at every issuance.
 TRIED = DATA_DIR / "acme2certifier-install-tried"
 RETRY_AFTER = 6 * 3600
+# At startup: now, and twice more if it fails. The service is restarted from
+# inside the package manager's own run, which can hold its lock for longer
+# than one attempt waits; and at boot the network may not be up yet.
+STARTUP_TRIES = (0, 180, 600)
+# One install at a time, and whoever else needs it waits for that one.
+_installing = threading.Lock()
 # Impacket's package brings example scripts -- secretsdump and the like --
 # that scanners flag; they are not what enrollment uses, and the image leaves
 # them out the same way.
@@ -587,24 +607,28 @@ def install():
     return True, "installed acme2certifier %s" % (version() or A2C_VERSION)
 
 
-def ensure_installed():
-    """Install it where an account needs it and it is missing: (ok, message).
-    Never fatal, and a failure is not retried for a while."""
+def ensure_installed(force=False):
+    """Install it where it is missing: (ok, message). Never fatal. A failure
+    is not retried for a while, unless force says somebody is asking now. An
+    install already running is waited for rather than started twice."""
     if installed():
         return True, "installed"
-    if _tried_recently():
-        return False, "an install failed recently; not retried yet: " + last_failure()[-300:]
-    ok, out = install()
-    TRIED.parent.mkdir(parents=True, exist_ok=True)
-    if ok:
-        TRIED.unlink(missing_ok=True)
-        TRIED.with_suffix(".log").unlink(missing_ok=True)
-        log.info(out)
-    else:
-        TRIED.write_text(str(time.time()))
-        TRIED.with_suffix(".log").write_text(out)
-        log.warning("acme2certifier could not be installed: %s", out.strip()[-300:])
-    return ok, out
+    with _installing:
+        if installed():
+            return True, "installed"
+        if not force and _tried_recently():
+            return False, "an install failed recently; not retried yet: " + last_failure()[-300:]
+        ok, out = install()
+        TRIED.parent.mkdir(parents=True, exist_ok=True)
+        if ok:
+            TRIED.unlink(missing_ok=True)
+            TRIED.with_suffix(".log").unlink(missing_ok=True)
+            log.info(out)
+        else:
+            TRIED.write_text(str(time.time()))
+            TRIED.with_suffix(".log").write_text(out)
+            log.warning("acme2certifier could not be installed: %s", out.strip()[-300:])
+        return ok, out
 
 
 def wanted(cfg):
@@ -613,12 +637,13 @@ def wanted(cfg):
 
 
 def startup():
-    """At startup: a node that has an AD CS account gets acme2certifier if it
-    lacks it, so the first renewal does not wait for the download."""
+    """At startup: a node that lacks acme2certifier gets it, whether or not an
+    account uses it yet. The image has it, so there this does nothing."""
     try:
-        from .config import load_config
-        if wanted(load_config()):
-            ensure_installed()
+        for wait in STARTUP_TRIES:
+            time.sleep(wait)
+            if ensure_installed(force=True)[0]:
+                return
     except Exception:
         log.exception("acme2certifier at startup failed")
 
@@ -626,7 +651,8 @@ def startup():
 def summary(cfg):
     """For /api/acme/health: whether this node can enroll with AD CS."""
     out = {"wanted": wanted(cfg), "installed": installed(), "version": version(),
-           "impacket": _module("impacket"), "port": A2C_PORT, "release": A2C_VERSION}
+           "impacket": _module("impacket"), "port": A2C_PORT, "release": A2C_VERSION,
+           "installing": _installing.locked()}
     if out["wanted"] and not out["installed"]:
         out["install_error"] = last_failure()
     return out
@@ -634,8 +660,8 @@ def summary(cfg):
 
 @app.post("/api/acme/adcs/install")
 def api_adcs_install():
-    """Install acme2certifier on this node now, rather than at the first issuance."""
-    TRIED.unlink(missing_ok=True)
-    ok, message = ensure_installed()
+    """Install acme2certifier on this node now: for a node where the install
+    at startup failed, once what stopped it is put right."""
+    ok, message = ensure_installed(force=True)
     from .config import load_config
     return jsonify({"ok": ok, "message": message, "adcs": summary(load_config())}), (200 if ok else 500)
