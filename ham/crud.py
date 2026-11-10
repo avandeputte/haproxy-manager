@@ -17,8 +17,9 @@ from . import access, acme, apply, errorpages, haproxy, oauth
 def _check_item(sec, col, cfg, item):
     """What a collection refuses before storing it. Raises ValueError with why."""
     if sec == "acme" and col == "challenges":
-        acme.check_challenge(item)
-        return
+        acme.check_challenge(item, cfg)
+    if sec == "acme" and col == "certificates":
+        acme.check_certificate(cfg, item)
     if sec != "haproxy":
         return
     if col == "backends":
@@ -166,11 +167,11 @@ def collection_item(sec, col, iid):
                 continue
             if request.method == "PUT":
                 data = request.get_json(force=True) or {}
+                data["id"] = iid        # before the check: some ask what else uses this
                 try:
                     _check_item(sec, col, cfg, data)
                 except ValueError as e:
                     return jsonify({"error": str(e)}), 400
-                data["id"] = iid
                 items[i] = data
                 save_config(cfg)
                 _after_save(sec, col, cfg)

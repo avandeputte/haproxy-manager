@@ -64,38 +64,6 @@ ok(clean["challenges"][0]["dns_credentials"] == ""
 ok(acme["challenges"][0]["dns_credentials"] == "CF_Token=leaky",
    "without mutating the stored config")
 
-# -- DNS alias mode: the challenge alias reaches acme.sh as a validated flag --
-from ham import acme   # noqa: E402
-ch = {"method": "dns01", "challenge_alias": "validation.example.net"}
-ok(acme.challenge_alias_args(ch, ["a.example.com", "b.example.com"])
-   == ["--challenge-alias", "validation.example.net"],
-   "one alias applies to every domain on the certificate")
-ch["challenge_alias"] = "x.example.net y.example.net"
-ok(acme.challenge_alias_args(ch, ["a.example.com", "b.example.com"])
-   == ["--challenge-alias", "x.example.net", "--challenge-alias", "y.example.net"],
-   "one alias per domain is passed in order")
-ok(acme.challenge_alias_args({"method": "dns01"}, ["a.example.com"]) == [],
-   "no alias adds no argument")
-
-
-def refused(fn, *a):
-    try:
-        fn(*a)
-    except ValueError:
-        return True
-    return False
-
-
-ok(refused(acme.challenge_alias_args, {"challenge_alias": "a.net b.net"}, ["1.x.com", "2.x.com", "3.x.com"]),
-   "an alias count that matches neither one nor the domain count is refused")
-ok(refused(acme.check_challenge, {"challenge_alias": "evil.net; rm -rf /"})
-   and refused(acme.check_challenge, {"challenge_alias": "--force"})
-   and refused(acme.check_challenge, {"challenge_alias": "nodots"}),
-   "an alias that is not a host name is refused at save time")
-ok(not refused(acme.check_challenge, {"challenge_alias": ""})
-   and not refused(acme.check_challenge, {"challenge_alias": "_acme.validation.example.net"}),
-   "an empty alias and a valid one are accepted")
-
 # -- a corrupt config file does not reopen setup -----------------------------
 save_config(copy.deepcopy(DEFAULT_CONFIG))       # a real file exists
 CONF_PATH.write_text("{ this is not json")

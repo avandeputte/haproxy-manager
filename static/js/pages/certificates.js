@@ -117,7 +117,7 @@ export async function openCertWizard(){
     body.challenge=d.challenge_id===NEWOPT
       ? {name:d.ch_name||(d.ch_method==="dns01"?("dns-"+(d.dns_provider||"01")):"http-01"),
          method:d.ch_method,dns_provider:d.dns_provider,dns_credentials:d.dns_credentials,
-         challenge_alias:d.challenge_alias}
+         challenge_alias:d.ch_method==="dns01"?d.challenge_alias:""}
       : {id:d.challenge_id};
     return body;
   };
