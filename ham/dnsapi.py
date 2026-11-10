@@ -213,6 +213,9 @@ def api_wizard_certificate():
         def pick(kind, spec, defaults, label_field="name"):
             """Reuse the referenced object, or create one from the given fields."""
             spec = spec or {}
+            if not isinstance(spec, dict):
+                raise ValueError("the %s must be {id} of an existing one, or the fields of a "
+                                 "new one" % kind[:-1])
             if spec.get("id"):
                 found = _by_id(ac[kind]).get(spec["id"])
                 if not found:
@@ -252,7 +255,14 @@ def api_wizard_certificate():
                          "create the validation record.")
 
         name = (body.get("name") or "").strip() or domains[0].replace("*.", "wildcard-")
-        existing = wizard._find(ac["certificates"], lambda c: set(parse_domains(c)) == set(domains))
+        # An uploaded certificate for the same names is not this one: issuing
+        # over it would leave an ACME certificate marked as uploaded, which
+        # nothing renews. The new one is created beside it.
+        existing = wizard._find(ac["certificates"], lambda c: not acme.is_custom(c)
+                                and set(parse_domains(c)) == set(domains))
+        if any(acme.is_custom(c) and set(parse_domains(c)) == set(domains) for c in ac["certificates"]):
+            warns.append("An uploaded certificate already covers these names. This one is "
+                         "issued beside it; delete the uploaded one once this is in use.")
         if existing:
             existing.update({"account": account["id"], "challenge": challenge["id"],
                              "key_type": body.get("key_type") or existing.get("key_type", "ec-256"),

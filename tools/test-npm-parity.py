@@ -93,7 +93,9 @@ ok(any(s["url"] == "http://*.example.com" for s in svc), "and the Services page 
 haproxy.ipv6_available.cache_clear()
 real = haproxy.ipv6_available
 haproxy.ipv6_available = lambda: True
-ok(lines("bind :::80 v4v6"), "a listener on every address answers over IPv6 too")
+ok(lines("bind 0.0.0.0:80") and lines("bind :::80 v6only") and not lines("v4v6"),
+   "a listener on every address answers over IPv6 too: a second bind, so an IPv4 client "
+   "keeps its IPv4 address rather than becoming ::ffff:a.b.c.d")
 c = load_config(); c["haproxy"]["settings"]["ipv6"] = False; save_config(c)
 ok(lines("bind 0.0.0.0:80") and not lines(":::80"), "unless IPv6 is turned off")
 c = load_config(); c["haproxy"]["settings"]["ipv6"] = True; save_config(c)
@@ -109,6 +111,26 @@ haproxy.ipv6_available = real
 ok(lines("http-request set-header X-Real-IP %[src]") and lines("http-request set-header X-Forwarded-Host %[req.hdr(host)]"),
    "X-Real-IP and X-Forwarded-Host are set beside X-Forwarded-For, overwriting any a client sent")
 ok(lines("timeout tunnel 1h"), "an idle WebSocket is kept for an hour, not cut at the 50 s timeouts")
+
+
+def block(start):
+    """The lines of one section of the rendered file, from its first line to the next blank one."""
+    out, inside = [], False
+    for ln in text().splitlines():
+        if ln.startswith(start):
+            inside = True
+        elif inside and not ln.strip():
+            break
+        if inside:
+            out.append(ln.strip())
+    return out
+
+
+publish("tcp://0.0.0.0:5432", target="10.0.0.7:5432", name="pg")
+ok(not any("timeout tunnel" in ln for ln in block("defaults"))
+   and not any("timeout tunnel" in ln for ln in block("backend be_pg"))
+   and any("timeout tunnel 1h" in ln for ln in block("backend be_app")),
+   "the tunnel timeout is an HTTP pool's: a tcp:// service keeps its client and server timeouts")
 r = client.put("/api/haproxy/settings", headers=H, json={"timeout_tunnel": "forever"})
 ok(r.status_code == 400 and "timeout_tunnel" in r.get_json()["error"], "a tunnel timeout that is not a time is refused")
 
@@ -196,6 +218,68 @@ crt3, key3 = make("shop2", "shop.example.com", ["shop.example.com", "api.shop.ex
 up = post("acme/certificates/upload", {"id": cert["id"], "cert": crt3, "key": key3})
 cert = next(c for c in load_config()["acme"]["certificates"] if c["id"] == cert["id"])
 ok("api.shop.example.com" in cert["domains"] and crt3.strip() in pem.read_text(), "uploading again replaces it")
+# A redirect target is a log-format string to HAProxy: a literal % is written %%.
+post("wizard/publish", {"url": "http://pct.example.com", "redirect": {"to": "https://new.example.com/docs%20v2", "code": 301},
+                        "certificate": False, "http_redirect": False, "dry_run": False})
+ok(lines("http-request redirect prefix https://new.example.com/docs%%20v2 code 301"),
+   "a % in a redirect address is escaped, so HAProxy takes it as a % and not as a variable")
+# Outside the wizard a pool's redirect is checked too, and one stored anyway does not take the node down.
+pct = next(b for b in load_config()["haproxy"]["backends"] if b["name"] == "pct")
+r = client.put("/api/haproxy/backends/" + pct["id"], headers=H, json=dict(pct, redirect_code="permanent"))
+ok(r.status_code == 400 and "301, 302, 307 or 308" in r.get_json()["error"], "a redirect code that is not one is refused")
+r = client.put("/api/haproxy/backends/" + pct["id"], headers=H, json=dict(pct, redirect_to="new.example.com"))
+ok(r.status_code == 400 and "http://" in r.get_json()["error"], "and so is a redirect address without a scheme")
+c = load_config()
+next(b for b in c["haproxy"]["backends"] if b["name"] == "pct")["redirect_code"] = "permanent"
+save_config(c)
+ok(lines("docs%%20v2 code 301") and client.get("/api/services", headers=H).status_code == 200,
+   "a bad code already stored renders as 301 instead of failing every page and every Apply")
+c = load_config()
+next(b for b in c["haproxy"]["backends"] if b["name"] == "pct")["redirect_code"] = 301
+save_config(c)
+
+# ---- an uploaded certificate is not issued over --------------------------------------------------
+up = next(x for x in load_config()["acme"]["certificates"] if x["name"] == "shop-custom")
+made = r = post("wizard/certificate", {"domains": up["domains"], "issue": False,
+                                "account": {"name": "le", "email": "", "ca": "letsencrypt"},
+                                "challenge": {"name": "http", "method": "http01"}})
+ok([a["action"] for a in r["actions"] if a["type"] == "Certificate"] == ["created"]
+   and any("uploaded" in w for w in r["warnings"]),
+   "the certificate wizard, asked for names an uploaded certificate covers, makes a new one beside it")
+after = next(x for x in load_config()["acme"]["certificates"] if x["id"] == up["id"])
+ok(after == up, "and leaves the uploaded one exactly as it was")
+res = acme._acme_issue(load_config(), up)
+ok(not res["ok"] and "uploaded" in res["error"], "whatever asks, an uploaded certificate is not issued over")
+r = client.post("/api/wizard/certificate", headers=H, json={"domains": "s.example.com", "account": "le", "challenge": "http"})
+ok(r.status_code == 400 and "{id}" in r.get_json()["error"], "an account given as a string is refused, not a crash")
+
+# ---- a renewal that changes nothing reloads nothing ------------------------------------------------
+new = next(x for x in load_config()["acme"]["certificates"] if x["id"] == made["certificate_id"])
+pem_crt, pem_key = make("renewed", "renewed.example.com", ["renewed.example.com"])
+runs, reloads, told = [], [], []
+
+
+def fake_acme(args, env_extra=None):
+    runs.append(args[0])
+    if "--install-cert" in args:
+        pathlib.Path(args[args.index("--fullchain-file") + 1]).write_text(pem_crt)
+        pathlib.Path(args[args.index("--key-file") + 1]).write_text(pem_key)
+        return 0, "installed"
+    return (2, "Skipping. Next renewal time is later.") if args[0] == "--issue" else (0, "ok")
+
+
+real_run, real_after, real_notify = acme.acme_run, acme.after_certificate_deployed, acme.notify.notify
+acme.acme_run = fake_acme
+acme.after_certificate_deployed = lambda cfg, cert: (reloads.append(cert["name"]), "reloaded HAProxy")[1]
+acme.notify.notify = lambda *a, **k: told.append(a[1])
+first = acme.acme_issue(load_config(), new)
+second = acme.acme_issue(load_config(), new)
+acme.acme_run, acme.after_certificate_deployed, acme.notify.notify = real_run, real_after, real_notify
+ok(first["ok"] and first["changed"] and len(reloads) == 1 and len(told) == 1,
+   "a certificate that arrives is deployed, HAProxy reloaded and the issue announced")
+ok(second["ok"] and second["changed"] is False and len(reloads) == 1 and len(told) == 1,
+   "one that is not due and already deployed is left alone: no reload, no announcement, nothing sent")
+
 issued = {"id": "acme1", "name": "issued", "domains": "x.example.com", "auto_renew": True}
 c = load_config(); c["acme"]["certificates"].append(issued); save_config(c)
 post("acme/certificates/upload", {"id": "acme1", "cert": crt, "key": key}, want=400)

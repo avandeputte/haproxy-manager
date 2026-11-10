@@ -9,7 +9,7 @@ import copy
 from .base import LISTEN, PORT, _lock, app, log
 from .config import WEBUI_NAME, is_webui_cert, load_config, merged, move_to_local, promote_local, save_config, webui_object_ids
 from .util import _by_id, cert_details, cert_path, rule_cond_ids
-from . import access, apply, dnsapi, errorpages, vrrp, wizard, oauth
+from . import access, apply, dnsapi, errorpages, haproxy, vrrp, wizard, oauth
 
 # --------------------------------------------------------------------------
 
@@ -438,7 +438,7 @@ def api_services():
             "rules": list(pool.get("rules") or []),
             "hsts": bool(pool.get("hsts")),
             "hsts_subdomains": bool(pool.get("hsts_subdomains")),
-            "redirect": ({"to": pool.get("redirect_to"), "code": int(pool.get("redirect_code") or 301),
+            "redirect": ({"to": pool.get("redirect_to"), "code": haproxy.redirect_code(pool.get("redirect_code")),
                           "keep_path": pool.get("redirect_keep_path", True)}
                          if (pool.get("redirect_to") or "").strip() else None),
             "rule_names": [rules[r]["name"] for r in (pool.get("rules") or []) if r in rules and rules[r].get("name")],

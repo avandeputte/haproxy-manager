@@ -416,7 +416,7 @@ export default {
 "Replace": "Korvaa",
 "Replace: {name}": "Korvaa: {name}",
 "Send HSTS": "Lähetä HSTS",
-"Services that listen on every address answer over IPv6 as well (bind ::: v4v6). Skipped by itself on a node without IPv6; turn it off where IPv6 exists but is broken.": "Palvelut, jotka kuuntelevat kaikissa osoitteissa, vastaavat myös IPv6:lla (bind ::: v4v6). Ohitetaan itsestään solmussa ilman IPv6:ta; kytke pois, jos IPv6 on olemassa mutta rikki.",
+"Services that listen on every address answer over IPv6 as well (bind ::: v6only). Skipped by itself on a node without IPv6; turn it off where IPv6 exists but is broken.": "Palvelut, jotka kuuntelevat kaikissa osoitteissa, vastaavat myös IPv6:lla (bind ::: v6only). Ohitetaan itsestään solmussa ilman IPv6:ta; kytke pois, jos IPv6 on olemassa mutta rikki.",
 "Stored, covering {names}.": "Tallennettu, kattaa {names}.",
 "Strict-Transport-Security, over HTTPS only: browsers that have been here come back over HTTPS for two years without trying HTTP first. HTTP mode only.": "Strict-Transport-Security, vain HTTPS:llä: täällä käyneet selaimet palaavat HTTPS:llä kahden vuoden ajan kokeilematta ensin HTTP:tä. Vain HTTP-tilassa.",
 "The certificate and chain, or the private key": "Varmenne ja ketju tai yksityinen avain",
