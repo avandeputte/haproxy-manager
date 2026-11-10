@@ -14,6 +14,23 @@ from . import access, crowdsec, errorpages, oauth
 
 # --------------------------------------------------------------------------
 
+def _redirect_target(value):
+    """An address for `http-request redirect`: HAProxy reads that argument as
+    a log-format string, where a % begins a variable, so a literal one --
+    /docs%20v2 -- is written %%."""
+    return _line_safe(value).replace("%", "%%")
+
+
+def redirect_code(value):
+    """A pool's redirect status as a number; 301 for anything that is not one
+    of the four a redirect can be answered with."""
+    try:
+        code = int(value or 301)
+    except (TypeError, ValueError):
+        return 301
+    return code if code in (301, 302, 307, 308) else 301
+
+
 def _line_safe(value):
     """Strip anything that could end the line and begin a new directive.
 
@@ -183,13 +200,18 @@ def ipv6_available():
         return False
 
 
-def _bind_address(addr, st):
-    """A listener's address as HAProxy is given it: every IPv4 address
-    becomes every address, both families, where IPv6 is wanted and works.
-    A specific address -- a virtual IP -- is left exactly as it is."""
+def _bind_addresses(addr, st):
+    """A listener's address as HAProxy is given it: every IPv4 address is
+    joined by every IPv6 one where IPv6 is wanted and works. A specific
+    address -- a virtual IP -- is left exactly as it is.
+
+    Two binds, not one dual-stack socket (`:::port v4v6`): on that socket
+    the kernel hands HAProxy an IPv4 client as ::ffff:203.0.113.7, and that
+    is what the log, X-Forwarded-For, the PROXY protocol and CrowdSec would
+    then be given."""
     if addr.startswith("0.0.0.0:") and st.get("ipv6", True) and ipv6_available():
-        return ":::%s v4v6" % addr.split(":", 1)[1]
-    return addr
+        return [addr, ":::%s v6only" % addr.split(":", 1)[1]]
+    return [addr]
 
 
 DEFAULT_SITE_BACKEND = "bk_default_site"
@@ -206,7 +228,7 @@ def _default_site_lines(st):
     elif kind == "drop":
         action = "http-request silent-drop"
     elif kind == "redirect" and (st.get("default_site_url") or "").strip():
-        action = "http-request redirect location %s code 302" % _line_safe(st["default_site_url"])
+        action = "http-request redirect location %s code 302" % _redirect_target(st["default_site_url"])
     else:
         return []
     return ["backend " + DEFAULT_SITE_BACKEND, "    mode http", "    " + action, ""]
@@ -299,8 +321,6 @@ def render_haproxy(cfg):
     A("    timeout connect %s" % (st.get("timeout_connect") or "5s"))
     A("    timeout client %s" % (st.get("timeout_client") or "50s"))
     A("    timeout server %s" % (st.get("timeout_server") or "50s"))
-    if (st.get("timeout_tunnel") or "").strip():
-        A("    timeout tunnel %s" % _sec(st["timeout_tunnel"].strip()))
     # The error pages every service answers with; a pool may still pick its
     # own. The files are written by the node that applies this, from the
     # same configuration, so naming them here is safe on every node.
@@ -352,7 +372,8 @@ def render_haproxy(cfg):
                 ssl_suffix += " alpn h2,http/1.1"
         for b in (fe.get("binds") or "").splitlines():
             if b.strip():
-                A("    bind %s%s" % (_bind_address(b.strip(), st), ssl_suffix))
+                for addr in _bind_addresses(b.strip(), st):
+                    A("    bind %s%s" % (addr, ssl_suffix))
         A("    mode %s" % mode)
         A("    option httplog" if mode == "http" else "    option tcplog")
         if mode == "http" and fe.get("forwardfor", True):
@@ -670,6 +691,11 @@ def render_haproxy(cfg):
                                ("timeout_check", "timeout check")):
             if be.get(key):
                 A("    %s %s" % (directive, _sec(str(be[key]))))
+        # The WebSocket idle timeout, on HTTP pools only. In `defaults` it
+        # would govern every tcp:// service too, where a tunnel is the whole
+        # connection and this would replace the client and server timeouts.
+        if mode == "http" and (st.get("timeout_tunnel") or "").strip():
+            A("    timeout tunnel %s" % _sec(st["timeout_tunnel"].strip()))
         use_cookie = be.get("persistence") == "cookie" and mode == "http"
         if use_cookie:
             A("    cookie %s insert indirect nocache" % (be.get("cookie_name") or "SRVID"))
@@ -705,11 +731,12 @@ def render_haproxy(cfg):
         # After the allow-list and the sign-in, so those still hold. With the
         # path kept, /a?b on this name arrives as /a?b on the other.
         if mode == "http" and (be.get("redirect_to") or "").strip():
-            to = _line_safe(be["redirect_to"]).rstrip("/") if be.get("redirect_keep_path", True) \
-                else _line_safe(be["redirect_to"])
-            code = int(be.get("redirect_code") or 301)
+            to = _redirect_target(be["redirect_to"])
+            if be.get("redirect_keep_path", True):
+                to = to.rstrip("/")
             A("    http-request redirect %s %s code %d"
-              % ("prefix" if be.get("redirect_keep_path", True) else "location", to, code))
+              % ("prefix" if be.get("redirect_keep_path", True) else "location", to,
+                 redirect_code(be.get("redirect_code"))))
         for sid in be.get("servers") or []:
             sv = servers.get(sid)
             if not sv or not sv.get("enabled", True):

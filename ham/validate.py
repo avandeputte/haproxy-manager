@@ -90,3 +90,15 @@ def check_pool(item):
             raise ValueError("the rate window must be a whole number of seconds")
         if not 1 <= w <= 3600:
             raise ValueError("the rate window must be between 1 and 3600 seconds")
+    # A redirect: the wizard checks these, the Backend Pools editor and the
+    # API store what they are given, and the renderer writes it out.
+    to = str(item.get("redirect_to") or "").strip()
+    if to and not plain_url(to):
+        raise ValueError("a redirect needs an address starting with http:// or https://")
+    if item.get("redirect_code") not in ("", None):
+        try:
+            code = int(str(item["redirect_code"]).strip())
+        except (TypeError, ValueError):
+            code = 0
+        if code not in (301, 302, 307, 308):
+            raise ValueError("a redirect is answered with 301, 302, 307 or 308")

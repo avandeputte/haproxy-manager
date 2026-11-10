@@ -44,13 +44,22 @@ import uuid
 from .base import (PEER_CONNECT_TIMEOUT, PEER_READ_TIMEOUT, PUSH_READ_TIMEOUT, VERSION,
     _lock, _requests, app, log)
 from .config import VALID_COLLECTIONS, load_config, save_config
-from . import auth, peering, sync
+from . import auth, logs, peering, sync
 
 PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 REDACTED = "[redacted]"
 # Values an assistant has no use for and should never be sent: whatever it is
 # shown leaves this machine for the model's provider.
-SECRET_KEY_RE = re.compile(r"(passw|(^|_)pass$|secret|token|credential|private|salt|hash$|(^|_)key$|totp)", re.I)
+SECRET_KEY_RE = re.compile(r"(passw|(^|_)pass$|secret|token|credential|private|salt|hash$|hmac|(^|_)key$|totp)", re.I)
+# Secrets that sit inside text rather than under a key: the rendered
+# haproxy.cfg carries the key that signs single sign-on cookies and the
+# password hashes of the users HAProxy checks, and a preview or a dry run
+# quotes those lines.
+_TEXT_SECRETS = (
+    (re.compile(r'(hmac\(sha256,")[^"]*(")'), r"\1%s\2" % "[redacted]"),
+    (re.compile(r"^(\s*user\s+\S+\s+(?:insecure-)?password\s+)\S+", re.M), r"\1%s" % "[redacted]"),
+    (re.compile(r"^(\s*stats\s+auth\s+[^:\s]+:)\S+", re.M), r"\1%s" % "[redacted]"),
+)
 MAX_TEXT = 200000            # characters of tool output; a log can be longer
 _sessions = {}               # Mcp-Session-Id -> the client's name, for the log
 INSTRUCTIONS = (
@@ -94,14 +103,25 @@ def token_matches(cfg, presented):
     return hmac.compare_digest(stored, _token_hash(presented))
 
 
+def redact_text(text):
+    """Configuration text with the secrets written into it replaced."""
+    if "hmac(" in text or "password" in text or "stats" in text:
+        for pattern, repl in _TEXT_SECRETS:
+            text = pattern.sub(repl, text)
+    return text
+
+
 def redact(value):
-    """A copy with every secret-looking value replaced, at any depth."""
+    """A copy with every secret-looking value replaced, at any depth: by the
+    name it is stored under, and inside configuration text."""
     if isinstance(value, dict):
         return {k: (REDACTED if SECRET_KEY_RE.search(str(k)) and v not in ("", None, [], {})
                     and not isinstance(v, bool) else redact(v))
                 for k, v in value.items()}
     if isinstance(value, list):
         return [redact(v) for v in value]
+    if isinstance(value, str):
+        return redact_text(value)
     return value
 
 
@@ -115,6 +135,10 @@ def unredact(sent, stored):
     if isinstance(sent, list):
         stored = stored if isinstance(stored, list) else []
         return [unredact(v, stored[i] if i < len(stored) else None) for i, v in enumerate(sent)]
+    # Text that was redacted inside and comes back untouched is the stored text.
+    if isinstance(sent, str) and isinstance(stored, str) and REDACTED in sent \
+            and redact_text(stored) == sent:
+        return stored
     return sent
 
 
@@ -184,7 +208,10 @@ SETTINGS_READ = {"haproxy": "/api/haproxy/settings", "acme": "/api/acme/settings
                  "cluster": "/api/cluster/settings", "crowdsec": "/api/crowdsec/settings",
                  "notify": "/api/notify", "watchdog": "/api/watchdog"}
 SETTINGS_WRITE = {"haproxy": "/api/haproxy/settings", "acme": "/api/acme/settings"}
-LOG_SOURCES = ("app", "haproxy", "keepalived", "acme", "crowdsec")
+# The log viewer's own sources, so the two cannot drift apart. "app" is what
+# this server called the manager's log before it read the list from there.
+LOG_SOURCES = tuple(key for key, _label, _read in logs.LOG_SOURCES)
+LOG_ALIASES = {"app": "manager"}
 
 
 def _service_body(s):
@@ -226,10 +253,13 @@ def _find_service(sid):
 
 
 def t_publish(args):
+    # redirect: null means "forward again", and has to be seen before the
+    # arguments left out -- which arrive as null from some clients -- are dropped.
+    forward_again = "redirect" in args and args["redirect"] is None
     body = {k: v for k, v in args.items() if v is not None}
     if body.get("service_id"):
         base = _service_body(_find_service(body["service_id"]))
-        if "redirect" in body and body["redirect"] is None:
+        if forward_again:
             base.pop("redirect", None)
         if body.get("redirect"):
             base["target"] = ""
@@ -293,7 +323,11 @@ def t_logs(args):
     q = {"lines": int(args.get("lines") or 200), "q": args.get("search") or "",
          "level": args.get("level") or "INFO"}
     if args.get("sources"):
-        q["sources"] = ",".join(args["sources"])
+        wanted = [LOG_ALIASES.get(str(s), str(s)) for s in args["sources"]]
+        unknown = [s for s in wanted if s not in LOG_SOURCES]
+        if unknown:
+            raise Refused("no log source %s; one of %s" % (", ".join(unknown), ", ".join(LOG_SOURCES)))
+        q["sources"] = ",".join(wanted)
     return _get("/api/logs", q)
 
 
@@ -304,6 +338,16 @@ def t_settings(args):
     data = _get(SETTINGS_READ[sec])
     if sec == "watchdog" and isinstance(data, dict):
         data = data.get("settings", data)
+    if sec == "notify" and isinstance(data, dict):
+        # A webhook's address is often the credential itself (a Slack or
+        # Discord hook), and its extra headers are where a bearer token goes.
+        for d in (data.get("settings") or data).get("destinations") or []:
+            if isinstance(d, dict):
+                if d.get("headers"):
+                    d["headers"] = REDACTED
+                if d.get("url"):
+                    u = urlsplit(str(d["url"]))
+                    d["url"] = "%s://%s/%s" % (u.scheme, u.hostname or "", REDACTED) if u.scheme else REDACTED
     return data
 
 
@@ -318,7 +362,40 @@ def t_update_settings(args):
 
 def t_haproxy_cfg(args):
     data = _ok(*_api("GET", "/api/preview"))
-    return data.get("haproxy", "") if isinstance(data, dict) else data
+    return redact_text(data.get("haproxy", "") if isinstance(data, dict) else str(data))
+
+
+def _acme_ref(kind, given):
+    """An account or a challenge type for the certificate wizard, as it wants
+    it: {id} of the one named -- by id or by name -- or of the only one there
+    is; an object is the fields of a new one, and is passed on."""
+    if isinstance(given, dict):
+        return given
+    items = _ok(*_api("GET", "/api/acme/%s" % kind))
+    what = "account" if kind == "accounts" else "challenge type"
+    want = str(given or "").strip()
+    if want:
+        hit = next((i for i in items if want in (i.get("id"), i.get("name"))), None)
+        if hit is None:
+            raise Refused("no ACME %s %r: list_objects acme/%s shows them" % (what, want, kind))
+        return {"id": hit["id"]}
+    if len(items) == 1:
+        return {"id": items[0]["id"]}
+    if not items:
+        raise Refused("there is no ACME %s yet: pass one as an object to create it, or "
+                      "create_object in acme/%s" % (what, kind))
+    raise Refused("say which ACME %s to use, by id or name: %s"
+                  % (what, ", ".join(str(i.get("name")) for i in items)))
+
+
+def t_request_certificate(args):
+    body = {k: v for k, v in args.items() if k not in ("account", "challenge")}
+    body["account"] = _acme_ref("accounts", args.get("account"))
+    body["challenge"] = _acme_ref("challenges", args.get("challenge"))
+    # Issued unless told otherwise: that is what the tool is for. A dry run
+    # stores nothing, so there is nothing to issue.
+    body["issue"] = bool(args.get("issue", True)) and not args.get("dry_run")
+    return _send("POST", "/api/wizard/certificate", body)
 
 
 def _id(args, what="id"):
@@ -383,7 +460,7 @@ TOOLS = [
          _schema(), t_haproxy_cfg),
     tool("check_config", "Check the configuration",
          "Run haproxy -c on what the stored configuration renders to, storing nothing.",
-         _schema(), lambda a: _ok(*_api("POST", "/api/validate", {"section": "haproxy"}))),
+         _schema(), lambda a: _send("POST", "/api/validate", {"section": "haproxy"})),
     tool("get_stats", "Live statistics",
          "HAProxy's live counters per frontend, backend and server: state, sessions, rates, "
          "errors, check results.",
@@ -400,7 +477,8 @@ TOOLS = [
          _schema(), lambda a: _get("/api/probes")),
     tool("get_logs", "Read logs",
          "Recent log lines, newest last.",
-         _schema({"sources": {"type": "array", "items": {"type": "string", "enum": list(LOG_SOURCES)}},
+         _schema({"sources": {"type": "array", "items": {"type": "string", "enum": list(LOG_SOURCES)},
+                              "description": "manager is this app's own log"},
                   "lines": {"type": "integer", "description": "1-2000, default 200"},
                   "search": {"type": "string", "description": "Only lines containing this"},
                   "level": {"type": "string", "enum": ["DEBUG", "INFO", "WARNING", "ERROR"]}}),
@@ -480,7 +558,9 @@ TOOLS = [
              "rules": {"type": "array", "items": S, "description": "Rule ids to apply to this pool"},
              "rate_limit": {"type": ["integer", "string"]}, "rate_window": I,
              "proxy_protocol": {"type": "string", "enum": ["", "v1", "v2"]},
-             "notify_mode": {"type": "string", "enum": ["servers", "service", "off"]},
+             "notify_mode": {"type": "string", "enum": ["servers", "outage", "off"],
+                             "description": "Alert when any server is lost, only when the "
+                                            "service has none left, or never"},
              "dry_run": DRY,
          }, extra=True), t_publish, write=True),
     tool("pause_service", "Pause or resume a service",
@@ -520,12 +600,19 @@ TOOLS = [
          lambda a: _send("POST", "/api/wizard/condition", a),
          write=True),
     tool("request_certificate", "Request a certificate",
-         "Create a certificate for these names and issue it through ACME.",
+         "Create a certificate for these names and issue it through ACME. account and "
+         "challenge are the id or name of an ACME account and a challenge type (list_objects "
+         "acme/accounts, acme/challenges); each may be left out when there is only one.",
          _schema({"domains": {"type": "string", "description": "Names, comma- or space-separated; "
                               "*.example.com needs a DNS challenge"},
-                  "account": S, "challenge": S, "dry_run": DRY}, ["domains"], extra=True),
-         lambda a: _send("POST", "/api/wizard/certificate", a),
-         write=True),
+                  "account": S, "challenge": S,
+                  "name": {"type": "string", "description": "The certificate's name; the first "
+                           "domain when left out"},
+                  "key_type": {"type": "string", "enum": ["ec-256", "ec-384", "rsa-2048", "rsa-4096"]},
+                  "issue": {"type": "boolean", "description": "Run ACME now (the default); false "
+                            "only creates the certificate object"},
+                  "dry_run": DRY}, ["domains"], extra=True),
+         t_request_certificate, write=True),
     tool("issue_certificate", "Issue or renew a certificate",
          "Run ACME for an existing certificate now; force renews one that is not due.",
          _schema({"id": S, "force": B}, ["id"]),
@@ -609,8 +696,10 @@ def _call_tool(params):
 
 
 def _run(t, args):
-    shown = {k: v for k, v in args.items() if not SECRET_KEY_RE.search(k)}
-    log.info("mcp %s: %s %s", request.mcp_client, t["name"], json.dumps(shown, sort_keys=True)[:200])
+    # Redacted at every depth: a credential inside item or values would
+    # otherwise be written to the log, which get_logs then reads back.
+    log.info("mcp %s: %s %s", request.mcp_client, t["name"],
+             json.dumps(redact(args), sort_keys=True)[:200])
     try:
         out = t["fn"](args)
     except Refused as e:

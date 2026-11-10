@@ -259,6 +259,78 @@ cfg["local"]["mcp"] = keep
 save_config(cfg)
 ok(mcp.push_settings(load_config()) == [], "with no peers there is nothing to copy to")
 
+# -- what is shown, and what is logged ------------------------------------------------------
+from ham import acme, haproxy   # noqa: E402
+client.put("/api/mcp", json={"allow_writes": True}, headers=K)
+sample = ('    acl sso_valid var(txn.sso_msg),hmac(sha256,"c2lnbmluZy1rZXk="),hex,lower -m str x\n'
+          'userlist ham_users\n    user alice password $6$salt$hashhashhash\n    stats auth admin:hunter2\n')
+shown = mcp.redact_text(sample)
+ok("c2lnbmluZy1rZXk=" not in shown and "$6$salt" not in shown and "hunter2" not in shown
+   and "user alice password [redacted]" in shown and 'hmac(sha256,"[redacted]")' in shown,
+   "configuration text loses the SSO signing key, the password hashes and the stats password")
+ok(mcp.unredact(shown, sample) == sample and mcp.unredact("typed anew", sample) == "typed anew",
+   "and such text written back untouched keeps what is stored")
+real_render = haproxy.render_haproxy
+haproxy.render_haproxy = lambda c: real_render(c) + "\n" + sample
+res, text = call("get_haproxy_config", token=tok)
+haproxy.render_haproxy = real_render
+ok("c2lnbmluZy1rZXk=" not in text and "$6$salt" not in text and "userlist ham_users" in text,
+   "get_haproxy_config shows the rendered file without them")
+cfg = load_config()
+cfg["acme"]["accounts"] = [{"id": "ac1", "name": "zero", "email": "", "ca": "zerossl",
+                            "eab_kid": "kid-1", "eab_hmac": "hmac-sekrit"}]
+cfg["notify"]["destinations"] = [{"id": "d1", "name": "hook", "type": "webhook", "enabled": True,
+                                  "url": "https://hooks.example.com/T000/sekrit-path",
+                                  "headers": "Authorization: Bearer sekrit-bearer"}]
+save_config(cfg)
+res, text = call("list_objects", {"collection": "acme/accounts"}, token=tok)
+ok("hmac-sekrit" not in text and "kid-1" in text, "an account's EAB HMAC key is a secret too")
+res, text = call("get_settings", {"section": "notify"}, token=tok)
+ok("sekrit-path" not in text and "sekrit-bearer" not in text and "hooks.example.com" in text,
+   "a webhook is shown by its host: its path and its headers are where the credential is")
+del lines[:]
+call("create_object", {"collection": "acme/challenges",
+                       "item": {"name": "nested", "method": "dns01", "dns_provider": "dns_cf",
+                                "dns_credentials": "CF_Token=nested-sekrit"}}, token=tok)
+ok(any("create_object" in ln for ln in lines) and not any("nested-sekrit" in ln for ln in lines),
+   "a credential inside item is not written to the log, which get_logs reads back")
+
+# -- the tools do what their schemas say ------------------------------------------------------
+listed = {t["name"]: t for t in rpc("tools/list", token=tok).get_json()["result"]["tools"]}
+ok(listed["publish_service"]["inputSchema"]["properties"]["notify_mode"]["enum"] == ["servers", "outage", "off"],
+   "notify_mode offers what the wizard takes")
+ok("manager" in listed["get_logs"]["inputSchema"]["properties"]["sources"]["items"]["enum"],
+   "get_logs offers the log viewer's own sources")
+res, text = call("get_logs", {"sources": ["app"]}, token=tok)
+ok(not res["isError"], "app is still understood as the manager's log")
+res, text = call("get_logs", {"sources": ["nope"]}, token=tok)
+ok(res["isError"] and "no log source nope" in text, "a source there is not is said to be none, not answered with nothing")
+issued = []
+real_issue = acme.acme_issue
+acme.acme_issue = lambda c, cert, force=False: (issued.append(cert["name"]), {"ok": True})[1]
+res, text = call("request_certificate", {"domains": "one.example.com", "account": "zero", "challenge": "ch1"}, token=tok)
+made = [c for c in load_config()["acme"]["certificates"] if c.get("domains") == "one.example.com"]
+ok(not res["isError"] and made and made[0]["account"] == "ac1" and made[0]["challenge"] == "ch1"
+   and issued == [made[0]["name"]],
+   "request_certificate takes an account by name and a challenge by id, and issues: %s" % text[:80])
+res, text = call("request_certificate", {"domains": "two.example.com", "issue": False}, token=tok)
+ok(res["isError"] and "say which ACME challenge type" in text,
+   "with two challenge types and none named it asks which, rather than failing")
+res, text = call("request_certificate", {"domains": "two.example.com", "account": "nobody", "challenge": "ch1"}, token=tok)
+ok(res["isError"] and "no ACME account 'nobody'" in text, "an account there is not is said so")
+res, text = call("request_certificate", {"domains": "two.example.com", "challenge": "ch1", "issue": False}, token=tok)
+ok(not res["isError"] and len(issued) == 1, "the only account is used when none is named, and issue: false only creates")
+acme.acme_issue = real_issue
+call("publish_service", {"url": "http://moved.example.com", "redirect": {"to": "https://new.example.com"},
+                         "certificate": False, "http_redirect": False}, token=tok)
+svc = next(s for s in client.get("/api/services", headers=K).get_json() if s["pool"] == "moved")
+res, text = call("publish_service", {"service_id": svc["id"], "redirect": None, "target": "10.0.0.9:80",
+                                     "certificate": None, "name": None}, token=tok)
+pool = next(b for b in load_config()["haproxy"]["backends"] if b["name"] == "moved")
+ok(not res["isError"] and pool["redirect_to"] == "" and len(pool["servers"]) == 1,
+   "redirect: null turns a redirecting service back into a forward: %s" % text[:80])
+client.put("/api/mcp", json={"allow_writes": False}, headers=K)
+
 # -- turned off again ---------------------------------------------------------------------
 client.put("/api/mcp", json={"enabled": False}, headers=K)
 ok(rpc("ping", token=tok).status_code == 403, "turned off, the token no longer opens anything")
