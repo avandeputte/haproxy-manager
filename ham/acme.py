@@ -26,6 +26,104 @@ _DANGEROUS_ENV = {"PATH", "IFS", "ENV", "BASH_ENV", "SHELLOPTS", "BASHOPTS",
                   "PS4", "PROMPT_COMMAND", "PYTHONPATH", "PERL5LIB"}
 from . import adcs, auth, notify, sync
 
+# A DNS alias target is a plain host name: it ends up on the command line of a
+# root process, so nothing else is let through. Its last label starts with a
+# letter, which an address or an option does not.
+_ALIAS_NAME = re.compile(r"^(?=.{1,253}$)([A-Za-z0-9_]([A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?\.)+"
+                         r"[A-Za-z][A-Za-z0-9-]{0,61}[A-Za-z0-9]$")
+# acme.sh's own word for "this domain is validated in its own zone", for a
+# certificate where only some of the domains go through an alias.
+NO_ALIAS = "no"
+_ALIAS_PREFIX = "_acme-challenge."
+
+
+def parse_challenge_alias(value):
+    """The alias domains typed on a challenge type, as a list.
+
+    One name per line (or separated by spaces or commas); an API client may
+    send a list. A name is taken as it appears in a zone file too: a trailing
+    dot is dropped, and so is a leading _acme-challenge. label, which acme.sh
+    adds itself -- left in, the record would be made one label too deep.
+    Raises ValueError with why when one is not a host name.
+    """
+    if isinstance(value, (list, tuple)) and all(isinstance(x, str) for x in value):
+        value = " ".join(value)
+    if value is None:
+        value = ""
+    if not isinstance(value, str):
+        raise ValueError("the challenge alias is one host name, or one per domain, not a %s"
+                         % type(value).__name__)
+    names = []
+    for typed in re.split(r"[\s,]+", value.strip()):
+        if not typed:
+            continue
+        n = typed[:-1] if typed.endswith(".") else typed
+        if n.lower().startswith(_ALIAS_PREFIX):
+            n = n[len(_ALIAS_PREFIX):]
+        if n != NO_ALIAS and not _ALIAS_NAME.match(n):
+            raise ValueError("%r is not a valid challenge alias domain" % typed)
+        names.append(n)
+    return names
+
+
+def check_alias_count(ch, doms, cert_name=""):
+    """One alias serves every domain of a certificate; several are paired
+    with its domains by position, so there must be exactly as many. Raises
+    ValueError when there are not; returns the aliases."""
+    names = parse_challenge_alias(ch.get("challenge_alias"))
+    if len(names) > 1 and len(names) != len(doms):
+        raise ValueError("challenge type %s has %d alias domains but %s has %d domain names: "
+                         "give one alias for all of them, or one per domain name, in order"
+                         % (ch.get("name") or "", len(names),
+                            ("certificate %s" % cert_name) if cert_name else "the certificate", len(doms)))
+    return names
+
+
+def check_challenge(item, cfg=None):
+    """What a challenge type is refused for when it is saved: an alias that
+    is not a host name, and a list of them that does not fit a certificate
+    already using it -- that certificate's next renewal would fail."""
+    if item.get("method") != "dns01":
+        return                      # the alias is not used, and not shown
+    names = parse_challenge_alias(item.get("challenge_alias"))
+    item["challenge_alias"] = " ".join(names)
+    if not cfg or not item.get("id"):
+        return
+    for cert in cfg["acme"]["certificates"]:
+        if cert.get("challenge") == item["id"] and not is_custom(cert):
+            check_alias_count(item, parse_domains(cert), cert.get("name") or "")
+
+
+def check_certificate(cfg, item):
+    """A certificate whose domain names no longer fit its challenge type's
+    per-domain aliases is refused when saved, not at its next renewal."""
+    if is_custom(item):
+        return
+    ch = _by_id(cfg["acme"]["challenges"]).get(item.get("challenge"))
+    if not ch or ch.get("method") != "dns01":
+        return
+    try:
+        parse_challenge_alias(ch.get("challenge_alias"))
+    except ValueError:
+        return                      # the challenge type's own fault, said when issuing
+    check_alias_count(ch, parse_domains(item), item.get("name") or "")
+
+
+def challenge_alias_args(ch, doms, cert_name=""):
+    """acme.sh's --challenge-alias arguments for a DNS-01 challenge type.
+
+    With the validation records CNAMEd to another zone (acme.sh's DNS alias
+    mode), _acme-challenge.<domain> is answered in that zone instead. One alias
+    applies to every domain on the certificate; otherwise there must be exactly
+    one per domain, in the order the domains are listed -- acme.sh pairs them
+    by position.
+    """
+    args = []
+    for n in check_alias_count(ch, doms, cert_name):
+        args += ["--challenge-alias", n]
+    return args
+
+
 # --------------------------------------------------------------------------
 
 # The public CAs, by the short names acme.sh knows (its CA_NAMES). acme.sh
@@ -283,6 +381,14 @@ def _acme_issue(cfg, cert, force=False):
     doms = parse_domains(cert)
     if not doms:
         return {"ok": False, "error": "certificate has no domain names"}
+    if ch.get("method") == "dns01":
+        # Checked before anything is asked of the CA: an alias list that does
+        # not fit is this node's own configuration, and saving refuses it, but
+        # a restored or synced configuration has not been through that.
+        try:
+            challenge_alias_args(ch, doms, cert.get("name") or "")
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
 
     try:
         check_account(acc)
@@ -334,6 +440,7 @@ def _acme_run_issue(cfg, cert, acc, ch, doms, force, trace):
     env = {}
     if ch.get("method") == "dns01":
         args += ["--dns", ch.get("dns_provider", "")]
+        args += challenge_alias_args(ch, doms)
         for line in (ch.get("dns_credentials") or "").splitlines():
             if "=" not in line:
                 continue

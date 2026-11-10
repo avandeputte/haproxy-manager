@@ -141,6 +141,7 @@ export const CERT_WIZ=[
   h:"HTTP-01 needs port 80 reachable from the internet. DNS-01 works behind a firewall and is the only way to get a wildcard."},
  {k:"dns_provider",l:"DNS API hook",t:"combo",o:()=>dnsApiOptions,h:"The provider acme.sh should talk to"},
  {k:"dns_credentials",l:"DNS API credentials",t:"textarea",h:"One KEY=value per line"},
+ {k:"challenge_alias",l:"Challenge alias domain",t:"text",h:"Optional, e.g. alias.example.net. Validates through another zone: the _acme-challenge name of each domain must be a CNAME to _acme-challenge.alias.example.net"},
  {k:"key_type",l:"Key type",t:"select",o:["ec-256","ec-384","rsa-2048","rsa-4096"],d:"ec-256"},
  {k:"auto_renew",l:"Renew automatically",t:"bool",d:true},
  {k:"issue",l:"Request it now",t:"bool",d:true,h:"Runs acme.sh straight away; leave off to just create the objects"},
@@ -172,7 +173,7 @@ export async function openCertWizard(){
     const newCh=frm.querySelector("#f_challenge_id").value===NEWOPT;
     const method=frm.querySelector("#f_ch_method").value;
     ["ch_name","ch_method"].forEach(k=>setRow(k,newCh));
-    ["dns_provider","dns_credentials"].forEach(k=>setRow(k,newCh&&method==="dns01"));
+    ["dns_provider","dns_credentials","challenge_alias"].forEach(k=>setRow(k,newCh&&method==="dns01"));
   };
   ["f_account_id","f_challenge_id","f_ch_method"].forEach(id=>{
     const el=frm.querySelector("#"+id);if(el)el.addEventListener("change",sync);});
@@ -192,7 +193,8 @@ export async function openCertWizard(){
       : {id:d.account_id};
     body.challenge=d.challenge_id===NEWOPT
       ? {name:d.ch_name||(d.ch_method==="dns01"?("dns-"+(d.dns_provider||"01")):"http-01"),
-         method:d.ch_method,dns_provider:d.dns_provider,dns_credentials:d.dns_credentials}
+         method:d.ch_method,dns_provider:d.dns_provider,dns_credentials:d.dns_credentials,
+         challenge_alias:d.ch_method==="dns01"?d.challenge_alias:""}
       : {id:d.challenge_id};
     return body;
   };
