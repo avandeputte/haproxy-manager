@@ -4,6 +4,7 @@ from datetime import datetime
 from datetime import timezone
 import os
 import re
+import signal
 import subprocess
 
 from .base import CERT_DIR, DRY_RUN
@@ -27,6 +28,25 @@ def run(cmd, env=None, timeout=600):
         return 127, "command not found: " + cmd[0]
     except subprocess.TimeoutExpired:
         return 124, "timed out: " + " ".join(cmd)
+
+
+def run_script(script, timeout):
+    """Run a shell script in its own process group, and on timeout kill the
+    group -- the shell alone dying would leave apt or dnf running, mid-transaction."""
+    env = dict(os.environ)
+    env.pop("NOTIFY_SOCKET", None)
+    p = subprocess.Popen(["sh", "-c", script], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         text=True, env=env, start_new_session=True)
+    try:
+        out, _ = p.communicate(timeout=timeout)
+        return p.returncode, out or ""
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(p.pid, signal.SIGTERM)
+        except OSError:
+            pass
+        out, _ = p.communicate()
+        return 124, (out or "") + "\n[stopped after %ds]" % timeout
 
 
 def _sec(name):

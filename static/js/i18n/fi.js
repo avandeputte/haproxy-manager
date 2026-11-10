@@ -546,6 +546,8 @@ export default {
 "Advanced. Any acme2certifier setting the fields above do not cover, as lines of its acme_srv.cfg with their section headers -- for example [CAhandler] timeout: 30, or [Challenge] dns_server_list: [\"10.0.0.53\"]. These are laid over the generated configuration, so a setting here replaces the one the fields produce. Show the configuration to see the result.": "Edistynyt. Mikä tahansa acme2certifierin asetus, jota yllä olevat kentät eivät kata, sen acme_srv.cfg-tiedoston riveinä osio-otsikoineen -- esimerkiksi [CAhandler] timeout: 30 tai [Challenge] dns_server_list: [\"10.0.0.53\"]. Ne asetetaan luodun kokoonpanon päälle, joten tässä annettu asetus korvaa kenttien tuottaman. Näytä kokoonpano näyttää tuloksen.",
 "Show the configuration": "Näytä kokoonpano",
 "the extra acme2certifier settings need their section headers, such as [CAhandler] above timeout: 30": "acme2certifierin lisäasetukset tarvitsevat osio-otsikkonsa, esimerkiksi [CAhandler] rivin timeout: 30 yläpuolelle",
+"krb5_kinit_path must be the system's kinit, such as /usr/bin/kinit": "krb5_kinit_path-asetuksen on oltava järjestelmän kinit, esim. /usr/bin/kinit",
+"a certificate is being requested through acme2certifier right now; test again when it is done": "varmennetta pyydetään juuri nyt acme2certifierin kautta; testaa uudelleen, kun se on valmis",
 "Load from file": "Lataa tiedostosta",
 "Reads a local .html file into the field above. Nothing is uploaded: the page is saved with the configuration.": "Lukee paikallisen .html-tiedoston yllä olevaan kenttään. Mitään ei ladata palvelimelle: sivu tallennetaan asetusten mukana.",
 "Value": "Arvo",

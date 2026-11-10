@@ -253,7 +253,14 @@ c = lambda cid, dom: {"id": cid, "domains": dom}   # noqa: E731
 meta = {"_meta": {"issue_log": {}}}
 ok(acme.renewal_due(meta, c("d", "day.example.lan"), now), "a certificate acme.sh planned to renew by now is due")
 ok(not acme.renewal_due(meta, c("l", "later.example.lan"), now), "one planned for later is not")
-ok(acme.renewal_due(meta, c("r", "rsa.example.lan"), now), "an RSA certificate's plan is read too (no _ecc folder)")
+ok(acme.renewal_due(meta, dict(c("r", "rsa.example.lan"), key_type="rsa-2048"), now),
+   "an RSA certificate's plan is read from its own folder (no _ecc)")
+plan("switched.example.lan", now - 86400)                  # issued as EC once: the folder stays
+plan("switched.example.lan", now + 3600, ecc=False)        # RSA now, and not due
+ok(not acme.renewal_due(meta, dict(c("s", "switched.example.lan"), key_type="rsa-2048"), now),
+   "a certificate switched from EC to RSA is judged by its RSA plan, not the _ecc folder left behind")
+ok(acme.renewal_due(meta, dict(c("s", "switched.example.lan"), key_type="ec-256"), now),
+   "and by the EC one while it is an EC certificate")
 ok(not acme.renewal_due(meta, c("n", "never.example.lan"), now), "one acme.sh has no plan for is left to the rounds")
 meta["_meta"]["issue_log"]["d"] = {"time": at(600), "ok": False}
 ok(not acme.renewal_due(meta, c("d", "day.example.lan"), now), "a failure ten minutes ago waits an hour before trying again")

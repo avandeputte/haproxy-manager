@@ -301,14 +301,22 @@ def _acme_issue(cfg, cert, force=False):
         if not ok:
             return {"ok": False, "error": "acme2certifier is not installed on this node and could not "
                                           "be installed: %s" % out.strip()[-300:], "log": "\n".join(trace)}
-    with adcs.serving(acc, trace) as why:
+    a2c_out = []
+    with adcs.serving(acc, a2c_out) as why:
         if why:
-            return {"ok": False, "error": why, "log": "\n".join(trace)}
+            return {"ok": False, "error": why, "log": "\n".join(x for x in trace + a2c_out if x)}
         res = _acme_run_issue(cfg, cert, acc, ch, doms, force, trace)
-    if not res.get("ok") and adcs.is_adcs(acc) and "error" in res:
-        said = adcs.explain("\n".join(trace))
-        if said:
-            res["error"] = "%s -- acme2certifier: %s" % (res["error"], said)
+    # acme2certifier's output is complete only now that it has stopped. Its
+    # last lines go under acme.sh's in the log; the line that says what the
+    # CA made of the request goes into the error.
+    said = "\n".join(a2c_out)
+    if said.strip():
+        res["log"] = "%s\n\n--- acme2certifier ---\n%s" % (res.get("log") or "",
+                                                           "\n".join(said.splitlines()[-40:]))
+    if not res.get("ok") and "error" in res:
+        why = adcs.explain(said)
+        if why:
+            res["error"] = "%s -- acme2certifier: %s" % (res["error"], why)
     return res
 
 
@@ -476,17 +484,17 @@ def renewal_due(cfg, cert, now=None):
     doms = parse_domains(cert)
     if not doms:
         return False
-    nxt = None
-    for sub in (doms[0] + "_ecc", doms[0]):
-        try:
-            text = (Path(ACME_HOME) / sub / (doms[0] + ".conf")).read_text()
-        except OSError:
-            continue
-        m = re.search(r"^Le_NextRenewTime='?(\d+)'?\s*$", text, re.M)
-        if m:
-            nxt = int(m.group(1))
-            break
-    if nxt is None or nxt > now:
+    # acme.sh keeps an EC certificate in <name>_ecc and an RSA one in <name>.
+    # Only the folder of the key type this certificate has now: one issued as
+    # EC and switched to RSA leaves the _ecc folder behind, with a plan that
+    # is forever in the past.
+    folder = doms[0] + ("_ecc" if cert.get("key_type", "ec-256").startswith("ec") else "")
+    try:
+        text = (Path(ACME_HOME) / folder / (doms[0] + ".conf")).read_text()
+    except OSError:
+        return False
+    m = re.search(r"^Le_NextRenewTime='?(\d+)'?\s*$", text, re.M)
+    if not m or int(m.group(1)) > now:
         return False
     last = (cfg.get("_meta", {}).get("issue_log") or {}).get(cert.get("id")) or {}
     if last and not last.get("ok"):

@@ -546,6 +546,8 @@ export default {
 "Advanced. Any acme2certifier setting the fields above do not cover, as lines of its acme_srv.cfg with their section headers -- for example [CAhandler] timeout: 30, or [Challenge] dns_server_list: [\"10.0.0.53\"]. These are laid over the generated configuration, so a setting here replaces the one the fields produce. Show the configuration to see the result.": "Avancé. Tout réglage d'acme2certifier que les champs ci-dessus ne couvrent pas, sous forme de lignes de son acme_srv.cfg avec leurs en-têtes de section -- par exemple [CAhandler] timeout: 30, ou [Challenge] dns_server_list: [\"10.0.0.53\"]. Ils sont posés sur la configuration générée : un réglage ici remplace celui que produisent les champs. Afficher la configuration montre le résultat.",
 "Show the configuration": "Afficher la configuration",
 "the extra acme2certifier settings need their section headers, such as [CAhandler] above timeout: 30": "les réglages acme2certifier supplémentaires ont besoin de leurs en-têtes de section, par exemple [CAhandler] au-dessus de timeout: 30",
+"krb5_kinit_path must be the system's kinit, such as /usr/bin/kinit": "krb5_kinit_path doit être le kinit du système, par exemple /usr/bin/kinit",
+"a certificate is being requested through acme2certifier right now; test again when it is done": "un certificat est en cours de demande via acme2certifier ; refaites le test quand ce sera terminé",
 "Load from file": "Charger depuis un fichier",
 "Reads a local .html file into the field above. Nothing is uploaded: the page is saved with the configuration.": "Lit un fichier .html local dans le champ ci-dessus. Rien n'est téléversé : la page est enregistrée avec la configuration.",
 "Value": "Valeur",

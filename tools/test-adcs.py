@@ -45,6 +45,7 @@ A2C_DIR = pathlib.Path(os.environ["HAM_A2C_DIR"])
 A2C_DIR.mkdir()
 (A2C_DIR / "acme2certifier_wsgi.py").write_text(r'''
 import json, os, pathlib
+print("stand-in acme2certifier loaded", flush=True)
 seen = {"cfg": os.environ.get("ACME_SRV_CONFIGFILE", ""), "cwd": os.getcwd(),
         "cfg_text": pathlib.Path(os.environ.get("ACME_SRV_CONFIGFILE", "/nonexistent")).read_text()
                     if os.path.exists(os.environ.get("ACME_SRV_CONFIGFILE", "/nonexistent")) else ""}
@@ -133,6 +134,8 @@ add_account(dict(GOOD, name="web", adcs_method="certsrv", adcs_auth="ntlm", adcs
 add_account({"name": "le", "ca": "letsencrypt"}, 200)
 accs = {a["name"]: a for a in load_config()["acme"]["accounts"]}
 ok(set(accs) == {"corp", "ntlm-no-domain", "web", "le"}, "only the valid accounts were stored: %s" % sorted(accs))
+ok(mcp.redact(dict(accs["corp"], adcs_extra="[CAhandler]\npassword: x"))["adcs_extra"] == "[redacted]",
+   "and so are the extra settings, which can hold one")
 ok(mcp.redact(accs["corp"])["adcs_password"] == "[redacted]", "the password is a secret to MCP")
 
 print("what acme2certifier is given")
@@ -174,6 +177,17 @@ ok(cp["DBhandler"]["dbfile"].startswith(os.environ["HAM_A2C_STATE"]) and cp["Cha
    "the database and the untouched settings are as before")
 _, err = add_account(dict(GOOD, name="extra-db", adcs_extra="[DBhandler]\ndbfile: /tmp/x.db\n"), 400)
 ok("[DBhandler]" in err, "extra settings may not move the database")
+for bad, what in (("[CAhandler]\nhandler_module: /tmp/evil.py\n", "a handler by file path"),
+                  ("[CAhandler]\nhandler_module: os\n", "a module that is not acme2certifier's"),
+                  ("[Hooks]\nhooks_file: /tmp/evil.py\n", "a hooks file"),
+                  ("[EABhandler]\neab_handler_module: ../x.py\n", "an EAB handler by path"),
+                  ("[CAhandler:two]\nhandler_file: /tmp/evil.py\n", "a handler file in a second handler"),
+                  ("[Helper]\nlog_file: /etc/cron.d/x\n", "a log file of its choosing"),
+                  ("[CAhandler]\nkrb5_kinit_path: /tmp/kinit\n", "a kinit outside the system's")):
+    _, err = add_account(dict(GOOD, name="extra-code", adcs_extra=bad), 400)
+    ok("extra acme2certifier settings" in err or "kinit" in err, "extra settings may not name %s: %s" % (what, err[:60]))
+add_account(dict(GOOD, name="extra-builtin", adcs_extra="[EABhandler]\neab_handler_module: acme2certifier.eabhandlers.kid_profile_handler\n"
+                                                       "[CAhandler]\nkrb5_kinit_path: /usr/bin/kinit\n"), 200)
 _, err = add_account(dict(GOOD, name="extra-nosec", adcs_extra="timeout: 30\n"), 400)
 ok("section headers" in err, "extra settings without a section header say so")
 _, err = add_account(dict(GOOD, name="extra-broken", adcs_extra="[CAhandler]\nthis is not a setting\n"), 400)
@@ -182,11 +196,32 @@ r = client.post("/api/acme/adcs/config", headers=H, json=dict(GOOD, adcs_extra="
 ok(r["ok"] and "timeout = 30" in r["config"] and "msicpr_ca_handler" in r["config"],
    "the configuration is shown with the extra settings laid over")
 ok(GOOD["adcs_password"] not in r["config"] and "password = ********" in r["config"], "with the password masked")
+r = client.post("/api/acme/adcs/config", headers=H,
+                json=dict(GOOD, adcs_password="e", adcs_extra="[EABhandler]\nhmac_key: other-sekrit\n")).get_json()
+ok(r["ok"] and "other-sekrit" not in r["config"] and "hmac_key = ********" in r["config"]
+   and "handler_module = acme2certifier" in r["config"],
+   "masked by setting, not by text: a one-letter password leaves the rest readable, a credential in the extras is hidden")
 r = client.post("/api/acme/adcs/config", headers=H, json=dict(GOOD, adcs_host="")).get_json()
 ok(not r["ok"] and "certification authority's server" in r["error"], "or the reason an incomplete account is refused")
 ok(acme.server_args(accs["corp"]) == ["--server", "http://127.0.0.1:%d/directory" % PORT],
    "acme.sh is pointed at acme2certifier on localhost")
 ok(acme.check_directory(accs["corp"]) == "", "the directory is not read ahead: nothing is running yet")
+
+print("where acme2certifier is installed")
+ok(not adcs.installed() or adcs._module("acme2certifier"), "an entry point without its package is not an install")
+(A2C_DIR / "acme2certifier" / "acme_srv").mkdir(parents=True)
+(A2C_DIR / "acme2certifier" / "__init__.py").write_text("")
+(A2C_DIR / "acme2certifier" / "acme_srv" / "version.py").write_text('__version__ = "9.9.9"\n')
+ok(adcs.installed() and adcs.a2c_dir() == A2C_DIR, "the package beside the entry point counts, as the .rpm lays it out")
+ok(adcs.version() in ("9.9.9", adcs.A2C_VERSION), "its version is read from the package when there is no metadata: %s" % adcs.version())
+import email.message   # noqa: E402
+hdrs = email.message.Message()
+hdrs["WWW-Authenticate"] = "Negotiate"
+hdrs["WWW-Authenticate"] = "NTLM"
+ok(adcs.offers_ntlm(hdrs), "a 401 that offers Negotiate before NTLM, as IIS does, offers NTLM")
+basic = email.message.Message()
+basic["WWW-Authenticate"] = 'Basic realm="x"'
+ok(not adcs.offers_ntlm(basic), "one that offers only basic does not")
 
 print("issuing")
 # The stand-in stands in: acme2certifier counts as installed, Impacket too.
@@ -222,8 +257,8 @@ except Exception:
     still = False
 ok(not still, "acme2certifier is stopped afterwards")
 log_text = res.get("log") or ""
-ok("Serving on http://127.0.0.1:%d" % PORT in log_text or "waitress" in log_text.lower() or "seen" in log_text
-   or len(log_text) > 0, "its output is kept with the issue log")
+ok("--- acme2certifier ---" in log_text and "stand-in acme2certifier loaded" in log_text.split("--- acme2certifier ---")[1],
+   "its output is kept with the issue log, under acme.sh's")
 ok(not res["ok"] and "issuance failed" in res["error"], "the stand-in's refusal is reported: %s" % res["error"][:80])
 # What the stand-in saw: the configuration named by ACME_SRV_CONFIGFILE, in
 # the directory acme2certifier's entry point lives in.
@@ -280,6 +315,12 @@ ok(adcs.explain("all fine") == "", "nothing when nothing went wrong")
 print("testing the connection")
 r = client.post("/api/acme/adcs/test", headers=H, json=dict(GOOD, adcs_host="")).get_json()
 ok(r["ok"] is False and "certification authority's server" in r["message"], "an incomplete account is refused with why")
+adcs._serving.acquire()
+t0 = time.time()
+r = client.post("/api/acme/adcs/test", headers=H, json=GOOD).get_json()
+adcs._serving.release()
+ok(r["ok"] is False and "being requested" in r["message"] and time.time() - t0 < 10,
+   "while an issuance has acme2certifier, the test says so instead of waiting for it")
 r = client.post("/api/acme/adcs/test", headers=H,
                 json=dict(GOOD, adcs_method="certsrv", adcs_auth="basic", adcs_host="localhost")).get_json()
 ok(r["ok"] is False and "could not reach" in r["message"], "web enrollment nobody answers for: %s" % r["message"][:70])
