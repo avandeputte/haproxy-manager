@@ -26,6 +26,51 @@ _DANGEROUS_ENV = {"PATH", "IFS", "ENV", "BASH_ENV", "SHELLOPTS", "BASHOPTS",
                   "PS4", "PROMPT_COMMAND", "PYTHONPATH", "PERL5LIB"}
 from . import auth, notify, sync
 
+# A DNS alias target is a plain host name: it ends up on the command line of a
+# root process, so nothing else is let through.
+_ALIAS_NAME = re.compile(r"^(?=.{1,253}$)([A-Za-z0-9_]([A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?\.)+[A-Za-z0-9-]{2,63}$")
+
+
+def parse_challenge_alias(value):
+    """The alias domains typed on a challenge type, as a list.
+
+    One name per line (or separated by spaces or commas). Raises ValueError
+    with why when one is not a host name.
+    """
+    names = [x for x in re.split(r"[\s,]+", (value or "").strip()) if x]
+    for n in names:
+        if not _ALIAS_NAME.match(n):
+            raise ValueError("%r is not a valid challenge alias domain" % n)
+    return names
+
+
+def check_challenge(item):
+    """What a challenge type is refused for when it is saved."""
+    parse_challenge_alias(item.get("challenge_alias"))
+
+
+def challenge_alias_args(ch, doms):
+    """acme.sh's --challenge-alias arguments for a DNS-01 challenge type.
+
+    With the validation records CNAMEd to another zone (acme.sh's DNS alias
+    mode), _acme-challenge.<domain> is answered in that zone instead. One alias
+    applies to every domain on the certificate; otherwise there must be exactly
+    one per domain, in the order the domains are listed -- acme.sh pairs them
+    by position.
+    """
+    names = parse_challenge_alias(ch.get("challenge_alias"))
+    if not names:
+        return []
+    if len(names) not in (1, len(doms)):
+        raise ValueError("the challenge type has %d alias domains but the certificate has %d "
+                         "domains: give one alias for all of them, or one per domain"
+                         % (len(names), len(doms)))
+    args = []
+    for n in names:
+        args += ["--challenge-alias", n]
+    return args
+
+
 # --------------------------------------------------------------------------
 
 CA_SERVERS = {
@@ -161,6 +206,10 @@ def _acme_issue(cfg, cert, force=False):
     env = {}
     if ch.get("method") == "dns01":
         args += ["--dns", ch.get("dns_provider", "")]
+        try:
+            args += challenge_alias_args(ch, doms)
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
         for line in (ch.get("dns_credentials") or "").splitlines():
             if "=" not in line:
                 continue

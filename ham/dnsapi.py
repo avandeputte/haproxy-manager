@@ -223,6 +223,8 @@ def api_wizard_certificate():
             obj.update({k: v for k, v in spec.items() if k != "id"})
             if not obj.get("name"):
                 raise ValueError("a name is required for the new %s" % kind[:-1])
+            if kind == "challenges":
+                acme.check_challenge(obj)
             obj["id"] = str(uuid.uuid4())
             obj["name"] = wizard._uniq_name({x["name"] for x in ac[kind]}, obj["name"])
             ac[kind].append(obj)
@@ -233,7 +235,8 @@ def api_wizard_certificate():
             account = pick("accounts", body.get("account"),
                            {"name": "", "email": "", "ca": "letsencrypt", "eab_kid": "", "eab_hmac": ""})
             challenge = pick("challenges", body.get("challenge"),
-                             {"name": "", "method": "http01", "dns_provider": "", "dns_credentials": ""})
+                             {"name": "", "method": "http01", "dns_provider": "", "dns_credentials": "",
+                              "challenge_alias": ""})
         except ValueError as e:
             return jsonify({"ok": False, "error": str(e)}), 400
 
