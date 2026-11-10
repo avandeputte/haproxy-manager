@@ -416,7 +416,7 @@ export default {
 "Replace": "Remplacer",
 "Replace: {name}": "Remplacer : {name}",
 "Send HSTS": "Envoyer HSTS",
-"Services that listen on every address answer over IPv6 as well (bind ::: v4v6). Skipped by itself on a node without IPv6; turn it off where IPv6 exists but is broken.": "Les services qui écoutent sur toutes les adresses répondent aussi en IPv6 (bind ::: v4v6). Ignoré d'office sur un nœud sans IPv6 ; à désactiver là où IPv6 existe mais est défaillant.",
+"Services that listen on every address answer over IPv6 as well (bind ::: v6only). Skipped by itself on a node without IPv6; turn it off where IPv6 exists but is broken.": "Les services qui écoutent sur toutes les adresses répondent aussi en IPv6 (bind ::: v6only). Ignoré d'office sur un nœud sans IPv6 ; à désactiver là où IPv6 existe mais est défaillant.",
 "Stored, covering {names}.": "Enregistré, couvre {names}.",
 "Strict-Transport-Security, over HTTPS only: browsers that have been here come back over HTTPS for two years without trying HTTP first. HTTP mode only.": "Strict-Transport-Security, en HTTPS seulement : les navigateurs venus ici reviennent en HTTPS pendant deux ans sans essayer HTTP d'abord. Mode HTTP seulement.",
 "The certificate and chain, or the private key": "Le certificat et sa chaîne, ou la clé privée",

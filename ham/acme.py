@@ -116,7 +116,11 @@ def acme_issue(cfg, cert, force=False):
                 "error", cfg)
     except OSError:
         pass  # never fail an issuance because the log could not be written
-    if res.get("ok"):
+    if res.get("ok") and not res.get("changed", True):
+        # Not due: acme.sh kept the certificate it has and the deployed file
+        # already is that one. Nothing to reload, announce or send.
+        log.debug("certificate %s is not due; the deployed one is current", cert.get("name"))
+    elif res.get("ok"):
         log.info("certificate issued: %s (%s)", cert.get("name"), ", ".join(parse_domains(cert)))
         notify.notify("certificates", "Certificate %s issued" % cert.get("name"),
                "The certificate %s was issued and deployed.\n\nDomains: %s"
@@ -128,6 +132,12 @@ def acme_issue(cfg, cert, force=False):
 
 
 def _acme_issue(cfg, cert, force=False):
+    if is_custom(cert):
+        # Whatever asked -- a button, the wizard, MCP -- an uploaded
+        # certificate is not issued over: it would stay marked as uploaded,
+        # and so never be renewed.
+        return {"ok": False, "error": "this certificate was uploaded, not issued: "
+                                      "upload a new one to replace it"}
     accounts = _by_id(cfg["acme"]["accounts"])
     challenges = _by_id(cfg["acme"]["challenges"])
     acc = accounts.get(cert.get("account"))
@@ -179,7 +189,7 @@ def _acme_issue(cfg, cert, force=False):
 
     dep = deploy_cert(cfg, cert)
     trace.append(dep.get("log", ""))
-    res = {"ok": dep["ok"], "log": "\n".join(x for x in trace if x)}
+    res = {"ok": dep["ok"], "changed": dep.get("changed", True), "log": "\n".join(x for x in trace if x)}
     if not dep["ok"]:
         res["error"] = dep.get("error")
     return res
@@ -199,10 +209,20 @@ def deploy_cert(cfg, cert):
             return {"ok": False, "error": "acme.sh --install-cert failed", "log": out}
         CERT_DIR.mkdir(parents=True, exist_ok=True)
         p = cert_path(cert)
-        p.write_text(fc.read_text() + key.read_text())
+        pem = fc.read_text() + key.read_text()
+        # A round asks acme.sh about every certificate, and one that is not
+        # due comes back as it was. The file is compared rather than acme.sh's
+        # exit code trusted, so a PEM that went missing or was replaced by a
+        # placeholder is still put back.
+        try:
+            if p.read_text() == pem:
+                return {"ok": True, "changed": False, "log": out.strip()}
+        except OSError:
+            pass
+        p.write_text(pem)
         os.chmod(p, 0o600)
     auto = after_certificate_deployed(cfg, cert)
-    return {"ok": True, "log": (out + ("\n" + auto if auto else "")).strip()}
+    return {"ok": True, "changed": True, "log": (out + ("\n" + auto if auto else "")).strip()}
 
 
 def after_certificate_deployed(cfg, cert):

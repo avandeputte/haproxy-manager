@@ -416,7 +416,7 @@ export default {
 "Replace": "Ersätt",
 "Replace: {name}": "Ersätt: {name}",
 "Send HSTS": "Skicka HSTS",
-"Services that listen on every address answer over IPv6 as well (bind ::: v4v6). Skipped by itself on a node without IPv6; turn it off where IPv6 exists but is broken.": "Tjänster som lyssnar på alla adresser svarar även över IPv6 (bind ::: v4v6). Hoppas över av sig själv på en nod utan IPv6; stäng av där IPv6 finns men är trasigt.",
+"Services that listen on every address answer over IPv6 as well (bind ::: v6only). Skipped by itself on a node without IPv6; turn it off where IPv6 exists but is broken.": "Tjänster som lyssnar på alla adresser svarar även över IPv6 (bind ::: v6only). Hoppas över av sig själv på en nod utan IPv6; stäng av där IPv6 finns men är trasigt.",
 "Stored, covering {names}.": "Sparat, täcker {names}.",
 "Strict-Transport-Security, over HTTPS only: browsers that have been here come back over HTTPS for two years without trying HTTP first. HTTP mode only.": "Strict-Transport-Security, bara över HTTPS: webbläsare som varit här kommer tillbaka över HTTPS i två år utan att först prova HTTP. Bara i HTTP-läge.",
 "The certificate and chain, or the private key": "Certifikatet och kedjan, eller den privata nyckeln",

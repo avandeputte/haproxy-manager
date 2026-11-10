@@ -330,7 +330,7 @@ export const S={
    {k:"timeout_tunnel",l:"WebSocket idle timeout",t:"text",d:"1h",
     h:"How long an upgraded connection -- a WebSocket, a terminal -- may sit idle before it is closed (timeout tunnel). Empty falls back to the client and server timeouts, which cut an idle WebSocket after 50 seconds."},
    {k:"ipv6",l:"Listen on IPv6 too",t:"bool",d:true,
-    h:"Services that listen on every address answer over IPv6 as well (bind ::: v4v6). Skipped by itself on a node without IPv6; turn it off where IPv6 exists but is broken."},
+    h:"Services that listen on every address answer over IPv6 as well (bind ::: v6only). Skipped by itself on a node without IPv6; turn it off where IPv6 exists but is broken."},
    {k:"default_site",l:"Unknown hosts",t:"select",o:[{value:"503",label:"503 -- HAProxy's own answer"},{value:"404",label:"404 not found -- the 404 error page when there is one"},{value:"drop",label:"drop the connection, say nothing"},{value:"redirect",label:"redirect to an address"}],d:"503",
     h:"What a request for a host name no service answers gets, on every HTTP listener without a default Backend Pool."},
    {k:"default_site_url",l:"Unknown hosts redirect to",t:"text",h:"Only for redirect: an address starting with http:// or https://"},
