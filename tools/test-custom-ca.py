@@ -116,6 +116,19 @@ for ca, who in (("google", "Google"), ("google_test", "Google"), ("sslcom", "SSL
     ok(who + " needs External Account Binding" in err, "%s without EAB says it needs it" % ca)
 add_account({"name": "gts", "ca": "google", "eab_kid": "kid", "eab_hmac": "hmac"}, 200)
 add_account({"name": "zero", "ca": "zerossl", "email": "z@example.com"}, 200)
+for ca in ("letsencrypt", "letsencrypt_test"):
+    acc, _ = add_account({"name": "left-" + ca, "ca": ca, "eab_kid": "left-over", "eab_hmac": "left-over-key"}, 200)
+    ok(acc.get("eab_kid") == "" and acc.get("eab_hmac") == "",
+       "%s has no EAB: what was typed for another CA is not stored with it" % ca)
+acc, _ = add_account({"name": "zero-eab", "ca": "zerossl", "eab_kid": "kid", "eab_hmac": "hmac"}, 200)
+ok(acc.get("eab_kid") == "kid" and acc.get("eab_hmac") == "hmac", "ZeroSSL keeps EAB credentials that were given")
+_real_run, _reg = acme.acme_run, []
+acme.acme_run = lambda args, env_extra=None: (_reg.append(args) or (0, ""))
+acme.ensure_account({"ca": "letsencrypt", "email": "", "eab_kid": "old", "eab_hmac": "old-key"})
+ok("--eab-kid" not in _reg[-1], "an older Let's Encrypt account still carrying EAB registers without it")
+acme.ensure_account({"ca": "google", "email": "", "eab_kid": "kid", "eab_hmac": "key"})
+ok(_reg[-1][_reg[-1].index("--eab-kid") + 1] == "kid", "a CA that has EAB is still given it")
+acme.acme_run = _real_run
 for ca in ("google", "google_test", "sslcom", "actalis", "zerossl", "letsencrypt_test"):
     ok(acme.server_args({"ca": ca}) == ["--server", ca], "%s is passed to acme.sh by its short name" % ca)
 known = subprocess.run(["sh", "-c", "sed -n '/^CA_NAMES=/,/^\"/p' /opt/acme.sh/acme.sh"],

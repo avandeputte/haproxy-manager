@@ -1,4 +1,4 @@
-import { $, ADCS_FIELDS, CA_CHOICES, api, btn, closeDlg, esc, fieldRow, list, lists, localTime, openDlg, readForm, showText, download } from "../core.js";
+import { $, ADCS_FIELDS, CA_CHOICES, CA_NO_EAB, api, btn, closeDlg, esc, fieldRow, list, lists, localTime, openDlg, readForm, showText, download } from "../core.js";
 import { E, renderEntity } from "../entities.js";
 import { t, tn } from "../i18n.js";
 import { refreshStatus, route } from "../shell.js";
@@ -60,11 +60,11 @@ const caLabel=a=>a.ca==="custom"?(String(a.server||"").replace(/^https?:\/\//,""
 /* Which rows an account's CA calls for beyond the common ones: a custom CA its
    address and certificate; AD CS its server and credentials, with the CA name
    and the domain for MS-ICPR and the CA certificate to trust for web enrollment
-   over HTTPS. EAB is a public CA's thing, or a custom one's. */
+   over HTTPS. EAB is for the public CAs that have it, or a custom one. */
 export const CA_EXTRA=["server","ca_bundle",...ADCS_FIELDS.map(f=>f.k),"eab_kid","eab_hmac"];
 export function caFieldsShown(ca,method){
   if(ca==="custom")return ["server","ca_bundle","eab_kid","eab_hmac"];
-  if(ca!=="adcs")return ["eab_kid","eab_hmac"];
+  if(ca!=="adcs")return CA_NO_EAB.includes(ca||"letsencrypt")?[]:["eab_kid","eab_hmac"];
   const keys=ADCS_FIELDS.map(f=>f.k).filter(k=>method!=="certsrv"||!["adcs_ca_name","adcs_domain","adcs_dc"].includes(k));
   return method==="certsrv"?keys.concat(["ca_bundle"]):keys;
 }
@@ -187,7 +187,7 @@ export async function openCertWizard(){
       ? Object.assign({name:d.acc_name||("account-"+(d.acc_ca||"letsencrypt")),email:d.acc_email,ca:d.acc_ca,
          server:d.acc_ca==="custom"?d.acc_server:"",
          ca_bundle:d.acc_ca==="custom"||d.acc_ca==="adcs"?d.acc_ca_bundle:"",
-         eab_kid:d.acc_ca==="adcs"?"":d.acc_eab_kid,eab_hmac:d.acc_ca==="adcs"?"":d.acc_eab_hmac},
+         eab_kid:CA_NO_EAB.includes(d.acc_ca)?"":d.acc_eab_kid,eab_hmac:CA_NO_EAB.includes(d.acc_ca)?"":d.acc_eab_hmac},
          d.acc_ca==="adcs"?Object.fromEntries(ADCS_FIELDS.map(f=>[f.k,d["acc_"+f.k]])):{})
       : {id:d.account_id};
     body.challenge=d.challenge_id===NEWOPT

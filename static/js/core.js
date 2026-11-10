@@ -66,6 +66,10 @@ document.addEventListener("keydown",e=>{if(e.key==="Escape")closeDlg();});
    in front of Active Directory Certificate Services, step-ca, Vault. */
 export const CA_CHOICES=["letsencrypt","letsencrypt_test","zerossl","google","google_test","sslcom","actalis","custom",
   {value:"adcs",label:"Active Directory Certificate Services"}];
+/* The CAs that take no External Account Binding: Let's Encrypt has none, and
+   AD CS is not reached over ACME at all. Their EAB rows are not shown, and
+   what was left in them is not sent. */
+export const CA_NO_EAB=["letsencrypt","letsencrypt_test","adcs"];
 /* The fields an account for Active Directory Certificate Services has: in the
    account editor as they are, in the wizard with acc_ in front. Here rather
    than with the wizard because the entities and the certificates page import

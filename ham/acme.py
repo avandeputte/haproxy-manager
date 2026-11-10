@@ -46,6 +46,10 @@ CA_SERVERS = {
 }
 EAB_REQUIRED = {"google": "Google", "google_test": "Google", "sslcom": "SSL.com",
                 "actalis": "Actalis"}
+# The ones with no External Account Binding at all: Let's Encrypt has none,
+# and AD CS is not reached over ACME. (ZeroSSL takes it, or makes its own
+# from the e-mail address; a custom server may ask for it.)
+NO_EAB = {"letsencrypt", "letsencrypt_test", "adcs"}
 KEYLEN = {"ec-256": "ec-256", "ec-384": "ec-384", "rsa-2048": "2048", "rsa-4096": "4096"}
 
 
@@ -89,6 +93,13 @@ SYSTEM_BUNDLES = ("/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-b
 def check_account(acc):
     """What an ACME account refuses before it is stored. Raises ValueError with why."""
     ca = acc.get("ca") or "letsencrypt"
+    if ca in NO_EAB:
+        # The editor hides the EAB rows for these, so what was typed for
+        # another CA before switching must not stay behind, unseen: one of
+        # the two is a key.
+        for k in ("eab_kid", "eab_hmac"):
+            if acc.get(k):
+                acc[k] = ""
     if ca == "buypass":
         raise ValueError("Buypass stopped issuing certificates on 31 October 2025: "
                          "choose another certificate authority for this account")
@@ -188,7 +199,9 @@ def server_args(acc):
 
 def ensure_account(acc):
     args = ["--register-account", "-m", acc.get("email", "")] + server_args(acc)
-    if acc.get("eab_kid"):
+    # An account stored before the EAB rows were hidden for these CAs may
+    # still carry credentials meant for another one.
+    if acc.get("eab_kid") and (acc.get("ca") or "letsencrypt") not in NO_EAB:
         args += ["--eab-kid", acc["eab_kid"], "--eab-hmac-key", acc.get("eab_hmac", "")]
     return acme_run(args)
 
