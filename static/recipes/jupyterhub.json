@@ -1,0 +1,20 @@
+{
+  "name": "JupyterHub",
+  "category": "Applications",
+  "summary": "HTTP 8000 checked with /hub/health, with kernel WebSockets kept open.",
+  "notes": "A notebook talks to its kernel over a WebSocket for as long as it is open, and a cell can run for hours. /hub/health exists for load balancers and answers without touching anything else.",
+  "fields": {
+    "url": "https://jupyter.example.com",
+    "target": "10.0.0.10:8000",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/hub/health",
+    "health_status": "200",
+    "health_interval": "10s",
+    "timeout_server": "4h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  }
+}

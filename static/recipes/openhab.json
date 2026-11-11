@@ -1,0 +1,20 @@
+{
+  "name": "openHAB",
+  "category": "Applications",
+  "summary": "HTTP 8080 checked against the REST API, with its event stream kept open.",
+  "notes": "The interface keeps an event stream open for live updates, so a short timeout shows up as a page that stops changing. /rest/ answers without signing in. Leave signing in to openHAB: with the Sign-in option here the browser's Authorization header reaches openHAB as well, which its documentation warns against.",
+  "fields": {
+    "url": "https://openhab.example.com",
+    "target": "10.0.0.10:8080",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/rest/",
+    "health_status": "200",
+    "health_interval": "5s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  }
+}

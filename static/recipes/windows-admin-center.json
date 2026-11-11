@@ -1,0 +1,19 @@
+{
+  "name": "Windows Admin Center",
+  "category": "Infrastructure",
+  "summary": "HTTPS 443 passed on to the gateway's self-signed certificate.",
+  "notes": "For a gateway installed on Windows Server, which listens on 443; a desktop installation uses 6516, or 6600 in recent versions. The certificate is the gateway's own and is not verified. PowerShell, Remote Desktop and Events run over WebSockets, and the gateway refuses a WebSocket whose origin is not a name on its own certificate: add the name published here to its WebSocketValidationOverride registry value.",
+  "fields": {
+    "url": "https://wac.example.com",
+    "target": "wac1=https://10.0.0.1:443",
+    "balance": "source",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "tcp",
+    "health_interval": "10s",
+    "timeout_server": "4h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  }
+}

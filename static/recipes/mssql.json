@@ -1,0 +1,17 @@
+{
+  "name": "Microsoft SQL Server",
+  "category": "Databases",
+  "summary": "TCP 1433 with a connection check.",
+  "notes": "For one instance, or the listener of an availability group. A named instance picks its port at start-up and announces it through the SQL Server Browser on UDP 1434, which cannot pass through here: give the instance a fixed TCP port and use that. Do not put servers that are not copies of each other behind one service.",
+  "fields": {
+    "url": "tcp://0.0.0.0:1433",
+    "target": "10.0.0.1:1433",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "tcp",
+    "health_interval": "5s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "AWX",
+  "category": "Applications",
+  "summary": "HTTP checked with the unauthenticated ping.",
+  "notes": "The target is whatever exposes the AWX web service outside the cluster: the example is a NodePort, set with nodeport_port in the AWX resource. /api/v2/ping/ needs no sign-in. Job output arrives over a WebSocket, hence the timeout.",
+  "fields": {
+    "url": "https://awx.example.com",
+    "target": "10.0.0.10:30080",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/api/v2/ping/",
+    "health_status": "200",
+    "health_interval": "10s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  }
+}

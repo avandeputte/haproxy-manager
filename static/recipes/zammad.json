@@ -1,0 +1,20 @@
+{
+  "name": "Zammad",
+  "category": "Applications",
+  "summary": "HTTP 8080 for the bundled nginx, with its WebSockets.",
+  "notes": "The target is the zammad-nginx container of the Docker deployment, which already splits the application and its WebSocket server; a package install has the same nginx on 80. Set NGINX_SERVER_SCHEME=https there, or the session cookie is not marked secure and signing in fails with a CSRF error. The health check Zammad offers needs a token, so this one only asks for the front page.",
+  "fields": {
+    "url": "https://support.example.com",
+    "target": "10.0.0.10:8080",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  }
+}

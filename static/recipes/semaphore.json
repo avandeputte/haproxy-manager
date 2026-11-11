@@ -1,0 +1,20 @@
+{
+  "name": "Semaphore UI",
+  "category": "Applications",
+  "summary": "HTTP 3000 checked with /api/ping, with the task log WebSocket kept open.",
+  "notes": "Task output streams over a WebSocket that is only pinged every two minutes, so a short timeout shows up as a log view that keeps disconnecting. Set web_host to the address published here: Semaphore builds redirects and checks the request's origin from it.",
+  "fields": {
+    "url": "https://semaphore.example.com",
+    "target": "10.0.0.10:3000",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/api/ping",
+    "health_status": "200",
+    "health_interval": "10s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  }
+}

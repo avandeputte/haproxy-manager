@@ -1,0 +1,17 @@
+{
+  "name": "Remote Desktop Gateway",
+  "category": "Infrastructure",
+  "summary": "TCP 443 passed through, with each client kept on one gateway.",
+  "notes": "Passed through without terminating TLS, the way the load-balancing guides for it are written: the gateway authenticates each connection itself, inside its own TLS session. A session opens two connections that must reach the same gateway, so clients are pinned by address. The gateway's UDP transport on 3391 cannot pass through here. Port 443 is taken whole by this service, so it cannot share a listening address with HTTPS services.",
+  "fields": {
+    "url": "tcp://0.0.0.0:443",
+    "target": "rdgw1=10.0.0.1:443, rdgw2=10.0.0.2:443",
+    "balance": "source",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "tcp",
+    "health_interval": "10s",
+    "timeout_server": "8h",
+    "timeout_connect": "5s"
+  }
+}

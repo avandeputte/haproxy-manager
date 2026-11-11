@@ -1,0 +1,19 @@
+{
+  "name": "EMQX",
+  "category": "Infrastructure",
+  "summary": "TCP 1883 with the check aimed at the broker's status page.",
+  "notes": "MQTT clients use 1883 while the check asks /status on the dashboard port, 18083, which needs no sign-in and answers 503 until the broker has finished starting. Clients connect once and stay connected, so the timeout has to outlast their keepalive. EMQX can read the PROXY protocol to see each client's real address: switch it on for the listener there and here together.",
+  "fields": {
+    "url": "tcp://0.0.0.0:1883",
+    "target": "emqx1=10.0.0.1:1883, emqx2=10.0.0.2:1883",
+    "balance": "leastconn",
+    "persistence": "none",
+    "health": "http",
+    "check_port": "18083",
+    "health_uri": "/status",
+    "health_status": "200",
+    "health_interval": "5s",
+    "timeout_server": "4h",
+    "timeout_connect": "5s"
+  }
+}

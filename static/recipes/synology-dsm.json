@@ -1,0 +1,20 @@
+{
+  "name": "Synology DSM",
+  "category": "Infrastructure",
+  "summary": "HTTP 5000 for the DSM desktop.",
+  "notes": "DSM answers plain HTTP on 5000 and HTTPS on 5001; this uses 5000 and leaves the encryption to this node. If DSM is set to redirect HTTP to HTTPS by itself, switch that off or use https://...:5001 as the target, or visitors are sent on to port 5001. The expected status is empty because what / answers depends on that setting. Uploads through File Station are what the timeout is for.",
+  "fields": {
+    "url": "https://nas.example.com",
+    "target": "10.0.0.10:5000",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  }
+}

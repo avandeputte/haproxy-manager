@@ -1,0 +1,20 @@
+{
+  "name": "GlitchTip",
+  "category": "Applications",
+  "summary": "HTTP 8000 checked with /_health/.",
+  "notes": "Set GLITCHTIP_DOMAIN to the address published here, with https://, since GlitchTip builds its links and the addresses it hands to SDKs from it.",
+  "fields": {
+    "url": "https://glitchtip.example.com",
+    "target": "10.0.0.10:8000",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/_health/",
+    "health_status": "200",
+    "health_interval": "10s",
+    "timeout_server": "5m",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  }
+}

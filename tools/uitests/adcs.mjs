@@ -86,7 +86,14 @@ ok(!!choice && /Active Directory/.test(choice.label), "the CA pickers offer Acti
 
 // -- the account editor ------------------------------------------------------------
 openEditor("acme/accounts");
-ok(ADCS.every(k => !shown(k)) && shown("eab_kid"), "a new account hides the AD CS rows and shows EAB");
+ok(ADCS.every(k => !shown(k)) && !shown("eab_kid") && !shown("eab_hmac"),
+   "a new account, for Let's Encrypt, hides the AD CS rows and EAB, which Let's Encrypt has none of");
+for (const ca of ["zerossl", "google", "google_test", "sslcom", "actalis", "custom"]) {
+  setSelect($("#f_ca"), ca);
+  ok(shown("eab_kid") && shown("eab_hmac"), ca + " shows the EAB rows");
+}
+setSelect($("#f_ca"), "letsencrypt_test");
+ok(!shown("eab_kid") && !shown("eab_hmac"), "Let's Encrypt's test CA hides them too");
 setSelect($("#f_ca"), "adcs");
 ok(ADCS.every(k => shown(k)), "picking Active Directory shows them all for MS-ICPR");
 ok(!shown("server") && !shown("ca_bundle") && !shown("eab_kid") && !shown("eab_hmac"),
@@ -102,8 +109,10 @@ ok($("#f_adcs_auth").value === "ntlm" && $('#f_adcs_auth option[value="kerberos"
 setSelect($("#f_adcs_method"), "msicpr");
 ok($("#f_adcs_auth").value === "ntlm" && !$('#f_adcs_auth option[value="kerberos"]').disabled
    && $('#f_adcs_auth option[value="basic"]').disabled, "back to MS-ICPR: NTLM stays, basic is out");
+setSelect($("#f_ca"), "zerossl");
+ok(ADCS.every(k => !shown(k)) && shown("eab_kid"), "a public CA hides them again, and shows EAB if it has it");
 setSelect($("#f_ca"), "letsencrypt");
-ok(ADCS.every(k => !shown(k)) && shown("eab_kid"), "a public CA hides them again");
+ok(ADCS.every(k => !shown(k)) && !shown("eab_kid"), "Let's Encrypt: neither");
 
 openEditor("acme/accounts", ACCOUNTS[1]);
 ok($("#f_ca").value === "adcs" && shown("adcs_host") && $("#f_adcs_host").value === "ca01.corp.lan"
@@ -135,8 +144,10 @@ const acc = $("#f_account_id");
 ok([...acc.querySelectorAll("option")].some(o => o.textContent === "corp (ca01.corp.lan)"),
    "an existing AD CS account is offered by its CA server");
 setSelect(acc, "__new__");
-ok(shown("acc_ca") && ADCS.every(k => !shown("acc_" + k)) && shown("acc_eab_kid"),
-   "a new account: the AD CS rows wait for Active Directory");
+ok(shown("acc_ca") && ADCS.every(k => !shown("acc_" + k)) && !shown("acc_eab_kid") && !shown("acc_eab_hmac"),
+   "a new account: the AD CS rows wait for Active Directory, and Let's Encrypt has no EAB rows");
+setSelect($("#f_acc_ca"), "google");
+ok(shown("acc_eab_kid") && shown("acc_eab_hmac"), "Google shows them");
 setSelect($("#f_acc_ca"), "adcs");
 ok(ADCS.every(k => shown("acc_" + k)) && !shown("acc_server") && !shown("acc_eab_kid"),
    "Active Directory shows them and hides the directory URL and EAB");
@@ -158,11 +169,16 @@ ok(path === "wizard/certificate" && sent && sent.account.ca === "adcs" && sent.a
    && sent.account.adcs_auth === "kerberos" && sent.account.adcs_user === "svc" && sent.account.adcs_password === "secret",
    "the new AD CS account is sent with its server, CA name, template and credentials");
 ok(sent.account.eab_kid === "" && sent.account.server === "" && sent.account.adcs_extra === "", "and without EAB or a directory URL, the extra settings empty");
+setSelect($("#f_acc_ca"), "zerossl");
+sent = null;
+await findButton(document, "Preview").onclick();
+ok(sent && sent.account.ca === "zerossl" && !("adcs_host" in sent.account) && sent.account.eab_kid === "leftover",
+   "a public CA is sent without the AD CS fields, EAB as typed");
 setSelect($("#f_acc_ca"), "letsencrypt");
 sent = null;
 await findButton(document, "Preview").onclick();
-ok(sent && sent.account.ca === "letsencrypt" && !("adcs_host" in sent.account) && sent.account.eab_kid === "leftover",
-   "a public CA is sent without the AD CS fields, EAB as typed");
+ok(sent && sent.account.ca === "letsencrypt" && sent.account.eab_kid === "" && sent.account.eab_hmac === "",
+   "Let's Encrypt is sent without what was left in the hidden EAB rows");
 
 // -- the certificates page says when acme2certifier is missing ----------------------
 await loadAcmeHealth();
