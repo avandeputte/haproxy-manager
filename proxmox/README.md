@@ -25,6 +25,9 @@ newest release of all, betas included, and a stable release still outranks the
 betas before it. One third-party apt source is added: CrowdSec's
 repository, with its signing key checked against a pinned fingerprint, so the
 SPOA bouncer is on the node (stopped) should you switch CrowdSec on later.
+As on any package install, the service fetches acme2certifier from GitHub when
+it first starts; certificates from Active Directory Certificate Services go
+through it.
 
 ## Updating
 

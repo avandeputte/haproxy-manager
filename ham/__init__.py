@@ -31,6 +31,7 @@ from . import (
     metrics,
     apply,
     acme,
+    adcs,
     notify,
     watchdog,
     mcp,
@@ -61,7 +62,7 @@ from . import (
 __all__ = [
     "app", "log", "VERSION", "config", "util", "auth", "access", "twofactor",
     "qr", "validate",
-    "crud", "haproxy", "history", "keepalived", "metrics", "apply", "acme", "notify",
+    "crud", "haproxy", "history", "keepalived", "metrics", "apply", "acme", "adcs", "notify",
     "watchdog",
     "sync", "setup", "peering", "probe", "vrrp", "cluster", "stats", "traffic",
     "mqtt", "hass", "oauth", "logs",

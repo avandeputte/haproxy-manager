@@ -1,0 +1,20 @@
+{
+  "name": "Sentry",
+  "category": "Applications",
+  "summary": "HTTP 9000 checked with /_health/.",
+  "notes": "9000 is where the self-hosted installation publishes its nginx. Set system.url-prefix in config.yml and uncomment the SSL/TLS block in sentry.conf.py, or forms fail with CSRF errors. /_health/ answers ok without running any checks.",
+  "fields": {
+    "url": "https://sentry.example.com",
+    "target": "10.0.0.10:9000",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/_health/",
+    "health_status": "200",
+    "health_interval": "10s",
+    "timeout_server": "5m",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  }
+}

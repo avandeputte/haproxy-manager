@@ -1,0 +1,16 @@
+{
+  "name": "Minecraft (Java Edition)",
+  "category": "Infrastructure",
+  "summary": "TCP 25565 for players.",
+  "notes": "The server sees every player arriving from this node's address unless the PROXY protocol carries the real one. Paper (proxies.proxy-protocol), Velocity (haproxy-protocol) and BungeeCord (proxy_protocol) can read it: switch it on there and under PROXY protocol here at the same moment, because a server that expects it drops every connection that arrives without. Bedrock Edition uses UDP and cannot pass through.",
+  "fields": {
+    "url": "tcp://0.0.0.0:25565",
+    "target": "10.0.0.1:25565",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "tcp",
+    "health_interval": "10s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s"
+  }
+}

@@ -92,6 +92,13 @@ checks = [
   ("minio",            "/minio/health/live"),
   ("kubernetes-api",   "check"),
   ("web-websockets",   "timeout server 1h"),
+  # a TCP service checked over HTTP on another port, and an https:// target
+  # whose HTTP check has to travel over TLS as well
+  ("adfs",             "mode tcp", "option httpchk", "/adfs/probe", "port 80"),
+  ("nats",             "mode tcp", "/healthz", "port 8222"),
+  ("emqx",             "mode tcp", "/status", "port 18083"),
+  ("exchange",         "/owa/healthcheck.htm", "ssl verify none"),
+  ("wazuh-dashboard",  "/app/login", "ssl verify none"),
 ]
 for rid, *needles in checks:
     print("  %-22s %s" % (rid, "ok" if has(rid, *needles) else "MISSING"))

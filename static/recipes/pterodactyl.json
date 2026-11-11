@@ -1,0 +1,20 @@
+{
+  "name": "Pterodactyl Panel",
+  "category": "Applications",
+  "summary": "HTTP 80 for the panel.",
+  "notes": "The panel only. Set TRUSTED_PROXIES in its .env to this node's address, or it builds http:// links. The expected status is empty because / answers a visitor who is not signed in with a redirect. Each Wings node is a service of its own on 8080, with a WebSocket for the console and Behind Proxy ticked on the node; SFTP on 2022 is not HTTP.",
+  "fields": {
+    "url": "https://panel.example.com",
+    "target": "10.0.0.10:80",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "timeout_server": "10m",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  }
+}

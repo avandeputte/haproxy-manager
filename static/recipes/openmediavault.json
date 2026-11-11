@@ -1,0 +1,20 @@
+{
+  "name": "OpenMediaVault",
+  "category": "Infrastructure",
+  "summary": "HTTP 80 for the web interface.",
+  "notes": "OpenMediaVault serves its interface over plain HTTP on 80 unless HTTPS has been switched on in its settings, in which case use https://...:443 as the target. The interface signs people out after five idle minutes by default, which is its own setting and not this timeout.",
+  "fields": {
+    "url": "https://omv.example.com",
+    "target": "10.0.0.10:80",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "timeout_server": "30m",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  }
+}

@@ -13,7 +13,7 @@ import uuid
 from .base import ACME_HOME, ACME_SH, _lock, app
 from .config import load_config, save_config
 from .util import _by_id, _sec, cert_details, cert_path, parse_domains, rule_cond_ids, run
-from . import access, acme, errorpages, validate, wizard, oauth
+from . import access, acme, adcs, errorpages, validate, wizard, oauth
 from .validate import plain_url as _plain_url
 
 # --------------------------------------------------------------------------
@@ -162,6 +162,10 @@ def api_acme_health():
         out["problem"] = "acme.sh needs %s, which is not installed." % " and ".join(missing)
         out["hint"] = "apt-get install -y " + " ".join(missing)
         return jsonify(out)
+    # Whether the node can enroll with Active Directory Certificate Services,
+    # for the certificates page to say so when an account asks for it.
+    out["adcs"] = adcs.summary(load_config())
+
     if not shutil.which("socat"):
         out["ok"] = True
         out["problem"] = ""
@@ -223,6 +227,8 @@ def api_wizard_certificate():
             obj.update({k: v for k, v in spec.items() if k != "id"})
             if not obj.get("name"):
                 raise ValueError("a name is required for the new %s" % kind[:-1])
+            if kind == "challenges":
+                acme.check_challenge(obj)
             obj["id"] = str(uuid.uuid4())
             obj["name"] = wizard._uniq_name({x["name"] for x in ac[kind]}, obj["name"])
             ac[kind].append(obj)
@@ -231,9 +237,12 @@ def api_wizard_certificate():
 
         try:
             account = pick("accounts", body.get("account"),
-                           {"name": "", "email": "", "ca": "letsencrypt", "eab_kid": "", "eab_hmac": ""})
+                           dict({"name": "", "email": "", "ca": "letsencrypt", "server": "",
+                                 "ca_bundle": "", "eab_kid": "", "eab_hmac": ""}, **adcs.FIELDS))
+            acme.check_account(account)
             challenge = pick("challenges", body.get("challenge"),
-                             {"name": "", "method": "http01", "dns_provider": "", "dns_credentials": ""})
+                             {"name": "", "method": "http01", "dns_provider": "", "dns_credentials": "",
+                              "challenge_alias": ""})
         except ValueError as e:
             return jsonify({"ok": False, "error": str(e)}), 400
 
@@ -244,6 +253,14 @@ def api_wizard_certificate():
         if wildcards and challenge.get("method") != "dns01":
             warns.append("%s is a wildcard, and wildcards can only be validated with DNS-01. "
                          "Pick or create a DNS-01 challenge type." % wildcards[0])
+        aliases = []
+        if challenge.get("method") == "dns01":
+            # Aliases given one per domain are paired with the names by
+            # position, so a count that does not fit can never issue.
+            try:
+                aliases = acme.check_alias_count(challenge, domains)
+            except ValueError as e:
+                return jsonify({"ok": False, "error": str(e)}), 400
         if challenge.get("method") == "dns01" and not challenge.get("dns_provider"):
             warns.append("The DNS-01 challenge type has no DNS API hook set, so acme.sh cannot "
                          "create the validation record.")
@@ -258,6 +275,10 @@ def api_wizard_certificate():
             warns.append("An uploaded certificate already covers these names. This one is "
                          "issued beside it; delete the uploaded one once this is in use.")
         if existing:
+            if len(aliases) > 1:
+                # The same names in another order: the aliases follow the
+                # order just typed, so the certificate has to as well.
+                existing["domains"] = " ".join(domains)
             existing.update({"account": account["id"], "challenge": challenge["id"],
                              "key_type": body.get("key_type") or existing.get("key_type", "ec-256"),
                              "auto_renew": bool(body.get("auto_renew", True))})

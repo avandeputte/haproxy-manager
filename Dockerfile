@@ -16,6 +16,9 @@ FROM debian:trixie-slim
 # suite, for amd64 and arm64, and publishes each point release as it comes.
 ARG HAPROXY_BRANCH=3.4
 ARG ACME_VERSION=3.1.6
+# acme2certifier, for certificates from Active Directory Certificate Services
+# (ham/adcs.py pins the same release for nodes that install it on demand).
+ARG A2C_VERSION=0.46.4
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -62,6 +65,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         procps \
         supervisor \
         tzdata \
+    # acme2certifier: an ACME server in front of a CA that does not speak
+    # ACME, run by the app on localhost while a certificate is requested from
+    # Active Directory Certificate Services. Its .deb comes from its GitHub
+    # release, as acme.sh's tarball does; its dependencies are Debian's own,
+    # Impacket included, which MS-ICPR enrolls through. Impacket's package
+    # also carries example scripts (secretsdump and the like) that scanners
+    # flag and enrollment never uses: left out, as its own documentation
+    # recommends.
+    && printf 'path-exclude /usr/bin/impacket-*\npath-exclude /usr/share/doc/python3-impacket/*\n' \
+        > /etc/dpkg/dpkg.cfg.d/zz-impacket \
+    && curl -fsSL "https://github.com/grindsa/acme2certifier/releases/download/${A2C_VERSION}/acme2certifier_${A2C_VERSION}-1_all.deb" \
+        -o /tmp/acme2certifier.deb \
+    && apt-get install -y --no-install-recommends /tmp/acme2certifier.deb python3-impacket \
+    && rm -f /tmp/acme2certifier.deb \
     && rm -rf /var/lib/apt/lists/* \
     && cp /etc/keepalived/keepalived.config-opts /usr/sbin/keepalived.config-opts
 

@@ -144,6 +144,16 @@ if image_acme and script_acme:
         check(row.group(1) == script_acme.group(1), "the documented acme.sh default is wrong",
               "docs say %s, install.sh uses %s" % (row.group(1), script_acme.group(1)))
 
+# -- the acme2certifier release --------------------------------------------
+# The image carries it (ARG in the Dockerfile); a node installed from a
+# package or install.sh fetches the release ham/adcs.py names. One release.
+image_a2c = re.search(r"^ARG A2C_VERSION=([0-9.]+)$", dockerfile, re.M)
+code_a2c = re.search(r'^A2C_VERSION = "([0-9.]+)"$', (ROOT / "ham" / "adcs.py").read_text(), re.M)
+check(image_a2c is not None and code_a2c is not None, "the acme2certifier pin could not be read")
+if image_a2c and code_a2c:
+    check(image_a2c.group(1) == code_a2c.group(1), "the image and ham/adcs.py pin different acme2certifier releases",
+          "Dockerfile %s, adcs.py %s" % (image_a2c.group(1), code_a2c.group(1)))
+
 # -- recipes ---------------------------------------------------------------
 # Every recipe should be listed in the documentation, and every one should come
 # with example servers -- the shape of the answer is half of what they are for.

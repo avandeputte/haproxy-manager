@@ -50,7 +50,7 @@ PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 REDACTED = "[redacted]"
 # Values an assistant has no use for and should never be sent: whatever it is
 # shown leaves this machine for the model's provider.
-SECRET_KEY_RE = re.compile(r"(passw|(^|_)pass$|secret|token|credential|private|salt|hash$|hmac|(^|_)key$|totp)", re.I)
+SECRET_KEY_RE = re.compile(r"(passw|(^|_)pass$|secret|token|credential|private|salt|hash$|hmac|(^|_)key$|(^|_)extra$|totp)", re.I)
 # Secrets that sit inside text rather than under a key: the rendered
 # haproxy.cfg carries the key that signs single sign-on cookies and the
 # password hashes of the users HAProxy checks, and a preview or a dry run

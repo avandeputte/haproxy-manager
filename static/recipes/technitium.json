@@ -1,0 +1,20 @@
+{
+  "name": "Technitium DNS",
+  "category": "Infrastructure",
+  "summary": "HTTP 5380 for the web console.",
+  "notes": "The administration console only; DNS queries on port 53 do not come through here. Tell the server which address this node has under its reverse proxy settings, or every sign-in is logged as coming from here.",
+  "fields": {
+    "url": "https://dns.example.com",
+    "target": "10.0.0.10:5380",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "timeout_server": "30m",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  }
+}

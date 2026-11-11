@@ -1,0 +1,20 @@
+{
+  "name": "code-server",
+  "category": "Applications",
+  "summary": "HTTP 8080 checked with /healthz, with the editor's WebSockets kept open.",
+  "notes": "The editor and its terminals run over WebSockets that last as long as the tab is open. /healthz answers without signing in; the status it reports, alive or expired, says whether anyone has been active and not whether the server is well, so only the status code is checked. code-server listens on 127.0.0.1 until bind-addr says otherwise.",
+  "fields": {
+    "url": "https://code.example.com",
+    "target": "10.0.0.10:8080",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/healthz",
+    "health_status": "200",
+    "health_interval": "10s",
+    "timeout_server": "4h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  }
+}

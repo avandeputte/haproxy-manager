@@ -1,0 +1,20 @@
+{
+  "name": "Zulip",
+  "category": "Applications",
+  "summary": "HTTPS 443 re-encrypted to Zulip and checked with /health.",
+  "notes": "A Zulip server answers on 443 with its own certificate, which is not verified here. List this node under [loadbalancer] ips in /etc/zulip/zulip.conf: that is what makes Zulip believe the forwarded address, and it is also the only way /health (Zulip 8.0 and later) answers anything but localhost. Zulip delivers messages by long polling, so the timeout has to stay well above a minute; its documentation uses twenty.",
+  "fields": {
+    "url": "https://chat.example.com",
+    "target": "zulip1=https://10.0.0.10:443",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/health",
+    "health_status": "200",
+    "health_interval": "10s",
+    "timeout_server": "20m",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  }
+}

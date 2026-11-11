@@ -1,0 +1,20 @@
+{
+  "name": "ONLYOFFICE Docs",
+  "category": "Applications",
+  "summary": "HTTP 80 with the editing WebSocket kept open.",
+  "notes": "The document server works out its own address from X-Forwarded-Proto and X-Forwarded-Host, which this node sends. /healthcheck answers 200 with true or false in the body, so the check proves the server is answering rather than that its database and queue are well. Editing runs over a WebSocket for as long as a document is open.",
+  "fields": {
+    "url": "https://docs.example.com",
+    "target": "10.0.0.10:80",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/healthcheck",
+    "health_status": "200",
+    "health_interval": "10s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  }
+}

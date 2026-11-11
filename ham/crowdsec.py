@@ -21,7 +21,6 @@ import os
 import re
 import secrets
 import shutil
-import signal
 import subprocess
 import tempfile
 import time
@@ -29,7 +28,7 @@ import time
 from .base import (CROWDSEC_BIN, CROWDSEC_BOUNCER_CFG, CROWDSEC_HTML, CROWDSEC_SPOE, DATA_DIR,
                    _lock, _requests, app, log)
 from .config import DEFAULT_CONFIG, load_config, save_config
-from .util import run
+from .util import run, run_script
 from . import access, errorpages
 
 UNIT = "crowdsec-spoa-bouncer"
@@ -506,25 +505,6 @@ systemctl disable --now crowdsec-spoa-bouncer >/dev/null 2>&1 || true
 """ % {"key": REPO_KEY_URL, "fpr": REPO_KEY_FPR}
 
 
-def _run_script(script, timeout):
-    """Run a shell script in its own process group, and on timeout kill the
-    group -- the shell alone dying would leave apt or dnf running, mid-transaction."""
-    env = dict(os.environ)
-    env.pop("NOTIFY_SOCKET", None)
-    p = subprocess.Popen(["sh", "-c", script], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                         text=True, env=env, start_new_session=True)
-    try:
-        out, _ = p.communicate(timeout=timeout)
-        return p.returncode, out or ""
-    except subprocess.TimeoutExpired:
-        try:
-            os.killpg(p.pid, signal.SIGTERM)
-        except OSError:
-            pass
-        out, _ = p.communicate()
-        return 124, (out or "") + "\n[stopped after %ds]" % timeout
-
-
 def install():
     """Put the bouncer on this node from CrowdSec's repository: (ok, output)."""
     if installed():
@@ -536,7 +516,7 @@ def install():
     else:
         return False, ("this node has neither apt-get nor dnf; install crowdsec-haproxy-spoa-bouncer "
                        "from CrowdSec's repository by hand")
-    rc, out = _run_script(script, timeout=900)
+    rc, out = run_script(script, timeout=900)
     if rc != 0 or not installed():
         return False, "the install did not finish:\n" + (out or "").strip()[-1500:]
     return True, "installed; it starts when CrowdSec is on and Apply runs"

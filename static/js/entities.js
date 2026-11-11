@@ -1,7 +1,7 @@
-import { $, HEALTH_LABEL, PROXY_KEYWORD, PROXY_OPTIONS, api, btn, closeDlg, esc, fieldRow, list, lists, nameOf, openDlg, readForm, showText, trimHaproxy } from "./core.js";
+import { $, ADCS_FIELDS, CA_CHOICES, HEALTH_LABEL, PROXY_KEYWORD, PROXY_OPTIONS, api, btn, closeDlg, esc, fieldRow, list, lists, nameOf, openDlg, readForm, showText, trimHaproxy } from "./core.js";
 import { t } from "./i18n.js";
 import { refreshStatus, route } from "./shell.js";
-import { certificateNotices, certExpiryCell, certLastCell, certStatusCell, dnsApiByHook, dnsApiOptions, dnsCredentialHelp, issueCert, loadAcmeHealth, loadCertStatus, loadDnsApis, openCertWizard, openDownload, openUpload, showCertLog } from "./pages/certificates.js";
+import { caRows, certificateNotices, certExpiryCell, certLastCell, certStatusCell, dnsApiByHook, dnsApiOptions, dnsCredentialHelp, issueCert, loadAcmeHealth, loadCertStatus, loadDnsApis, openCertWizard, openDownload, openUpload, showCertLog } from "./pages/certificates.js";
 import { ACTION_LABEL, COND_LABEL, openRuleWizard } from "./pages/rules.js";
 import { openConditionWizard } from "./pages/conditions.js";
 import { state } from "./state.js";
@@ -255,12 +255,20 @@ export const E={
 
  "acme/accounts":{title:"ACME Accounts",one:"ACME Account",add:"Add account",
   intro:"ACME accounts used to request certificates.",
-  cols:[["name","Name"],["email","E-mail"],["ca","CA"]],
+  cols:[["name","Name"],["email","E-mail"],
+        ["ca","CA",r=>r.ca==="custom"?"custom<div class=sub>"+esc(r.server||"")+"</div>"
+          :r.ca==="adcs"?t("Active Directory")+"<div class=sub>"+esc(r.adcs_host||"")+(r.adcs_template?" &middot; "+esc(r.adcs_template):"")+"</div>"
+          :r.ca==="buypass"?"buypass<div class=sub>"+t("Buypass stopped issuing on 31 October 2025: choose another CA")+"</div>"
+          :esc(r.ca||"letsencrypt")]],
+  editorExtra:frm=>caRows(frm),
   fields:[
    {k:"name",l:"Name",t:"text"},
    {k:"email",l:"E-mail address",t:"text"},
-   {k:"ca",l:"Certificate authority",t:"select",o:["letsencrypt","letsencrypt_test","zerossl","buypass","google"],d:"letsencrypt",h:"Use letsencrypt_test while setting things up to avoid rate limits"},
-   {k:"eab_kid",l:"EAB key ID",t:"text",h:"Only for ZeroSSL / Google"},
+   {k:"ca",l:"Certificate authority",t:"select",o:CA_CHOICES,d:"letsencrypt",h:"Use letsencrypt_test while setting things up to avoid rate limits"},
+   {k:"server",l:"ACME directory URL",t:"text",h:"Your own ACME server's directory, such as https://ca.example.lan/directory -- for example acme2certifier in front of Active Directory Certificate Services, step-ca or Vault"},
+   {k:"ca_bundle",l:"CA certificate to trust",t:"textarea",h:"Optional. The PEM certificate of the CA that signed the ACME server's own HTTPS certificate, if this node does not trust it already"},
+   ...ADCS_FIELDS,
+   {k:"eab_kid",l:"EAB key ID",t:"text",h:"Google, SSL.com and Actalis need one, from your account with them, and so may your own CA. ZeroSSL gets its own from the e-mail address."},
    {k:"eab_hmac",l:"EAB HMAC key",t:"password"}]},
 
  "acme/challenges":{title:"Challenge Types",one:"Challenge Type",add:"Add challenge type",
@@ -276,7 +284,9 @@ export const E={
    {k:"dns_provider",l:"DNS API hook",t:"combo",o:()=>dnsApiOptions,
     h:"Pick the provider acme.sh should talk to. The list comes from the acme.sh installed on this node."},
    {k:"dns_credentials",l:"DNS API credentials",t:"textarea",
-    h:"One KEY=value per line. Choosing a hook above fills in the names it needs."}]},
+    h:"One KEY=value per line. Choosing a hook above fills in the names it needs."},
+   {k:"challenge_alias",l:"Challenge alias domain",t:"text",
+    h:"Optional, e.g. alias.example.net. For DNS alias mode: the _acme-challenge name of each domain is a CNAME to _acme-challenge.alias.example.net, and the validation record is created there instead. One name for every domain on the certificate, or one per domain in order, separated by spaces."}]},
 
  "acme/certificates":{title:"Certificates",one:"Certificate",add:"Add certificate",
   intro:"Certificates are issued with acme.sh and written as combined PEMs to the HAProxy certificate directory. HAProxy is reloaded and the certificate is pushed to the other nodes automatically. "+

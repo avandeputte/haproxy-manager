@@ -1,0 +1,17 @@
+{
+  "name": "Oracle Database",
+  "category": "Databases",
+  "summary": "TCP 1521 to the listener of a single instance.",
+  "notes": "This works when the listener hands the connection to a server process itself. A listener that answers with a redirect instead -- a RAC SCAN listener, or dispatchers on another host -- sends the client straight to the address it names, past this service; point those clients at the SCAN name directly.",
+  "fields": {
+    "url": "tcp://0.0.0.0:1521",
+    "target": "10.0.0.1:1521",
+    "balance": "roundrobin",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "tcp",
+    "health_interval": "5s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s"
+  }
+}
