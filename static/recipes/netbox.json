@@ -1,0 +1,20 @@
+{
+  "name": "NetBox",
+  "category": "Applications",
+  "summary": "HTTP 8000 checked against the login page.",
+  "notes": "The port is the one netbox-docker's example publishes; a native install has nginx in front of the application, so point at that nginx. /login/ answers without signing in, while /api/status/ does not unless LOGIN_REQUIRED is off. NetBox refuses forms posted under a name it does not know: list the public address, with https://, in CSRF_TRUSTED_ORIGINS.",
+  "fields": {
+    "url": "https://netbox.example.com",
+    "target": "10.0.0.10:8000",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/login/",
+    "health_status": "",
+    "health_interval": "10s",
+    "timeout_server": "5m",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  }
+}

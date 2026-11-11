@@ -1,0 +1,20 @@
+{
+  "name": "Apache Superset",
+  "category": "Applications",
+  "summary": "HTTP 8088 checked with /health.",
+  "notes": "/health answers OK whenever the web server is running. Set ENABLE_PROXY_FIX = True in superset_config.py so Superset believes the forwarded headers and builds https:// links. A slow chart holds its request open until the database answers, hence the timeout.",
+  "fields": {
+    "url": "https://superset.example.com",
+    "target": "10.0.0.10:8088",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/health",
+    "health_status": "200",
+    "health_interval": "10s",
+    "timeout_server": "10m",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "Wazuh dashboard",
+  "category": "Applications",
+  "summary": "HTTPS 443 re-encrypted to the dashboard and checked on its login page.",
+  "notes": "The dashboard only speaks TLS, with a certificate of its own that is not verified. /app/login is the one page that answers without signing in. Agents do not come this way: they report to the Wazuh server on TCP 1514 and enrol on 1515, which are services of their own.",
+  "fields": {
+    "url": "https://wazuh.example.com",
+    "target": "wazuh1=https://10.0.0.10:443",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/app/login",
+    "health_status": "",
+    "health_interval": "10s",
+    "timeout_server": "30m",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  }
+}

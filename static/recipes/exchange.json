@@ -1,0 +1,20 @@
+{
+  "name": "Microsoft Exchange",
+  "category": "Applications",
+  "summary": "HTTPS 443 re-encrypted to Exchange and checked with its healthcheck.htm.",
+  "notes": "The target is https:// because Exchange serves its client protocols over TLS only. /owa/healthcheck.htm is the probe Exchange provides for load balancers: it answers 200 while that protocol is healthy on the server, and every virtual directory has its own, such as /ews/healthcheck.htm and /mapi/healthcheck.htm. Extended Protection, switched on by the installer since Exchange 2019 CU14, only lets Outlook sign in when the certificate here is the same one Exchange serves, so put one certificate on both. No stickiness is needed since Exchange 2016. Phones hold a request open for many minutes, hence the timeout.",
+  "fields": {
+    "url": "https://mail.example.com",
+    "target": "ex1=https://10.0.0.1:443, ex2=https://10.0.0.2:443",
+    "balance": "leastconn",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/owa/healthcheck.htm",
+    "health_status": "200",
+    "health_interval": "10s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  }
+}

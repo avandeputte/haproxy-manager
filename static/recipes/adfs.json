@@ -1,0 +1,19 @@
+{
+  "name": "AD FS",
+  "category": "Applications",
+  "summary": "TCP 443 passed through and checked with the probe on port 80.",
+  "notes": "Microsoft does not support terminating TLS in front of AD FS, so the connection is passed through untouched and the certificate is the farm's own. The check asks /adfs/probe over plain HTTP on port 80, which AD FS answers with 200 for exactly this purpose -- the firewall on each server has to let this node reach it. Stickiness is left off, as Microsoft advises. Port 443 is taken whole by this service, so it cannot share a listening address with HTTPS services.",
+  "fields": {
+    "url": "tcp://0.0.0.0:443",
+    "target": "adfs1=10.0.0.1:443, adfs2=10.0.0.2:443",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "check_port": "80",
+    "health_uri": "/adfs/probe",
+    "health_status": "200",
+    "health_interval": "5s",
+    "timeout_server": "5m",
+    "timeout_connect": "5s"
+  }
+}

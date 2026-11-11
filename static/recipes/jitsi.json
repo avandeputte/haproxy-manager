@@ -1,0 +1,20 @@
+{
+  "name": "Jitsi Meet",
+  "category": "Applications",
+  "summary": "HTTP 8000 for the web container, with its signalling WebSocket.",
+  "notes": "For docker-jitsi-meet, with DISABLE_HTTPS=1, ENABLE_LETSENCRYPT=0 and PUBLIC_URL set to the address published here. Only the pages and the signalling on /xmpp-websocket come through this service. Sound and video travel over UDP 10000 straight to the video bridge, which has to be reachable from outside on its own. Jitsi does not work under a path, only at the root of a name.",
+  "fields": {
+    "url": "https://meet.example.com",
+    "target": "10.0.0.10:8000",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "",
+    "health_interval": "10s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  }
+}

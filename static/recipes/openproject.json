@@ -1,0 +1,20 @@
+{
+  "name": "OpenProject",
+  "category": "Applications",
+  "summary": "HTTP 8080 checked with its health check.",
+  "notes": "8080 is where the Docker deployments publish OpenProject. /health_checks/default answers once the web workers are running. OpenProject compares each request with the name it was given, so set OPENPROJECT_HOST__NAME to the name published here and leave OPENPROJECT_HTTPS on.",
+  "fields": {
+    "url": "https://projects.example.com",
+    "target": "10.0.0.10:8080",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/health_checks/default",
+    "health_status": "200",
+    "health_interval": "10s",
+    "timeout_server": "10m",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  }
+}

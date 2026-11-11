@@ -1,0 +1,20 @@
+{
+  "name": "Metabase",
+  "category": "Applications",
+  "summary": "HTTP 3000 checked with /api/health.",
+  "notes": "/api/health answers 503 while Metabase is still starting or cannot reach its application database, and 200 once it can serve. A slow question holds its request open until the warehouse answers, hence the timeout.",
+  "fields": {
+    "url": "https://metabase.example.com",
+    "target": "10.0.0.10:3000",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/api/health",
+    "health_status": "200",
+    "health_interval": "10s",
+    "timeout_server": "10m",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  }
+}

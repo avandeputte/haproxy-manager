@@ -1,0 +1,19 @@
+{
+  "name": "Proxmox Mail Gateway",
+  "category": "Infrastructure",
+  "summary": "HTTPS 8006 for administration and the user quarantine.",
+  "notes": "The target is https:// because the interface is always encrypted, with a self-signed certificate that is not verified. Users reach their quarantine on the same port, under /quarantine. The mail itself arrives over SMTP, which is a separate service: see the SMTP relay recipe.",
+  "fields": {
+    "url": "https://pmg.example.com",
+    "target": "pmg1=https://10.0.0.1:8006",
+    "balance": "source",
+    "persistence": "source",
+    "stick_type": "ip",
+    "health": "tcp",
+    "health_interval": "10s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  }
+}

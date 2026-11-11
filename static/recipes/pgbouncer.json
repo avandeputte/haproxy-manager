@@ -1,0 +1,16 @@
+{
+  "name": "PgBouncer",
+  "category": "Databases",
+  "summary": "TCP 6432 across a pool of PgBouncers.",
+  "notes": "A plain connection check: PgBouncer keeps its own watch on the PostgreSQL servers behind it. With more than one PgBouncer a cancel request can arrive at a different one from the query it is meant for; PgBouncer's peering ([peers] and peer_id) is what passes it on.",
+  "fields": {
+    "url": "tcp://0.0.0.0:6432",
+    "target": "pgb1=10.0.0.1:6432, pgb2=10.0.0.2:6432",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "tcp",
+    "health_interval": "5s",
+    "timeout_server": "30m",
+    "timeout_connect": "5s"
+  }
+}

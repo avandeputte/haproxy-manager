@@ -1,0 +1,19 @@
+{
+  "name": "NATS",
+  "category": "Infrastructure",
+  "summary": "TCP 4222 with the check aimed at the monitoring port.",
+  "notes": "Clients use 4222 while the check asks /healthz on the monitoring port, 8222, which is off until http_port is set or the server is started with -m 8222. A NATS server tells its clients the addresses of the rest of the cluster and they connect to those directly from then on; set no_advertise, or client_advertise to the address published here, to keep them coming through this service.",
+  "fields": {
+    "url": "tcp://0.0.0.0:4222",
+    "target": "nats1=10.0.0.1:4222, nats2=10.0.0.2:4222, nats3=10.0.0.3:4222",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "check_port": "8222",
+    "health_uri": "/healthz",
+    "health_status": "200",
+    "health_interval": "5s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s"
+  }
+}

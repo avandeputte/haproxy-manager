@@ -1,0 +1,20 @@
+{
+  "name": "Collabora Online",
+  "category": "Applications",
+  "summary": "HTTP 9980 with the editing WebSocket kept open.",
+  "notes": "Collabora has to be started with ssl.enable=false and ssl.termination=true to answer plain HTTP and still hand out https:// addresses; without them the target is https://. / answers a bare OK, which makes the check. A document is edited over one WebSocket for as long as it is open. With more than one server every request for a document has to reach the same one, which Collabora's documentation does by hashing the WOPISrc parameter (balance url_param WOPISrc check_post) -- a custom line on the backend pool, not something stickiness by address gets right.",
+  "fields": {
+    "url": "https://office.example.com",
+    "target": "10.0.0.10:9980",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/",
+    "health_status": "200",
+    "health_interval": "5s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  }
+}

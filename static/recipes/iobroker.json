@@ -1,0 +1,18 @@
+{
+  "name": "ioBroker",
+  "category": "Applications",
+  "summary": "HTTP 8081 for the admin interface, with its WebSocket kept open.",
+  "notes": "The admin interface does all its work over a WebSocket. Visualisations are served by the web adapter on 8082, which is a service of its own. ioBroker has no address to check without signing in, so the check is a connection.",
+  "fields": {
+    "url": "https://iobroker.example.com",
+    "target": "10.0.0.10:8081",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "tcp",
+    "health_interval": "10s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  }
+}

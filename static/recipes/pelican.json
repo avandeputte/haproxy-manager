@@ -1,0 +1,20 @@
+{
+  "name": "Pelican Panel",
+  "category": "Applications",
+  "summary": "HTTP 80 for the panel, checked with /up.",
+  "notes": "The panel only. Add this node to the trusted proxies on the panel's Settings page -- without it file uploads fail -- and set APP_URL to the address published here. Each Wings node is a service of its own on 8080, with a WebSocket for the console; SFTP on 2022 is not HTTP.",
+  "fields": {
+    "url": "https://panel.example.com",
+    "target": "10.0.0.10:80",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/up",
+    "health_status": "200",
+    "health_interval": "10s",
+    "timeout_server": "10m",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  }
+}

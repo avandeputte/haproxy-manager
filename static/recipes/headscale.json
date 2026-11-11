@@ -1,0 +1,20 @@
+{
+  "name": "Headscale",
+  "category": "Infrastructure",
+  "summary": "HTTP 8080 checked with /health, with the control connection kept open.",
+  "notes": "Every Tailscale client holds one connection open to the control server, started as an HTTP upgrade, so the timeout is long. Headscale has to be told its public address (server_url, with https://) and to trust this node (trusted_proxies), and it listens on 127.0.0.1 until listen_addr says otherwise. With the embedded relay in use, its STUN on UDP 3478 cannot pass through here and has to be reachable directly.",
+  "fields": {
+    "url": "https://headscale.example.com",
+    "target": "10.0.0.10:8080",
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "http",
+    "health_uri": "/health",
+    "health_status": "200",
+    "health_interval": "5s",
+    "timeout_server": "1h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  }
+}
