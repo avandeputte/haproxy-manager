@@ -58,7 +58,7 @@ export async function renderCrowdsec(){
    {k:"contact_url",l:"Contact URL on the ban page",t:"text",h:"Optional. A page a wrongly banned visitor can reach you through -- a form rather than a mailto:, which crawlers harvest."},
    {k:"skip_lists",l:"Never ask about",t:"refmulti",ref:"haproxy/addresslists",describe:describeList,h:"Address lists CrowdSec is not consulted for -- the LAN, typically. Everyone else is."},
    {k:"appsec_url",l:"AppSec URL",t:"text",
-    h:"Optional: CrowdSec's WAF. The bouncer sends each request to this AppSec listener on the CrowdSec host, e.g. http://192.168.1.5:7422/, and a request one of its rules matches gets the ban page. It must listen on an address this node can reach, not 127.0.0.1. Empty: not used."},
+    h:"Optional. AppSec is CrowdSec's WAF. It is part of CrowdSec and runs on your CrowdSec host, so nothing more is installed on this node -- but it has to be set up there first: install its rule collections and add an AppSec listener on an address this node can reach, not 127.0.0.1. The guide's CrowdSec page has both steps. Then enter the listener's URL here, e.g. http://192.168.1.5:7422/. The bouncer sends it each request, and a request one of its rules matches gets the ban page. Empty: not used."},
    {k:"appsec_reject_large",l:"Refuse bodies too large to inspect",t:"bool",
     h:"With AppSec only. It reads a request body up to about 50 kB; a larger one passes with its body unread. Ticked, such a request is answered 413 instead -- and so is every upload over that size."},
    {k:"enabled",l:"Enable CrowdSec",t:"bool",h:"HAProxy asks the bouncer about every HTTP request, on every node. Test the connection first; takes effect at the next Apply."},
