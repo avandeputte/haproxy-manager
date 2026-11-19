@@ -599,6 +599,9 @@ mkdir -p /etc/apt/keyrings
 curl -fsSL --max-time 60 %(key)s | gpg --dearmor --yes -o /etc/apt/keyrings/crowdsec.gpg
 gpg --show-keys --with-colons /etc/apt/keyrings/crowdsec.gpg | grep -q '^fpr:::::::::%(fpr)s:' || { echo "CrowdSec's key does not match the expected fingerprint"; rm -f /etc/apt/keyrings/crowdsec.gpg; exit 1; }
 printf '%%s' '%(line)s' > /etc/apt/sources.list.d/crowdsec.list
+# a minimised system drops /usr/share/doc, and the bouncer's post-install copies
+# a file from there; without it the package stays half-configured
+[ -d /etc/dpkg/dpkg.cfg.d ] && echo "path-include /usr/share/doc/crowdsec-haproxy-spoa-bouncer/*" > /etc/dpkg/dpkg.cfg.d/zz-crowdsec
 apt-get -o DPkg::Lock::Timeout=120 -o Acquire::http::Timeout=30 -o Acquire::Retries=2 update -q
 apt-get -o DPkg::Lock::Timeout=120 -o Acquire::http::Timeout=30 -o Acquire::Retries=2 install -y --no-install-recommends crowdsec-haproxy-spoa-bouncer
 systemctl disable --now crowdsec-spoa-bouncer >/dev/null 2>&1 || true
