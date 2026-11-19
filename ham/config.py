@@ -109,6 +109,10 @@ DEFAULT_CONFIG = {
         "captcha_signing_key": "",   # generated once; the same on every node
         "contact_url": "",           # shown on the ban page, when set
         "skip_lists": [],            # address lists never asked about: the LAN
+        # AppSec, CrowdSec's WAF: where the bouncer sends each request to be
+        # inspected, e.g. http://192.168.1.5:7422/. Empty: not used.
+        "appsec_url": "",
+        "appsec_reject_large": False,   # 413 for a body too large to inspect
     },
     # Cluster-wide VRRP settings: identical on every node, so they sync.
     "cluster": {

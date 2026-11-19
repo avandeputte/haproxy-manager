@@ -25,9 +25,13 @@ case "$action" in
     is-active)
         # The bouncer runs through a loop that keeps trying while the LAPI is
         # unreachable, so supervisor's RUNNING says the loop lives, not the
-        # bouncer. Ask for the bouncer itself.
+        # bouncer. Ask for the bouncer itself -- by its command line: a
+        # process name is cut at 15 characters, and this one is longer, so
+        # asking by name (pgrep -x) never found it and a running bouncer was
+        # reported as failed. Apply then "started" what was already running
+        # instead of restarting it, and a changed configuration was not read.
         if [ "$unit" = "crowdsec-spoa-bouncer" ] && [ "$(state "$unit")" = "RUNNING" ]; then
-            if pgrep -x crowdsec-spoa-bouncer >/dev/null 2>&1; then
+            if pgrep -f '^/usr/bin/crowdsec-spoa-bouncer ' >/dev/null 2>&1; then
                 echo active; exit 0
             else
                 echo failed; exit 3

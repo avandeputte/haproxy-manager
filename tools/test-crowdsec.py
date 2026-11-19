@@ -189,6 +189,94 @@ ok("tune.bufsize 65536" in text and "lf-file %s/captcha.html if cs_captcha" % CR
 s = client.get("/api/crowdsec/settings", headers=H).get_json()
 ok(s["has_captcha_secret"] and "captcha_secret_key" not in s and "captcha_signing_key" not in s, "the captcha secrets are never read back")
 
+# ---- AppSec: the request travels too, and only when told where to -------------------------
+put({"mode": "ban"})
+cfg = load_config()
+text = haproxy.render_haproxy(cfg)
+ok("tune.bufsize" not in text and "http-buffer-request" not in text and "req.body" not in text
+   and "appsec" not in crowdsec.bouncer_yaml(cfg) and crowdsec.spoe_text(cfg) == crowdsec.SPOE
+   and "req.body" not in crowdsec.SPOE,
+   "without an AppSec URL nothing is buffered, no body is sent and the bouncer is told nothing of it")
+put({"appsec_url": "192.168.1.5:7422"}, want=400)
+put({"appsec_url": "http://192.168.1.5:7422"})
+cfg = load_config()
+ok(crowdsec.appsec_on(cfg) and client.get("/api/crowdsec/settings", headers=H).get_json()["status"]["appsec"] is True,
+   "an AppSec URL is all it takes, and the status says so")
+ok('appsec_url: "http://192.168.1.5:7422/"' in crowdsec.bouncer_yaml(cfg), "the bouncer is told where AppSec listens")
+written = crowdsec.write_files(cfg)
+spoe = CROWDSEC_SPOE.read_text()
+ok(sorted(written) == ["crowdsec-spoa-bouncer.yaml", "crowdsec.cfg"], "both files are written again, so the bouncer restarts")
+ok("groups      crowdsec-http-body crowdsec-http-no-body" in spoe and "body=req.body" in spoe
+   and spoe.count("spoe-message") == 3 and spoe.count("spoe-group") == 2,
+   "the SPOE engine gains the message that carries the body, and keeps the one that does not")
+text = haproxy.render_haproxy(cfg)
+fe = text[text.index("frontend fe_http-80"):text.index("\n\n", text.index("frontend fe_http-80"))]
+ok("option http-buffer-request" in fe and "acl cs_body_fits req.body_size -m int le 51200" in fe,
+   "an HTTP listener waits for the body and knows which ones fit a frame")
+ok("send-spoe-group crowdsec crowdsec-http-body if !cs_trusted cs_body_fits || !cs_trusted !{ req.body_size -m found }\n" in fe
+   and "send-spoe-group crowdsec crowdsec-http-no-body if !cs_trusted !cs_body_fits { req.body_size -m found }\n" in fe,
+   "a body that fits goes with the question, a larger one stays behind, and the trusted are asked neither")
+ok(fe.count("send-spoe-group") == 2 and "status 413" not in fe, "nothing is refused for its size unless asked")
+ok("tune.bufsize 65536" in text, "the buffer is the size a frame with a body needs")
+tcp = text[text.index("frontend fe_tcp-5432"):]
+ok("http-buffer-request" not in tcp[:tcp.index("\n\n")], "a TCP listener is still left alone")
+put({"appsec_reject_large": True})
+fe = haproxy.render_haproxy(load_config())
+fe = fe[fe.index("frontend fe_http-80"):]
+ok('http-request return status 413 content-type text/plain string "Request body too large to inspect\\n" '
+   'if !cs_trusted { req.body_size -m found } !cs_body_fits\n' in fe
+   and fe.index("status 413") < fe.index("send-spoe-group"),
+   "asked for, a body AppSec cannot read is refused with 413 before anything else -- but not from the trusted")
+put({"skip_lists": []})
+fe = haproxy.render_haproxy(load_config())
+ok("cs_trusted" not in fe and "crowdsec-http-body if cs_body_fits || !{ req.body_size -m found }\n" in fe
+   and "crowdsec-http-no-body if !cs_body_fits { req.body_size -m found }\n" in fe
+   and "if { req.body_size -m found } !cs_body_fits\n" in fe, "with nobody trusted, the same without the exception")
+
+
+class FakeRequests:
+    """Stands in for the AppSec listener: says what it was asked, answers as told."""
+    def __init__(self):
+        self.calls, self.status = [], 200
+
+    def get(self, url, **kw):
+        self.calls.append((url, kw))
+        return type("R", (), {"status_code": self.status})()
+
+
+real_requests, fake = crowdsec._requests, FakeRequests()
+crowdsec._requests = fake
+post = lambda body: client.post("/api/crowdsec/test-appsec", headers=H, json=body).get_json()   # noqa: E731
+r = post({})
+url, kw = fake.calls[-1]
+ok(r["ok"] is True and url == "http://192.168.1.5:7422/" and kw["headers"]["X-Crowdsec-Appsec-Api-Key"] == "abc123"
+   and kw["headers"]["X-Crowdsec-Appsec-Uri"] == "/" and kw["headers"]["X-Crowdsec-Appsec-Verb"] == "GET"
+   and kw.get("verify", True) is True,
+   "the AppSec test asks the stored address the way the bouncer does, with the stored key")
+r = post({"appsec_url": "http://192.168.1.5:9999/"})
+ok(r["ok"] is True and fake.calls[-1][0] == "http://192.168.1.5:9999/", "another port on the LAPI's own host may have the stored key")
+n = len(fake.calls)
+r = post({"appsec_url": "http://203.0.113.9:7422/"})
+ok(r["ok"] is False and "needed first" in r["message"] and len(fake.calls) == n, "any other host is not sent the stored key")
+r = post({"appsec_url": "http://203.0.113.9:7422/", "api_key": "typed"})
+ok(r["ok"] is True and fake.calls[-1][1]["headers"]["X-Crowdsec-Appsec-Api-Key"] == "typed", "but is asked with a key typed for it")
+r = post({"appsec_url": "203.0.113.9:7422", "api_key": "typed"})
+ok(r["ok"] is False and "must start with" in r["message"], "an address without a scheme is not asked at all")
+fake.status = 401
+r = post({})
+ok(r["ok"] is False and "refused the API key" in r["message"], "a key AppSec refuses is reported as that")
+fake.status = 403
+ok(post({})["ok"] is True, "AppSec blocking the test request is still AppSec answering")
+fake.status = 500
+ok(post({})["ok"] is False, "anything else is reported as it came")
+crowdsec._requests = real_requests
+r = post({"appsec_url": "http://127.0.0.1:1", "api_key": "x"})
+ok(r["ok"] is False and "did not answer" in r["message"], "an AppSec that is not there is reported as such")
+put({"appsec_url": ""})
+r = post({})
+ok(r["ok"] is False and "needed first" in r["message"] and not crowdsec.appsec_on(load_config()), "emptied, AppSec is off again")
+put({"appsec_url": "http://192.168.1.5:7422/", "skip_lists": [lst["id"]], "mode": "captcha"})
+
 # ---- the install: only when wanted, only when missing, not again and again ---------------
 bouncer_present(False)
 installs.clear()
@@ -234,7 +322,8 @@ ok(r["ok"] is False and "did not answer" in r["message"], "a LAPI that is not th
 # ---- off again ---------------------------------------------------------------------------
 put({"enabled": False})
 text = haproxy.render_haproxy(load_config())
-ok("spoe" not in text and "crowdsec" not in text, "off again: no trace in the file")
+ok("spoe" not in text and "crowdsec" not in text and "http-buffer-request" not in text and "bufsize" not in text,
+   "off again: no trace in the file, AppSec URL or not")
 bouncer_present(False)
 step, warning = crowdsec.ensure_service(load_config())
 ok(step == "" and warning == "", "and nothing to stop on a node without the bouncer")
@@ -245,13 +334,15 @@ put({"enabled": True})
 apply._selfsigned_placeholder(CERT_DIR / "stand-in.pem", ["stand-in"])
 crowdsec.write_files(load_config())
 text = haproxy.render_haproxy(load_config())
+ok("crowdsec-http-body" in text and "status 413" in text and "captcha.html" in text and "cs_trusted" in text,
+   "what is checked next has all of it: AppSec, the size limit, the captcha and a trusted list")
 fd, path = tempfile.mkstemp(suffix=".cfg")
 with os.fdopen(fd, "w") as f:
     f.write(text)
 try:
     r = subprocess.run(["haproxy", "-c", "-f", path], capture_output=True, text=True, timeout=30)
     if r.returncode == 0:
-        ok(True, "haproxy -c accepts the configuration with the SPOE engine")
+        ok(True, "haproxy -c accepts the configuration with the SPOE engine, the captcha and AppSec")
     else:
         ok(False, "haproxy -c: " + (r.stderr or r.stdout).strip()[-400:])
 except FileNotFoundError:

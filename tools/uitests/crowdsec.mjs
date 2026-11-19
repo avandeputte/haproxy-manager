@@ -24,6 +24,7 @@ globalThis.localStorage = { getItem: () => null, setItem(){}, removeItem(){} };
 globalThis.setTimeout = () => 0;
 
 let settings = { enabled: false, api_url: "", has_api_key: false, mode: "ban", captcha_provider: "", skip_lists: [],
+                 appsec_url: "", appsec_reject_large: false,
                  status: { installed: false, version: "", service: "missing", active: false } };
 let sent = null, lastPath = null;
 globalThis.fetch = async (u, o) => {
@@ -35,6 +36,7 @@ globalThis.fetch = async (u, o) => {
     "haproxy/addresslists": [{ id: "l1", name: "lan" }],
     "crowdsec/install": { ok: true, message: "installed", status: { installed: true, version: "0.4.0", service: "inactive" } },
     "crowdsec/test": { ok: false, message: "the LAPI did not answer" },
+    "crowdsec/test-appsec": { ok: true, message: "AppSec answers and accepts the key" },
     status: { dirty: false, crowdsec: { on: true, bouncer: "active" }, vips: [], vip_held: [], haproxy: "active", keepalived: "disabled" },
   };
   return { ok: true, status: 200, json: async () => bodies[path] ?? {}, text: async () => "" };
@@ -59,6 +61,10 @@ const skip = $("#f_skip_lists");
 ok(!!skip && [...skip.querySelectorAll("input")].length === 1, "the address lists to never ask about");
 const cell = id => $(id).parentNode;
 ok(cell("#f_captcha_provider").style.display === "none", "captcha rows are hidden in ban mode");
+ok(!!$("#f_appsec_url") && $("#f_appsec_url").value === "" && $("#f_appsec_reject_large").type === "checkbox"
+   && !$("#f_appsec_reject_large").checked, "AppSec: an address, empty until given, and the size limit unticked");
+$("#f_appsec_url").value = "http://192.168.1.5:7422/";
+$("#f_appsec_reject_large").checked = true;
 $("#f_enabled").checked = true;
 $("#f_api_url").value = "http://192.168.1.5:8080/";
 $("#f_api_key").value = "abc";
@@ -68,9 +74,16 @@ await findButton(content, "Save").onclick();
 ok(lastPath === "crowdsec/settings" && sent.enabled === true && sent.api_url === "http://192.168.1.5:8080/"
    && sent.api_key === "abc" && JSON.stringify(sent.skip_lists) === '["l1"]',
    "Save sends the switch, the URL, the key and the lists");
+ok(sent.appsec_url === "http://192.168.1.5:7422/" && sent.appsec_reject_large === true,
+   "and where AppSec listens, with the size limit");
 await findButton(content, "Test the LAPI connection").onclick();
 ok(lastPath === "crowdsec/test" && sent.api_url === "http://192.168.1.5:8080/" && content.textContent.includes("not reachable"),
    "the test asks with what is typed and shows the verdict");
+await findButton(content, "Test the AppSec connection").onclick();
+ok(lastPath === "crowdsec/test-appsec" && sent.appsec_url === "http://192.168.1.5:7422/" && sent.api_key === "abc"
+   && Object.keys(sent).length === 2 && content.textContent.includes("AppSec answers and accepts the key")
+   && content.querySelector(".pill.up") !== null,
+   "the AppSec test asks with the address and key that are typed, nothing else, and shows the verdict");
 await findButton(content, "Install on this node").onclick();
 ok(lastPath === "crowdsec/install" && content.textContent.includes("bouncer 0.4.0 installed"),
    "installing redraws the node's state");
