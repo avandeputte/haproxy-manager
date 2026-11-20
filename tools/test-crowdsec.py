@@ -11,6 +11,7 @@ a node with CrowdSec off renders exactly as before.
 """
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -139,6 +140,9 @@ ok('api_url: "http://192.168.1.5:8080/"' in yml and 'api_key: "abc123"' in yml a
    "the bouncer's YAML is whole: URL with its slash, the key, a local listener, no placeholders")
 ok("use-backend crowdsec-spoa" in CROWDSEC_SPOE.read_text() and "crowdsec-http-no-body" in CROWDSEC_SPOE.read_text(),
    "the SPOE engine names the backend and the one HTTP message")
+ok(re.search(r"^\s+log\s+global\n\s+option\s+dontlog-normal$", CROWDSEC_SPOE.read_text(), re.M)
+   and "dontlog-normal" in crowdsec.SPOE_APPSEC,
+   "and logs its failures only, not two lines for every request that went well")
 ok(crowdsec.write_files(cfg) == [], "written once; unchanged files are left alone")
 text = haproxy.render_haproxy(cfg)
 fe = text[text.index("frontend fe_http-80"):text.index("\n\n", text.index("frontend fe_http-80"))]
@@ -318,6 +322,29 @@ ok(r["ok"] is False and "needed first" in r["message"], "the stored key is not s
 # ---- the LAPI test ----------------------------------------------------------------------
 r = client.post("/api/crowdsec/test", headers=H, json={"api_url": "http://127.0.0.1:1", "api_key": "x"}).get_json()
 ok(r["ok"] is False and "did not answer" in r["message"], "a LAPI that is not there is reported as such")
+
+crowdsec._requests = fake
+lapi = lambda url: client.post("/api/crowdsec/test", headers=H, json={"api_url": url, "api_key": "x"}).get_json()   # noqa: E731
+fake.status = 404
+r = lapi("http://127.0.0.1:%d" % crowdsec.PORT)
+ok(r["ok"] is False and "own interface" in r["message"] and "listen_uri" in r["message"],
+   "a LAPI URL that leads to this interface is called that, with the way out: %s" % r["message"][:60])
+r = lapi("http://localhost:%d/" % crowdsec.PORT)
+ok(r["ok"] is False and "own interface" in r["message"], "by name as well")
+r = lapi("http://127.0.0.1:%d" % (crowdsec.PORT + 1))
+ok(r["ok"] is False and "own interface" not in r["message"] and "answered 404" in r["message"] and "not a CrowdSec LAPI" in r["message"],
+   "a 404 from anywhere else is something that is not a LAPI")
+r = lapi("http://192.0.2.7:%d" % crowdsec.PORT)
+ok(r["ok"] is False and "own interface" not in r["message"], "the same port on another machine is not this interface")
+fake.status = 500
+r = lapi("http://127.0.0.1:%d" % (crowdsec.PORT + 1))
+ok(r["ok"] is False and r["message"] == "the LAPI answered 500", "any other answer is reported as it came")
+fake.status = 403
+r = lapi("http://127.0.0.1:%d" % crowdsec.PORT)
+ok(r["ok"] is False and "refused the API key" in r["message"], "a refused key is still a refused key")
+fake.status = 200
+ok(lapi("http://127.0.0.1:%d" % crowdsec.PORT)["ok"] is True, "and a LAPI that answers is a LAPI, whatever its port")
+crowdsec._requests = real_requests
 
 # ---- off again ---------------------------------------------------------------------------
 put({"enabled": False})

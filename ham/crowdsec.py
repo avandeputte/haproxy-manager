@@ -23,16 +23,18 @@ the request is judged on its address alone.
 from flask import jsonify
 from flask import request
 import copy
+import ipaddress
 import os
 import re
 import secrets
 import shutil
+import socket
 import subprocess
 import tempfile
 import time
 from urllib.parse import urlsplit
 
-from .base import (CROWDSEC_BIN, CROWDSEC_BOUNCER_CFG, CROWDSEC_HTML, CROWDSEC_SPOE, DATA_DIR,
+from .base import (CROWDSEC_BIN, CROWDSEC_BOUNCER_CFG, CROWDSEC_HTML, CROWDSEC_SPOE, DATA_DIR, PORT,
                    _lock, _requests, app, log)
 from .config import DEFAULT_CONFIG, load_config, save_config
 from .util import run, run_script
@@ -64,7 +66,10 @@ spoe-agent crowdsec-agent
     timeout     idle            55s
     timeout     processing      500ms
     use-backend crowdsec-spoa
+    # Failures only. Without the option HAProxy logs a line for every message
+    # that went well, two for each request, beside the request's own line.
     log         global
+    option      dontlog-normal
 
 # Asked once per connection: the address alone, before any request.
 spoe-message crowdsec-tcp
@@ -506,6 +511,51 @@ def api_crowdsec_settings():
         return jsonify({"ok": True, "status": status(cfg)})
 
 
+def _own_interface(url):
+    """Does this address lead to haproxy-manager's own interface on this node:
+    its port, on the loopback or on one of the node's addresses. CrowdSec's
+    LAPI wants port 8080 by default, and so does this interface, so a LAPI
+    installed on the node is the usual way to end up here."""
+    try:
+        parts = urlsplit(url)
+        host, port = parts.hostname or "", parts.port or (443 if parts.scheme == "https" else 80)
+    except ValueError:
+        return False
+    if not host or port != PORT:
+        return False
+    try:
+        ips = {ai[4][0] for ai in socket.getaddrinfo(host, None)}
+    except (OSError, UnicodeError):
+        return False
+    try:
+        from . import apply
+        own = {a.split("/")[0] for i in apply.node_interfaces() for a in i["addresses"]}
+    except Exception:
+        own = set()
+    for ip in ips:
+        try:
+            if ip in own or ipaddress.ip_address(ip.split("%")[0]).is_loopback:
+                return True
+        except ValueError:
+            pass
+    return False
+
+
+def _not_a_lapi(url, status):
+    """What to say when something answers at the LAPI's address, and it is not the LAPI."""
+    if _own_interface(url):
+        text = "that address is haproxy-manager's own interface on this node, not CrowdSec (it answered %d)." % status
+        if PORT == 8080:
+            text += (" CrowdSec's LAPI wants port 8080 as well, so on this machine it needs another: "
+                     "set listen_uri in /etc/crowdsec/config.yaml and url in "
+                     "/etc/crowdsec/local_api_credentials.yaml to 127.0.0.1:8081, say, restart CrowdSec, "
+                     "and give that port here.")
+        return text
+    if status == 404:
+        return "the LAPI answered 404: something listens at that address, but it is not a CrowdSec LAPI"
+    return "the LAPI answered %d" % status
+
+
 @app.post("/api/crowdsec/test")
 def api_crowdsec_test():
     """Ask the LAPI one question with these credentials, and say what came back."""
@@ -529,7 +579,7 @@ def api_crowdsec_test():
     if r.status_code == 403:
         return jsonify({"ok": False, "message": "the LAPI refused the API key (403)"})
     if r.status_code != 200:
-        return jsonify({"ok": False, "message": "the LAPI answered %d" % r.status_code})
+        return jsonify({"ok": False, "message": _not_a_lapi(url, r.status_code)})
     return jsonify({"ok": True, "message": "the LAPI answers and accepts the key"})
 
 

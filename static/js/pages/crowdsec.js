@@ -46,7 +46,7 @@ export async function renderCrowdsec(){
   bd.appendChild(node);
 
   const FIELDS=[
-   {k:"api_url",l:"LAPI URL",t:"text",h:"Your CrowdSec local API, e.g. http://192.168.1.5:8080/ -- the machine running the CrowdSec agent."},
+   {k:"api_url",l:"LAPI URL",t:"text",h:"Your CrowdSec local API, e.g. http://192.168.1.5:8080/ -- the machine running the CrowdSec agent. With CrowdSec on this machine its LAPI needs a port of its own: it wants 8080 by default, which this interface usually has. The guide's CrowdSec page shows how."},
    {k:"api_key",l:"API key",t:"password",
     h:s.has_api_key?"Leave empty to keep the stored one":"On the CrowdSec host: cscli bouncers add haproxy-manager -- the key it prints. One key serves every node."},
    {k:"insecure_skip_verify",l:"Skip TLS verification",t:"bool",h:"For a LAPI on https:// with a certificate this node does not trust"},
@@ -58,7 +58,7 @@ export async function renderCrowdsec(){
    {k:"contact_url",l:"Contact URL on the ban page",t:"text",h:"Optional. A page a wrongly banned visitor can reach you through -- a form rather than a mailto:, which crawlers harvest."},
    {k:"skip_lists",l:"Never ask about",t:"refmulti",ref:"haproxy/addresslists",describe:describeList,h:"Address lists CrowdSec is not consulted for -- the LAN, typically. Everyone else is."},
    {k:"appsec_url",l:"AppSec URL",t:"text",
-    h:"Optional. AppSec is CrowdSec's WAF. It is part of CrowdSec and runs on your CrowdSec host, so nothing more is installed on this node -- but it has to be set up there first: install its rule collections and add an AppSec listener on an address this node can reach, not 127.0.0.1. The guide's CrowdSec page has both steps. Then enter the listener's URL here, e.g. http://192.168.1.5:7422/. The bouncer sends it each request, and a request one of its rules matches gets the ban page. Empty: not used."},
+    h:"Optional. AppSec is CrowdSec's WAF. It is part of CrowdSec and runs where CrowdSec runs, so nothing more is installed for it -- but it has to be set up there first: install its rule collections and add an AppSec listener. The guide's CrowdSec page has both steps. Then enter the listener's URL here. With CrowdSec on this machine that is http://127.0.0.1:7422/. With CrowdSec on another machine, the listener has to be on an address this node can reach, not 127.0.0.1, e.g. http://192.168.1.5:7422/. The bouncer sends it each request, and a request one of its rules matches gets the ban page. Empty: not used."},
    {k:"appsec_reject_large",l:"Refuse bodies too large to inspect",t:"bool",
     h:"With AppSec only. It reads a request body up to about 50 kB; a larger one passes with its body unread. Ticked, such a request is answered 413 instead -- and so is every upload over that size."},
    {k:"enabled",l:"Enable CrowdSec",t:"bool",h:"HAProxy asks the bouncer about every HTTP request, on every node. Test the connection first; takes effect at the next Apply."},
