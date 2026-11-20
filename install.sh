@@ -349,6 +349,11 @@ install_crowdsec() {
         return 0
     fi
     printf '%s\n' "$CROWDSEC_LINE" > "$CROWDSEC_LIST"
+    # A minimised system (a slim container image, Ubuntu minimal) tells dpkg to
+    # leave /usr/share/doc out, and the bouncer's post-install copies a file
+    # from there: the package would stay half-configured and fail every later
+    # apt run. Let this one package keep its directory.
+    [ -d /etc/dpkg/dpkg.cfg.d ] && echo "path-include /usr/share/doc/crowdsec-haproxy-spoa-bouncer/*" > /etc/dpkg/dpkg.cfg.d/zz-crowdsec
     apt-get update -q >/dev/null 2>&1 || true
     if apt-get install -y --no-install-recommends crowdsec-haproxy-spoa-bouncer >/dev/null 2>&1; then
         systemctl disable --now crowdsec-spoa-bouncer >/dev/null 2>&1 || true

@@ -273,7 +273,7 @@ def _staged(cfg, text, stage):
             f.write(content)
     spoe = os.path.join(stage, "crowdsec.cfg")
     with open(spoe, "w") as f:
-        f.write(crowdsec.SPOE)
+        f.write(crowdsec.spoe_text(cfg))
     return text.replace(str(ERROR_DIR) + "/", pages + "/").replace(str(CROWDSEC_SPOE), spoe)
 
 

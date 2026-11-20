@@ -57,6 +57,10 @@ export async function renderCrowdsec(){
    {k:"captcha_secret_key",l:"Captcha secret key",t:"password",h:s.has_captcha_secret?"Leave empty to keep the stored one":"From the provider's dashboard"},
    {k:"contact_url",l:"Contact URL on the ban page",t:"text",h:"Optional. A page a wrongly banned visitor can reach you through -- a form rather than a mailto:, which crawlers harvest."},
    {k:"skip_lists",l:"Never ask about",t:"refmulti",ref:"haproxy/addresslists",describe:describeList,h:"Address lists CrowdSec is not consulted for -- the LAN, typically. Everyone else is."},
+   {k:"appsec_url",l:"AppSec URL",t:"text",
+    h:"Optional. AppSec is CrowdSec's WAF. It is part of CrowdSec and runs on your CrowdSec host, so nothing more is installed on this node -- but it has to be set up there first: install its rule collections and add an AppSec listener on an address this node can reach, not 127.0.0.1. The guide's CrowdSec page has both steps. Then enter the listener's URL here, e.g. http://192.168.1.5:7422/. The bouncer sends it each request, and a request one of its rules matches gets the ban page. Empty: not used."},
+   {k:"appsec_reject_large",l:"Refuse bodies too large to inspect",t:"bool",
+    h:"With AppSec only. It reads a request body up to about 50 kB; a larger one passes with its body unread. Ticked, such a request is answered 413 instead -- and so is every upload over that size."},
    {k:"enabled",l:"Enable CrowdSec",t:"bool",h:"HAProxy asks the bouncer about every HTTP request, on every node. Test the connection first; takes effect at the next Apply."},
   ];
   const frm=document.createElement("div");frm.className="frm";
@@ -94,6 +98,16 @@ export async function renderCrowdsec(){
     const d=readForm(FIELDS);
     try{
       const r=await api("crowdsec/test","POST",{api_url:d.api_url,api_key:d.api_key,insecure_skip_verify:d.insecure_skip_verify});
+      msg.innerHTML='<span class="pill '+(r.ok?"up":"down")+'">'+(r.ok?t("reachable"):t("not reachable"))+"</span> "+esc(r.message);
+    }catch(e){msg.textContent=e.message;}
+  }));
+  foot.appendChild(document.createTextNode(" "));
+  /* asked from this node, as the bouncer will: the listener is on another machine */
+  foot.appendChild(btn(t("Test the AppSec connection"),"",async()=>{
+    msg.textContent=t("Asking...");
+    const d=readForm(FIELDS);
+    try{
+      const r=await api("crowdsec/test-appsec","POST",{appsec_url:d.appsec_url,api_key:d.api_key});
       msg.innerHTML='<span class="pill '+(r.ok?"up":"down")+'">'+(r.ok?t("reachable"):t("not reachable"))+"</span> "+esc(r.message);
     }catch(e){msg.textContent=e.message;}
   }));
