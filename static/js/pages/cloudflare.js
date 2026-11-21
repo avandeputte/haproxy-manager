@@ -11,7 +11,7 @@ export async function renderCloudflare(){
   catch(e){c.innerHTML='<div class="card"><div class="bd">'+esc(e.message)+"</div></div>";return;}
 
   const card=document.createElement("div");card.className="card";
-  card.innerHTML='<div class=hd><h2>Cloudflare</h2> <span class="pill warn">'+t("beta")+'</span><div class=sp></div>'+
+  card.innerHTML='<div class=hd><h2>Cloudflare</h2><div class=sp></div>'+
     '<span class="pill '+(s.enabled?"up":"off")+'">'+(s.enabled?t("saved: on"):t("saved: off"))+"</span></div>";
   const bd=document.createElement("div");bd.className="bd";
   bd.innerHTML='<p class=hint style="margin-bottom:14px">'+

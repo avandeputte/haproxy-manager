@@ -57,7 +57,7 @@ const findButton = (root, label) => [...root.querySelectorAll("button")].find(b 
 ok(NAV.some(x => x[0] === "p:cloudflare" && x[1] === "Cloudflare"), "Cloudflare is in the menu, under Access");
 await renderCloudflare();
 const content = $("#content");
-ok(content.textContent.includes("beta"), "the page says it is a beta");
+ok(!content.querySelector(".pill.warn"), "the page carries no beta mark");
 ok(content.textContent.includes("cloudflared not installed") && !!findButton(content, "Install on this node"),
    "a node without cloudflared says so and offers to install it");
 ok(content.textContent.includes("not connected"), "and that no tunnel is connected yet");

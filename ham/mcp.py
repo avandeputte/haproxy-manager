@@ -555,7 +555,7 @@ TOOLS = [
              "auth": {"type": "object", "description": "Ask visitors to sign in: {enabled, "
                       "groups: [group ids], realm, exempt, exempt_lists}"},
              "oauth": {"type": "object", "description": "Single sign-on: {enabled, allow, forward}"},
-             "cloudflare": {"type": "object", "description": "Publish through the Cloudflare Tunnel (beta, "
+             "cloudflare": {"type": "object", "description": "Publish through the Cloudflare Tunnel ("
                             "HTTP services): {enabled, access: public|allow, allow: emails, @domains or * "
                             "one per line, only: refuse what did not come through the tunnel}"},
              "allow_src": {"type": "string", "description": "Only these networks, space-separated"},

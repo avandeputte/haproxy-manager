@@ -118,9 +118,9 @@ export const WIZ_SECTIONS=[
  ]},
  /* Reached through Cloudflare's tunnel instead of -- or as well as -- this
     node's own ports, with Cloudflare Access deciding who gets that far. */
- {title:"Cloudflare (beta)",toggle:"cf_enabled",http:true,fields:[
+ {title:"Cloudflare",toggle:"cf_enabled",http:true,fields:[
   {k:"cf_enabled",l:"Publish through Cloudflare",t:"bool",
-   h:"Beta. Visitors reach this service through your Cloudflare Tunnel: Apply adds the route, the DNS record and, when asked for below, the Access application. Needs no open port and no certificate here -- publish the service as http:// and Cloudflare serves it over HTTPS. Connect Cloudflare first, under Access > Cloudflare."},
+   h:"Visitors reach this service through your Cloudflare Tunnel: Apply adds the route, the DNS record and, when asked for below, the Access application. Needs no open port and no certificate here -- publish the service as http:// and Cloudflare serves it over HTTPS. Connect Cloudflare first, under Access > Cloudflare."},
   {k:"cf_access",l:"Who may reach it",t:"select",o:["public","allow"],d:"public",
    h:"With a sign-in, Cloudflare Access asks every visitor to sign in before the request reaches this node, and lets in only the identities listed below."},
   {k:"cf_allow",l:"Allowed identities",t:"textarea",
