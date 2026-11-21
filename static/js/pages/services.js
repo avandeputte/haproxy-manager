@@ -30,7 +30,7 @@ export const WIZ_SECTIONS=[
      "when the servers are set up to expect it (nginx proxy_protocol, Postfix, Dovecot, Traefik...): "+
      "a server that is not refuses every connection."},
   {k:"server_http2",l:"HTTP/2 to the servers",t:"bool",
-   h:"For gRPC, which needs HTTP/2 all the way to the server. HAProxy speaks HTTP/1.1 to a server unless this is ticked, whatever visitors speak to it. To an https:// server HTTP/2 is offered and the server chooses; to an http:// server it is HTTP/2 only, so tick it only for a server that expects that. Set on every server behind this service."},
+   h:"For gRPC, which needs HTTP/2 all the way to the server. HAProxy speaks HTTP/1.1 to a server unless this is ticked, whatever visitors speak to it. To an https:// server HTTP/2 is offered and the server chooses; to an http:// server it is HTTP/2 only, so tick it only for a server that expects that. Set on every server behind this service. With CrowdSec AppSec on, the bodies of gRPC requests to such a service are not inspected: a stream has no end to wait for."},
   {k:"redirect_to",l:"Redirect to",t:"text",h:"e.g. https://new.example.com"},
   {k:"redirect_code",l:"Redirect code",t:"select",d:301,o:[{value:301,label:"301 moved permanently"},{value:302,label:"302 found"},{value:307,label:"307 temporary, same method"},{value:308,label:"308 permanent, same method"}]},
   {k:"redirect_keep_path",l:"Keep the path",t:"bool",d:true,h:"/a?b here arrives as /a?b there; off sends every request to the address as given."},

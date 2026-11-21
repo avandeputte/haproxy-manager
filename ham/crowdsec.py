@@ -357,10 +357,19 @@ def global_lines(cfg):
     return []
 
 
-def frontend_lines(cfg, src_acl):
+def _and(test, acl):
+    """A rule's test with one more thing that must hold, in each of its
+    alternatives: " if A || B" and "x" make " if A x || B x"."""
+    if not test:
+        return " if " + acl
+    return " if " + " || ".join(alt + " " + acl for alt in test[len(" if "):].split(" || "))
+
+
+def frontend_lines(cfg, src_acl, streams=()):
     """What an HTTP listener declares and does when CrowdSec is on:
     (declarations, requests). `src_acl(name, nets)` declares a source ACL
-    the way the renderer does elsewhere."""
+    the way the renderer does elsewhere. `streams` are the tests of this
+    listener's routing rules for services that speak gRPC."""
     if not active(cfg):
         return [], []
     s = settings_of(cfg)
@@ -385,17 +394,37 @@ def frontend_lines(cfg, src_acl):
         # question goes without it. The bouncer's own example, with the
         # trusted networks left out of both.
         who = "!cs_trusted " if trusted else ""
-        decl += ["option http-buffer-request",
-                 "acl cs_body_fits req.body_size -m int le %d" % APPSEC_BODY_LIMIT]
+        streams = [t for t in streams if not t or t.startswith(" if ")]
+        decl.append("acl cs_body_fits req.body_size -m int le %d" % APPSEC_BODY_LIMIT)
         req = []
+        if not streams:
+            decl.insert(len(decl) - 1, "option http-buffer-request")
+            live, quiet = "", ""
+        else:
+            # A gRPC stream is a request whose body never ends, and a listener
+            # that waits for whole bodies never lets one through: the call
+            # sits there until the client gives up (#37). So where a service
+            # is marked as speaking gRPC -- HTTP/2 to its servers -- the
+            # waiting is done per request instead, and that service's gRPC
+            # requests are not made to wait. Only those: by content type on
+            # any service, a visitor could switch the inspection off by
+            # claiming to speak gRPC. Everything else waits exactly as the
+            # option had it -- for the whole body, however slowly it comes --
+            # and a stream is asked about without its body.
+            decl += ["acl cs_grpc req.hdr(content-type) -m beg application/grpc",
+                     "acl cs_stream var(txn.cs_stream) -m bool"]
+            req += ["http-request set-var(txn.cs_stream) bool(1)" + _and(t, "cs_grpc") for t in streams]
+            req.append("http-request wait-for-body time 24h unless cs_stream"
+                       + (" || cs_trusted" if trusted else ""))
+            live, quiet = "!cs_stream ", " || %scs_stream" % who
         if s.get("appsec_reject_large"):
             # Asked for: what AppSec cannot read does not reach the service.
             req.append('http-request return status 413 content-type text/plain string '
-                       '"Request body too large to inspect\\n" if %s{ req.body_size -m found } !cs_body_fits' % who)
+                       '"Request body too large to inspect\\n" if %s%s{ req.body_size -m found } !cs_body_fits' % (who, live))
         req += ["http-request send-spoe-group crowdsec crowdsec-http-body "
-                "if %scs_body_fits || %s!{ req.body_size -m found }" % (who, who),
+                "if %s%scs_body_fits || %s%s!{ req.body_size -m found }" % (who, live, who, live),
                 "http-request send-spoe-group crowdsec crowdsec-http-no-body "
-                "if %s!cs_body_fits { req.body_size -m found }" % who]
+                "if %s!cs_body_fits { req.body_size -m found }%s" % (who, quiet)]
     else:
         req = ["http-request send-spoe-group crowdsec crowdsec-http-no-body"
                + (" unless cs_trusted" if trusted else "")]

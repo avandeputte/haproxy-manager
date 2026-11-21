@@ -456,7 +456,16 @@ def render_haproxy(cfg):
         # CrowdSec first: a banned address is answered before anything else
         # is done for it. HTTP only -- the answer is a page.
         if mode == "http":
-            decl, asks = crowdsec.frontend_lines(cfg, _src_acl)
+            # The services on this listener that speak gRPC, by the test
+            # that routes to them: HTTP/2 to a server is what marks one.
+            streams = []
+            for rid in fe.get("rules") or []:
+                r = rules.get(rid)
+                pool = backends.get(r.get("backend")) if r and r.get("type") == "use_backend" else None
+                if pool and pool.get("mode", "http") == "http" and any(
+                        (servers.get(sid) or {}).get("http2") for sid in pool.get("servers") or []):
+                    streams.append(_rule_test(r, conds))
+            decl, asks = crowdsec.frontend_lines(cfg, _src_acl, streams)
             acls.extend(decl)
             requests.extend(asks)
 

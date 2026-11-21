@@ -358,6 +358,37 @@ bouncer_present(True)
 
 # ---- the rendered file is one HAProxy accepts, engine and all -----------------------------
 put({"enabled": True})
+
+# ---- gRPC beside AppSec (#37) ------------------------------------------------------------
+# A stream is a request whose body never ends, and a listener that waits for
+# whole bodies never lets one through. A service marked as speaking gRPC --
+# HTTP/2 to its servers -- has its gRPC requests let through unwaited, and
+# asked about without their body. Nothing else is, whatever it claims to be.
+fe = haproxy.render_haproxy(load_config())
+fe = fe[fe.index("frontend fe_http-80"):fe.index("\n\n", fe.index("frontend fe_http-80"))]
+ok("option http-buffer-request" in fe and "wait-for-body" not in fe and "cs_stream" not in fe,
+   "with no gRPC service on the listener, it waits for bodies the way it always did")
+r = client.post("/api/wizard/publish", headers=H, json={
+    "url": "http://grpc.example.com", "target": "https://10.0.0.7:443", "certificate": False,
+    "http_redirect": False, "server_http2": True, "dry_run": False})
+ok(r.status_code == 200, "a gRPC service is published: HTTP/2 to its servers")
+fe = haproxy.render_haproxy(load_config())
+fe = fe[fe.index("frontend fe_http-80"):fe.index("\n\n", fe.index("frontend fe_http-80"))]
+ok("option http-buffer-request" not in fe
+   and "http-request wait-for-body time 24h unless cs_stream || cs_trusted\n" in fe,
+   "the listener then waits per request, and not for a stream or the trusted")
+marks = [ln.strip() for ln in fe.splitlines() if "set-var(txn.cs_stream)" in ln]
+ok(len(marks) == 1 and marks[0].startswith("http-request set-var(txn.cs_stream) bool(1) if acl_host-") and marks[0].endswith(" cs_grpc")
+   and "acl cs_grpc req.hdr(content-type) -m beg application/grpc" in fe,
+   "a stream is a gRPC request for that service, and no other: %s" % marks)
+ok("crowdsec-http-body if !cs_trusted !cs_stream cs_body_fits || !cs_trusted !cs_stream !{ req.body_size -m found }\n" in fe
+   and "crowdsec-http-no-body if !cs_trusted !cs_body_fits { req.body_size -m found } || !cs_trusted cs_stream\n" in fe,
+   "it is asked about without its body, and everything else as before")
+ok("if !cs_trusted !cs_stream { req.body_size -m found } !cs_body_fits\n" in fe, "and is not refused for a size it does not have")
+ok(fe.index("set-var(txn.cs_stream)") < fe.index("wait-for-body") < fe.index("status 413") < fe.index("send-spoe-group"),
+   "in that order: what it is, whether to wait, then the questions")
+ok(crowdsec._and(" if a b || c", "x") == " if a b x || c x" and crowdsec._and("", "x") == " if x",
+   "a rule with alternatives marks a stream in each of them")
 apply._selfsigned_placeholder(CERT_DIR / "stand-in.pem", ["stand-in"])
 crowdsec.write_files(load_config())
 text = haproxy.render_haproxy(load_config())
