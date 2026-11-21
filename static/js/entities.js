@@ -41,7 +41,7 @@ export const E={
  "haproxy/servers":{title:"Real Servers",one:"Real Server",add:"Add server",
   intro:"The upstream hosts traffic is forwarded to. Attach them to Backend Pools.",
   cols:[["name","Name"],["address","Address",r=>esc(r.address)+":"+esc(r.port)],
-        ["opts","Options",r=>[r.ssl?"ssl":"",PROXY_KEYWORD[r.proxy_protocol]||"",
+        ["opts","Options",r=>[r.ssl?"ssl":"",r.http2?"h2":"",PROXY_KEYWORD[r.proxy_protocol]||"",
                               r.backup?"backup":""].filter(Boolean).join(", ")||"—"],
         ["enabled","Enabled",r=>r.enabled!==false?t("yes"):t("no")]],
   fields:[
@@ -58,6 +58,7 @@ export const E={
      "and also works for tcp:// services. Only turn it on when the server is set up to expect it "+
      "(nginx proxy_protocol, Postfix, Dovecot, Traefik...): a server that is not refuses every "+
      "connection. Health checks to a separate check port are sent without it."},
+   {k:"http2",l:"HTTP/2 to the server",t:"bool",h:"For gRPC, which needs HTTP/2 all the way to the server. With Encrypt to server, HTTP/2 is offered and the server chooses (alpn h2,http/1.1); without it, HAProxy speaks HTTP/2 only (proto h2). HTTP pools only. With CrowdSec AppSec on, the bodies of gRPC requests to such a service are not inspected: a stream has no end to wait for."},
    {k:"backup",l:"Backup server",t:"bool",h:"Only receives traffic when all non-backup servers are down"},
    {k:"description",l:"Description",t:"text"}]},
 
@@ -80,6 +81,7 @@ export const E={
    {k:"timeout_connect",l:"Connect timeout",t:"text",h:"For this pool only, e.g. 5s"},
    {k:"timeout_server",l:"Server timeout",t:"text",h:"For this pool only, e.g. 30s"},
    {k:"timeout_check",l:"Check timeout",t:"text",h:"For this pool only"},
+   {k:"server_http2",l:"HTTP/2 to the servers",t:"bool",h:"For gRPC, which needs HTTP/2 all the way to the server. HAProxy speaks HTTP/1.1 to a server unless this is ticked, whatever visitors speak to it. To an https:// server HTTP/2 is offered and the server chooses; to an http:// server it is HTTP/2 only, so tick it only for a server that expects that. Set on every server behind this service. With CrowdSec AppSec on, the bodies of gRPC requests to such a service are not inspected: a stream has no end to wait for."},
    {k:"stick_type",l:"Stick table type",t:"select",o:["ip","ipv6"],d:"ip",h:"HAProxy spells the IPv4 type \"ip\"; \"ipv4\" is not valid"},
    {k:"stick_size",l:"Stick table size",t:"text",h:"For source persistence, e.g. 50k"},
    {k:"stick_expire",l:"Stick table expiry",t:"text",h:"For source persistence, e.g. 30m"},

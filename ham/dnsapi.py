@@ -13,7 +13,7 @@ import uuid
 from .base import ACME_HOME, ACME_SH, _lock, app
 from .config import load_config, save_config
 from .util import _by_id, _sec, cert_details, cert_path, parse_domains, rule_cond_ids, run
-from . import access, acme, adcs, errorpages, validate, wizard, oauth
+from . import access, acme, adcs, cloudflare, errorpages, validate, wizard, oauth
 from .validate import plain_url as _plain_url
 
 # --------------------------------------------------------------------------
@@ -389,9 +389,9 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
                    stick_type=None, log_health_checks=False, check_port=None,
                    timeout_connect=None, timeout_server=None, service_id=None,
                    auth=None, oauth_opts=None, allow_src=None, notify_mode=None,
-                   rate_limit=None, rate_window=None, proxy_protocol=None,
+                   rate_limit=None, rate_window=None, proxy_protocol=None, server_http2=None,
                    allow_lists=None, error_pages=None, rules=None,
-                   hsts=None, hsts_subdomains=None, redirect=None):
+                   hsts=None, hsts_subdomains=None, redirect=None, cloudflare_opts=None):
     """Create (or update) everything needed to serve `pub` from `tgts`.
 
     Re-running for the same public host updates that mapping instead of adding
@@ -506,6 +506,11 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
             srv["proxy_protocol"] = proxy_protocol
         elif proxy_protocol is not None:
             srv.pop("proxy_protocol", None)
+        # HTTP/2 to the servers is the service's, kept on its pool below: a
+        # server can be shared with another service, which did not ask for
+        # it. One a beta before this left on the server is taken off.
+        if server_http2 is not None:
+            srv.pop("http2", None)
         if srv["id"] not in srv_ids:
             srv_ids.append(srv["id"])
 
@@ -529,6 +534,9 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
     }
     if redirect:
         pool_opts["notify_mode"] = "off"         # no servers to lose
+    # HTTP/2 to the servers, for gRPC. Silence leaves the pool as it is.
+    if server_http2 is not None:
+        pool_opts["server_http2"] = bool(server_http2) and not is_tcp
     # HSTS, sent over HTTPS only. Silence leaves the pool as it is.
     if hsts is not None:
         pool_opts["hsts"] = bool(hsts) and not is_tcp
@@ -607,6 +615,31 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
             warns.append("A tcp:// service forwards a raw port, which carries no place "
                          "for a sign-in redirect, so OIDC was not applied.")
     oauth.validate_pool_oauth(cfg, pool_opts, existing_pool)
+    # Published through Cloudflare's tunnel, with Access in front when asked.
+    # Silence leaves the pool as it is; enabled:false clears it.
+    if cloudflare_opts is not None:
+        want = bool(cloudflare_opts.get("enabled")) and not is_tcp
+        cf_mode = cloudflare_opts.get("access") if cloudflare_opts.get("access") in cloudflare.ACCESS_MODES else "public"
+        entries, bad = oauth.parse_allow(cloudflare_opts.get("allow"))
+        if want and cf_mode == "allow":
+            if bad:
+                raise ValueError("not an email address or @domain: %s -- one per line, "
+                                 "or * for anyone who signs in" % ", ".join(bad[:3]))
+            if not entries:
+                raise ValueError("Cloudflare Access needs to know who may sign in: an email address "
+                                 "or @domain per line, or * for anyone your identity provider accepts")
+        pool_opts["cf_tunnel"] = want
+        pool_opts["cf_access"] = cf_mode if want else "public"
+        pool_opts["cf_access_allow"] = "\n".join(entries) if want and cf_mode == "allow" else ""
+        pool_opts["cf_only"] = bool(cloudflare_opts.get("only")) and want
+        if bool(cloudflare_opts.get("enabled")) and is_tcp:
+            warns.append("A tcp:// service cannot be published through Cloudflare here: the tunnel "
+                         "carries HTTP and HTTPS services only, so it was not applied.")
+        elif want and not cloudflare.configured(cfg):
+            warns.append("This service is marked for Cloudflare, but Cloudflare is not connected yet, so "
+                         "nothing is published there. Connect it under Access > Cloudflare, then Apply."
+                         + (" Until then the service refuses every request, because it is set to be "
+                            "reached through Cloudflare only." if pool_opts["cf_only"] else ""))
 
     # -- Health Monitor ---------------------------------------------------
     monitor = None

@@ -50,6 +50,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && gpg --show-keys --with-colons /etc/apt/keyrings/crowdsec.gpg | grep -q '^fpr:::::::::6A89E3C2303A901A889971D3376ED5326E93CD0C:' \
     && echo "deb [signed-by=/etc/apt/keyrings/crowdsec.gpg] https://packagecloud.io/crowdsec/crowdsec/debian/ bookworm main" \
         > /etc/apt/sources.list.d/crowdsec.list \
+    # cloudflared, from Cloudflare's own repository, for services published
+    # through a Cloudflare Tunnel. Installed, not started: the app starts it
+    # once Cloudflare is switched on. The key is held to its fingerprint.
+    && curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg --create-dirs --output /usr/share/keyrings/cloudflare-main.gpg \
+    && gpg --show-keys --with-colons /usr/share/keyrings/cloudflare-main.gpg | grep -q '^fpr:::::::::CC94B39C77AE7342A68B89628A682D308D4E5E73:' \
+    && echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" \
+        > /etc/apt/sources.list.d/cloudflared.list \
     && apt-get update && apt-get install -y --no-install-recommends \
         python3 \
         python3-flask \
@@ -57,6 +64,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3-waitress \
         "haproxy=${HAPROXY_BRANCH}.*" \
         crowdsec-haproxy-spoa-bouncer \
+        cloudflared \
         keepalived \
         openssl \
         socat \
@@ -110,10 +118,11 @@ COPY static/ ./static/
 COPY docker/syslogd.py /usr/local/bin/ham-syslogd
 COPY docker/systemctl /usr/local/bin/systemctl
 COPY docker/crowdsec-run /usr/local/bin/crowdsec-run
+COPY docker/cloudflared-run /usr/local/bin/cloudflared-run
 COPY docker/haproxy-run /usr/local/bin/haproxy-run
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY docker/supervisord.conf /etc/supervisor/supervisord.conf
-RUN chmod 0755 /usr/local/bin/systemctl /usr/local/bin/haproxy-run /usr/local/bin/crowdsec-run \
+RUN chmod 0755 /usr/local/bin/systemctl /usr/local/bin/haproxy-run /usr/local/bin/crowdsec-run /usr/local/bin/cloudflared-run \
                /usr/local/bin/entrypoint.sh /usr/local/bin/ham-syslogd
 
 ENV HAM_DATA_DIR=/var/lib/haproxy-manager \

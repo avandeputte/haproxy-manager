@@ -419,6 +419,7 @@ def api_services():
             "maintenance": bool(pool.get("maintenance")),
             "check_port": first.get("check_port") or "",
             "proxy_protocol": first.get("proxy_protocol") or "",
+            "server_http2": bool(pool.get("server_http2") or first.get("http2")),
             "timeout_connect": pool.get("timeout_connect") or "",
             "timeout_server": pool.get("timeout_server") or "",
             # Whether visitors are asked to sign in, and who is let through.
@@ -430,6 +431,10 @@ def api_services():
                      "exempt_lists": list(pool.get("auth_exempt_lists") or []),
                      "exempt_list_names": access.list_names(cfg, pool.get("auth_exempt_lists"))},
             "oauth": oauth.pool_summary(pool),
+            "cloudflare": {"enabled": bool(pool.get("cf_tunnel")),
+                           "access": pool.get("cf_access") or "public",
+                           "allow": pool.get("cf_access_allow") or "",
+                           "only": bool(pool.get("cf_only"))},
             "allow_src": pool.get("allow_src") or "",
             "allow_lists": list(pool.get("allow_lists") or []),
             "allow_list_names": access.list_names(cfg, pool.get("allow_lists")),

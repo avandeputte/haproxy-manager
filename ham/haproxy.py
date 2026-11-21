@@ -6,11 +6,12 @@ import base64
 import functools
 import re
 import socket
+import time
 
 from .base import CERT_DIR, PORT
 from .config import merged
-from .util import _by_id, _sec, cert_path, rule_cond_ids
-from . import access, crowdsec, errorpages, oauth
+from .util import _by_id, _sec, cert_path, rule_cond_ids, run
+from . import access, cloudflare, crowdsec, errorpages, oauth
 
 # --------------------------------------------------------------------------
 
@@ -145,6 +146,106 @@ def _rule_test(rule, conds):
     return " %s %s" % (rule.get("test", "if"), expr)
 
 
+_UNITS = {"us": 0.001, "ms": 1, "s": 1000, "m": 60000, "h": 3600000, "d": 86400000}
+
+
+def _ms(value):
+    """An HAProxy time in milliseconds, or None when it is not one."""
+    m = re.fullmatch(r"\s*(\d+)\s*(us|ms|s|m|h|d)?\s*", str(value or ""))
+    return int(int(m.group(1)) * _UNITS[m.group(2) or "ms"]) if m else None
+
+
+_version = {"at": 0.0, "value": None}
+
+
+def haproxy_version():
+    """(major, minor) of the HAProxy on this node, or None when it cannot be
+    asked. Asked again every few minutes: a package upgrade changes it under
+    a running app."""
+    if time.time() - _version["at"] > 300:
+        rc, out = run(["haproxy", "-v"], timeout=10)
+        m = re.search(r"version (\d+)\.(\d+)", out or "") if rc == 0 else None
+        _version.update(at=time.time(), value=(int(m.group(1)), int(m.group(2))) if m else None)
+    return _version["value"]
+
+
+# `http-request set-timeout client` came with HAProxy 3.0; before it only the
+# server and tunnel timeouts could be set for one request.
+CLIENT_TIMEOUT_SINCE = (3, 0)
+
+
+def _long_client_timeout(pool, st):
+    """The client timeout a request for this pool should be given, or "".
+
+    A pool's server timeout says how long its connections are meant to last,
+    but the listener holds the visitor's side to the client timeout that
+    stands for everything, 50 s unless changed. A stream that is quiet in
+    both directions -- gRPC, with its request still open -- is cut by that,
+    whatever the pool says. So a pool that waits longer than the listener
+    lends the listener its patience, for its own requests. Never shorter:
+    a pool with a short server timeout leaves the client timeout alone.
+    """
+    if not pool or pool.get("mode", "http") != "http" or (pool.get("redirect_to") or "").strip():
+        return ""
+    own = _ms(pool.get("timeout_server"))
+    base = _ms(st.get("timeout_client") or "50s")
+    if own is None or base is None or own <= base:
+        return ""
+    return _sec(str(pool["timeout_server"]).strip())
+
+
+def _hosts_of(rule, conds):
+    """The host names a rule can match, or None when that cannot be told
+    from its conditions: none of them names a host, or one is negated."""
+    hosts = set()
+    for cid in rule_cond_ids(rule):
+        c = conds.get(cid)
+        if c and c.get("type") == "host_matches" and c.get("value"):
+            if c.get("negate"):
+                return None
+            hosts.add(str(c["value"]).strip().lower())
+    return frozenset(hosts) or None
+
+
+def _may_overlap(a, b):
+    """Could one request match both rules? Two rules that name different
+    hosts cannot; anything less certain is taken as yes."""
+    if a is None or b is None:
+        return True
+    return not a.isdisjoint(b) or any("*" in h for h in a | b)
+
+
+def _last_word(routed, catch_all=None):
+    """Lines that set something per request, so that it follows the routing.
+
+    `routed` is the listener's routing rules in order: (test, hosts, value),
+    value empty for a rule that sets nothing. HAProxy routes by the first
+    rule that matches, but of several lines that set the same thing the last
+    to match holds. So the lines go in reverse, and a rule that sets nothing
+    takes it back where a later rule it shadows would have set it: the rule
+    that routes a request is then the one that decides. `catch_all` is the
+    value for what no rule routes. Returns [(test, value or None)].
+    """
+    out, armed = [], []
+    if catch_all:
+        out.append(("", catch_all))
+        armed.append(None)
+    for test, hosts, value in reversed(routed):
+        if value:
+            out.append((test, value))
+            armed.append(hosts)
+        elif any(_may_overlap(hosts, h) for h in armed):
+            out.append((test, None))
+    return out
+
+
+def _speaks_grpc(pool, servers):
+    """Is this pool's service gRPC: HTTP/2 to its servers, asked for on the
+    service or on one of its servers."""
+    return bool(pool) and pool.get("mode", "http") == "http" and bool(
+        pool.get("server_http2") or any((servers.get(sid) or {}).get("http2") for sid in pool.get("servers") or []))
+
+
 def _rule_line(rule, conds, backends):
     suffix = _rule_test(rule, conds)
     t = rule.get("type")
@@ -263,6 +364,9 @@ def render_haproxy(cfg):
     configuration that leaves out the service publishing this node's own
     management UI.
     """
+    # Asked of the shared configuration, before this node's own objects join
+    # it: the tunnel's routes are one thing for the whole cluster.
+    cf_routes = cloudflare.routes(cfg)
     cfg = merged(cfg)
     hp = cfg["haproxy"]
     st = hp["settings"]
@@ -374,8 +478,20 @@ def render_haproxy(cfg):
             if b.strip():
                 for addr in _bind_addresses(b.strip(), st):
                     A("    bind %s%s" % (addr, ssl_suffix))
+        # Where cloudflared hands over what came down the tunnel: a loopback
+        # port of this listener's own, in the clear -- the visitor's TLS ended
+        # at Cloudflare.
+        cf_binds, cf_decl, cf_asks = ([], [], []) if mode != "http" else \
+            cloudflare.frontend_lines(cf_routes, fe)
+        for addr in cf_binds:
+            A("    bind %s" % addr)
         A("    mode %s" % mode)
         A("    option httplog" if mode == "http" else "    option tcplog")
+        # First of all: who the visitor is, when Cloudflare brought them --
+        # before the headers below are written from that address, and before
+        # anything is decided by it.
+        for ln in cf_decl + cf_asks:
+            A("    " + ln)
         if mode == "http" and fe.get("forwardfor", True):
             A("    option forwardfor")
             # The names some applications read instead: the visitor's address
@@ -392,7 +508,15 @@ def render_haproxy(cfg):
         # CrowdSec first: a banned address is answered before anything else
         # is done for it. HTTP only -- the answer is a page.
         if mode == "http":
-            decl, asks = crowdsec.frontend_lines(cfg, _src_acl)
+            # Which requests are gRPC streams: the ones a service that speaks
+            # gRPC is routed by -- and only when that service is the one that
+            # takes them, so a rule ahead of it on the same host takes its
+            # requests back.
+            streams = _last_word([
+                (_rule_test(r, conds), _hosts_of(r, conds), _speaks_grpc(backends.get(r.get("backend")), servers))
+                for r in (rules.get(rid) for rid in fe.get("rules") or [])
+                if r and r.get("type") == "use_backend" and backends.get(r.get("backend"))])
+            decl, asks = crowdsec.frontend_lines(cfg, _src_acl, streams)
             acls.extend(decl)
             requests.extend(asks)
 
@@ -403,6 +527,11 @@ def render_haproxy(cfg):
             routes.append("use_backend bk_acme_challenge if acme_challenge")
         if mode == "http" and fe.get("http_to_https") and not fe.get("ssl_enabled"):
             excl = " if !acme_challenge !{ ssl_fc }" if acme_on else " unless { ssl_fc }"
+            if cf_decl:
+                # Down the tunnel the visitor is on HTTPS already; sending
+                # them there again would never end.
+                excl = (" if !acme_challenge !{ ssl_fc } !cf_tunnel" if acme_on
+                        else " if !{ ssl_fc } !cf_tunnel")
             requests.append("http-request redirect scheme https code 301" + excl)
         if sso_on and mode == "http" and fe.get("ssl_enabled"):
             # The sign-in host: nothing but /.ham-sso/ lives on it, and this
@@ -440,6 +569,7 @@ def render_haproxy(cfg):
             requests.append("tcp-request inspect-delay 5s")
             requests.append("tcp-request content accept if { req_ssl_hello_type 1 }")
 
+        routed = []
         for rid in fe.get("rules") or []:
             r = rules.get(rid)
             if not r:
@@ -450,6 +580,18 @@ def render_haproxy(cfg):
             # Relative order is preserved inside each group, so first-match
             # routing and rule precedence are unchanged.
             (routes if ln.startswith("use_backend") else requests).append(ln)
+            if mode == "http" and r.get("type") == "use_backend":
+                routed.append((_rule_test(r, conds), _hosts_of(r, conds),
+                               _long_client_timeout(backends.get(r.get("backend")), st)))
+        # The client timeout of a service that waits longer than the listener
+        # does, for the requests that service takes: the default pool's for
+        # what no rule routes, and the listener's own given back where a
+        # service that does not wait shadows one that does. Only where
+        # HAProxy knows the directive; an older one keeps the listener's.
+        if mode == "http" and (haproxy_version() or (0, 0)) >= CLIENT_TIMEOUT_SINCE:
+            own = _sec(str(st.get("timeout_client") or "50s").strip())
+            for test, wait in _last_word(routed, _long_client_timeout(backends.get(fe.get("default_backend")), st)):
+                requests.append("http-request set-timeout client %s%s" % (wait or own, test))
 
         for ln in acls + requests + routes:
             A("    " + ln)
@@ -539,6 +681,11 @@ def render_haproxy(cfg):
                       'string "This service is down for maintenance."')
             else:
                 A("    tcp-request content reject")
+        # Through Cloudflare only: what did not come down the tunnel stops
+        # here, before the allow-list -- which the tunnel's visitors are then
+        # still held to, by their own addresses.
+        for ln in cloudflare.backend_lines(cf_routes, be):
+            A("    " + ln)
         # Who may reach this pool by source address. Works for TCP too --
         # unlike the sign-in, an address needs no place in the protocol to
         # carry it. A list where every entry is malformed refuses everyone:
@@ -772,6 +919,28 @@ def render_haproxy(cfg):
             pp = PROXY_PROTOCOL.get(sv.get("proxy_protocol"))
             if pp:
                 parts.append(pp)
+            # HTTP/2 to the server, which gRPC cannot do without: HAProxy
+            # speaks HTTP/1.1 to a server unless told otherwise, whatever the
+            # visitor speaks to it. Over TLS it is offered and the server
+            # chooses, so one that only knows HTTP/1.1 still works; in the
+            # clear there is nothing to negotiate with, and it is HTTP/2 or
+            # nothing. Asked for on the service -- its pool -- or on this one
+            # server. An HTTP health check on the traffic port speaks the
+            # same, since a server that knows only HTTP/2 would fail any
+            # other; one on a separate check port is another service, and is
+            # spoken HTTP/1.1 to. In the clear a check takes the server's
+            # protocol unless told, so there it is the other port that has
+            # to be told.
+            if (be.get("server_http2") or sv.get("http2")) and mode == "http":
+                http_check = bool(hc) and hc.get("type") == "http"
+                if sv.get("ssl"):
+                    parts.append("alpn h2,http/1.1")
+                    if http_check and not sv.get("check_port"):
+                        parts.append("check-alpn h2,http/1.1")
+                else:
+                    parts.append("proto h2")
+                    if http_check and sv.get("check_port"):
+                        parts.append("check-proto h1")
             if sv.get("backup"):
                 parts.append("backup")
             if use_cookie:

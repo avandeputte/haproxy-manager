@@ -452,6 +452,10 @@ def _receive_locked(cfg, data, conf, source=None):
         # answer. A sender from before 2.0.0-beta.3 carries none, and this
         # node's own stays.
         cfg["crowdsec"] = _merge_defaults(conf["crowdsec"], DEFAULT_CONFIG["crowdsec"])
+    if isinstance(conf.get("cloudflare"), dict):
+        # The tunnel every node connects, and its token. A sender from before
+        # 2.4 carries none, and this node's own stays.
+        cfg["cloudflare"] = _merge_defaults(conf["cloudflare"], DEFAULT_CONFIG["cloudflare"])
 
     # An optional membership list: every other node as seen by the sender.
     mesh = data.get("peers")

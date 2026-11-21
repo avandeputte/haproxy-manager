@@ -11,7 +11,9 @@ Keepalived** on a shared virtual IP — one node active, the rest ready to take
 over, with settings and certificates syncing across all of them. Since 2.0 it
 also keeps named **address lists**, lets a service carry its own **rules** and
 **error pages**, and can put a **CrowdSec** bouncer in front of every HTTP
-service — with CrowdSec's WAF, AppSec, behind it since 2.3.
+service — with CrowdSec's WAF, AppSec, behind it since 2.3. Since 2.4 it
+publishes services through a **Cloudflare Tunnel**, with Cloudflare Access in
+front of the ones that ask for a sign-in.
 
 **No database to run — no PostgreSQL, no Redis, no message broker.** The whole
 configuration is one JSON file on disk, and a cluster keeps its nodes in step
@@ -23,7 +25,7 @@ copying it across.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_2.3.2_all.deb
+sudo apt-get install -y ./haproxy-manager_2.4.0_all.deb
 
 # or the install script, on any Debian-based server
 curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash

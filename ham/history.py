@@ -13,7 +13,7 @@ from .config import (DEFAULT_CONFIG, _history_files, _merge_defaults, load_confi
     save_config, shared_fingerprint, shared_objects, shared_view)
 
 # The sections a snapshot holds, and the order they are shown in.
-SECTIONS = ("haproxy", "acme", "access", "cluster", "notify", "crowdsec")
+SECTIONS = ("haproxy", "acme", "access", "cluster", "notify", "crowdsec", "cloudflare")
 
 
 def _read(name):
@@ -211,6 +211,10 @@ def api_history_restore(name):
             part = view.get(section)
             if isinstance(part, dict):
                 cfg[section] = _merge_defaults(part, DEFAULT_CONFIG[section])
+        # What Cloudflare was told then is not what it holds now: the next
+        # Apply has to say all of it again.
+        if isinstance(cfg.get("cloudflare"), dict):
+            cfg["cloudflare"]["told"] = ""
         save_config(cfg)
         rev = int(cfg["_meta"].get("shared_rev") or 0)
     log.info("restored the configuration of %s (revision %s) as revision %d",

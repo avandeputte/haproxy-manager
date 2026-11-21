@@ -23,6 +23,14 @@ export const WIZ_SECTIONS=[
      "A path like /api is allowed on a single URL, and tcp://0.0.0.0:3306 forwards a raw TCP port."},
   {k:"target",l:"Forward to",t:"text",
    h:"e.g. http://192.168.1.100:1781. Several (comma separated) are load balanced, and each may be named: galera1=192.168.1.81:3306"},
+  /* how the servers are spoken to: beside where they are named */
+  {k:"proxy_protocol",l:"PROXY protocol",t:"select",o:PROXY_OPTIONS,d:"",
+   h:"Tells the servers the visitor's real address, the way X-Forwarded-For does for HTTP, "+
+     "and also works for tcp:// services. Set on every server behind this service. Only turn it on "+
+     "when the servers are set up to expect it (nginx proxy_protocol, Postfix, Dovecot, Traefik...): "+
+     "a server that is not refuses every connection."},
+  {k:"server_http2",l:"HTTP/2 to the servers",t:"bool",
+   h:"For gRPC, which needs HTTP/2 all the way to the server. HAProxy speaks HTTP/1.1 to a server unless this is ticked, whatever visitors speak to it. To an https:// server HTTP/2 is offered and the server chooses; to an http:// server it is HTTP/2 only, so tick it only for a server that expects that. Set on every server behind this service. With CrowdSec AppSec on, the bodies of gRPC requests to such a service are not inspected: a stream has no end to wait for."},
   {k:"redirect_to",l:"Redirect to",t:"text",h:"e.g. https://new.example.com"},
   {k:"redirect_code",l:"Redirect code",t:"select",d:301,o:[{value:301,label:"301 moved permanently"},{value:302,label:"302 found"},{value:307,label:"307 temporary, same method"},{value:308,label:"308 permanent, same method"}]},
   {k:"redirect_keep_path",l:"Keep the path",t:"bool",d:true,h:"/a?b here arrives as /a?b there; off sends every request to the address as given."},
@@ -69,11 +77,6 @@ export const WIZ_SECTIONS=[
   {k:"stick_expire",l:"Stick table expiry",t:"text",d:"30m"},
   {k:"timeout_connect",l:"Connect timeout",t:"text",h:"Optional, for this pool only, e.g. 5s"},
   {k:"timeout_server",l:"Server timeout",t:"text",h:"Optional, for this pool only, e.g. 30s. Long-lived connections such as databases usually need more than the default. On a tcp:// service it is also how long a connection may sit idle, in either direction."},
-  {k:"proxy_protocol",l:"PROXY protocol",t:"select",o:PROXY_OPTIONS,d:"",
-   h:"Tells the servers the visitor's real address, the way X-Forwarded-For does for HTTP, "+
-     "and also works for tcp:// services. Set on every server behind this service. Only turn it on "+
-     "when the servers are set up to expect it (nginx proxy_protocol, Postfix, Dovecot, Traefik...): "+
-     "a server that is not refuses every connection."},
  ]},
  {title:"Allowed networks",toggle:"allow_enabled",fields:[
   {k:"allow_enabled",l:"Only allow certain networks",t:"bool",
@@ -113,6 +116,18 @@ export const WIZ_SECTIONS=[
      "of these headers a client sends is stripped on every service, so the value is always this "+
      "proxy's word. Only safe while the app is reachable through the proxy alone."},
  ]},
+ /* Reached through Cloudflare's tunnel instead of -- or as well as -- this
+    node's own ports, with Cloudflare Access deciding who gets that far. */
+ {title:"Cloudflare",toggle:"cf_enabled",http:true,fields:[
+  {k:"cf_enabled",l:"Publish through Cloudflare",t:"bool",
+   h:"Visitors reach this service through your Cloudflare Tunnel: Apply adds the route, the DNS record and, when asked for below, the Access application. Needs no open port and no certificate here -- publish the service as http:// and Cloudflare serves it over HTTPS. Connect Cloudflare first, under Access > Cloudflare."},
+  {k:"cf_access",l:"Who may reach it",t:"select",o:["public","allow"],d:"public",
+   h:"With a sign-in, Cloudflare Access asks every visitor to sign in before the request reaches this node, and lets in only the identities listed below."},
+  {k:"cf_allow",l:"Allowed identities",t:"textarea",
+   h:"For the sign-in. One per line: an email, a whole domain as @example.com, or * for anyone your Cloudflare identity provider signs in."},
+  {k:"cf_only",l:"Through Cloudflare only",t:"bool",
+   h:"Refuse every request that did not come through the tunnel, so nobody on the LAN or on this node's own ports gets round the sign-in. Leave off to keep the service reachable directly as well."},
+ ]},
  /* Last: what a service picks for itself from the Advanced pages. The pages
     that stand for every service apply without being picked; HTTP only, as
     the answer is a page. Rules picked here are acted on inside the service's
@@ -130,6 +145,7 @@ export const WIZ_SECTIONS=[
 /* every field, in the order it is shown -- what the form reads and sends */
 export const WIZ_FIELDS=WIZ_SECTIONS.flatMap(sec=>sec.fields);
 /* the checkboxes that only stand for a section being on or off */
+export const CF_ACCESS_LABEL={public:"anyone -- no sign-in",allow:"a Cloudflare Access sign-in, for the identities below"};
 const SECTION_ONLY=["health_enabled","allow_enabled","rate_enabled"];
 /* which of the health_* rows make sense for each check kind */
 export const HEALTH_SHOWS={none:[],tcp:["health_interval"],ssl:["health_interval"],
@@ -265,6 +281,8 @@ export function openWizard(prefill){
   if(hsel)[...hsel.options].forEach(o=>{o.textContent=t(HEALTH_LABEL[o.value]||o.value);});
   const nsel=frm.querySelector("#f_notify_mode");
   if(nsel)[...nsel.options].forEach(o=>{o.textContent=t(NOTIFY_MODE_LABEL[o.value]||o.value);});
+  const csel=frm.querySelector("#f_cf_access");
+  if(csel)[...csel.options].forEach(o=>{o.textContent=t(CF_ACCESS_LABEL[o.value]||o.value);});
   const setRow=(k,on)=>{(rows[k]||[]).forEach(el=>{el.style.display=on?"":"none";});};
   const val=k=>((fieldEl(k)||{}).value||"");
   const on=k=>!!(fieldEl(k)||{}).checked;
@@ -291,6 +309,8 @@ export function openWizard(prefill){
     /* forward or redirect: the target, or where to and how */
     setRow("action",!isTcp);
     setRow("target",!redirecting);
+    setRow("proxy_protocol",!redirecting);
+    setRow("server_http2",!redirecting&&!isTcp);
     ["redirect_to","redirect_code","redirect_keep_path"].forEach(k=>setRow(k,redirecting));
     setRow("hsts_subdomains",!isTcp&&on("hsts"));
     /* a raw TCP port has no HTTP for a rule to act on */
@@ -333,10 +353,12 @@ export function openWizard(prefill){
     d.auth={enabled:d.auth_enabled,groups:d.auth_groups,realm:d.auth_realm,
             exempt:d.auth_exempt,exempt_lists:d.auth_exempt_lists};
     d.oauth={enabled:d.oauth_enabled,allow:d.oauth_allow,forward:d.oauth_forward};
+    d.cloudflare={enabled:!!d.cf_enabled,access:d.cf_access||"public",allow:d.cf_allow||"",only:!!d.cf_only};
     ["cert_mode","health_interval","health_uri","health_status","health_user",
      "health_method","health_version","health_host",
      "auth_enabled","auth_groups","auth_realm","auth_exempt","auth_exempt_lists",
-     "oauth_enabled","oauth_allow","oauth_forward"].forEach(k=>delete d[k]);
+     "oauth_enabled","oauth_allow","oauth_forward",
+     "cf_enabled","cf_access","cf_allow","cf_only"].forEach(k=>delete d[k]);
     return d;   // balance / persistence / stick_* / check_port / log_health_checks pass straight through
   };
   const show=(r,saved)=>{
@@ -380,7 +402,7 @@ export function openWizard(prefill){
      rows that should appear and disappear as the URL changes stayed as they
      were first drawn. */
   if(hsel)hsel.addEventListener("change",syncRows);
-  ["url","persistence","auth_enabled","oauth_enabled","action","hsts",...SECTION_ONLY].forEach(k=>{
+  ["url","persistence","auth_enabled","oauth_enabled","cf_enabled","action","hsts",...SECTION_ONLY].forEach(k=>{
     const el=fieldEl(k);
     if(el){el.addEventListener("change",syncRows);el.addEventListener("input",syncRows);
            el.addEventListener("blur",syncRows);}
@@ -450,6 +472,12 @@ export async function servicesCard(){
                esc(auth.exempt.split("\n").filter(Boolean).concat(auth.exempt_list_names||[]).join(", "))}):"")+"</div>":"")+
           ((s.oauth||{}).enabled?'<div class=sub>'+t("sign-in via SSO &mdash; {who}",{who:
              esc(((s.oauth||{}).allow||[]).map(a=>a==="*"?t("anyone the provider signs in"):a).join(", "))})+"</div>":"")+
+          ((s.cloudflare||{}).enabled?'<div class=sub>'+
+             ((s.cloudflare.access==="allow")
+               ?t("through Cloudflare &mdash; sign-in for {who}",{who:
+                  esc((s.cloudflare.allow||"").split("\n").filter(Boolean).map(a=>a==="*"?t("anyone the provider signs in"):a).join(", "))})
+               :t("through Cloudflare &mdash; no sign-in"))+
+             (s.cloudflare.only?", "+t("and only through it"):"")+"</div>":"")+
           (s.allow_src||(s.allow_list_names||[]).length?'<div class=sub>'+t("only from {networks}",{networks:
              esc(s.allow_src.split("\n").filter(Boolean).concat(s.allow_list_names||[]).join(", "))})+"</div>":"")+
           (s.rate_limit?'<div class=sub>'+(s.scheme==="tcp"
@@ -482,7 +510,7 @@ export async function servicesCard(){
         balance:s.balance,persistence:s.persistence,stick_type:s.stick_type,
         stick_size:s.stick_size,stick_expire:s.stick_expire,
         log_health_checks:s.log_health_checks,check_port:s.check_port,
-        proxy_protocol:s.proxy_protocol,
+        proxy_protocol:s.proxy_protocol,server_http2:s.server_http2,
         notify_mode:s.notify_mode,
         health:(s.health||{}).type,health_interval:(s.health||{}).interval,
         health_uri:(s.health||{}).uri,health_status:(s.health||{}).status,
@@ -495,6 +523,8 @@ export async function servicesCard(){
         oauth_enabled:(s.oauth||{}).enabled,
         oauth_allow:((s.oauth||{}).allow||[]).join("\n"),
         oauth_forward:(s.oauth||{}).forward,
+        cf_enabled:(s.cloudflare||{}).enabled,cf_access:(s.cloudflare||{}).access,
+        cf_allow:(s.cloudflare||{}).allow,cf_only:(s.cloudflare||{}).only,
         allow_src:s.allow_src,allow_lists:s.allow_lists,
         error_pages:s.error_pages,rules:s.rules,
         hsts:s.hsts,hsts_subdomains:s.hsts_subdomains,

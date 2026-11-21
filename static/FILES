@@ -23,6 +23,7 @@ js/pages/acme.js
 js/pages/backup.js
 js/pages/certificates.js
 js/pages/conditions.js
+js/pages/cloudflare.js
 js/pages/crowdsec.js
 js/pages/cluster.js
 js/pages/history.js
@@ -93,6 +94,7 @@ recipes/gotify.json
 recipes/grafana.json
 recipes/graylog.json
 recipes/grocy.json
+recipes/grpc.json
 recipes/guacamole.json
 recipes/harbor.json
 recipes/headscale.json

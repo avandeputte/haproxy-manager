@@ -9,6 +9,7 @@ base.py
 cluster.py
 config.py
 crud.py
+cloudflare.py
 crowdsec.py
 dnsapi.py
 errorpages.py

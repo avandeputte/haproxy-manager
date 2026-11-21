@@ -156,11 +156,13 @@ def api_wizard_publish():
                 hsts=body.get("hsts") if "hsts" in body else None,
                 hsts_subdomains=body.get("hsts_subdomains") if "hsts_subdomains" in body else None,
                 redirect=redirect,
+                cloudflare_opts=body.get("cloudflare") if isinstance(body.get("cloudflare"), dict) else None,
                 notify_mode=body.get("notify_mode") or None,
                 rate_limit=body.get("rate_limit") if "rate_limit" in body else None,
                 rate_window=body.get("rate_window") if "rate_window" in body else None,
                 proxy_protocol=(body.get("proxy_protocol") or "") if "proxy_protocol" in body
                 else None,
+                server_http2=bool(body.get("server_http2")) if "server_http2" in body else None,
             )
         except ValueError as e:                     # a rejected request, not a crash
             return jsonify({"ok": False, "error": str(e)}), 400
