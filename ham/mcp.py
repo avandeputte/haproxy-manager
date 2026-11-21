@@ -235,7 +235,7 @@ def _service_body(s):
     if isinstance(s.get("cloudflare"), dict):
         body["cloudflare"] = dict(s["cloudflare"])
     for k in ("balance", "persistence", "stick_type", "stick_size", "stick_expire",
-              "log_health_checks", "check_port", "proxy_protocol", "notify_mode",
+              "log_health_checks", "check_port", "proxy_protocol", "server_http2", "notify_mode",
               "timeout_connect", "timeout_server", "allow_src", "allow_lists", "error_pages",
               "rules", "hsts", "hsts_subdomains", "rate_limit", "rate_window", "certificate_id"):
         if k in s:
@@ -564,6 +564,7 @@ TOOLS = [
              "rules": {"type": "array", "items": S, "description": "Rule ids to apply to this pool"},
              "rate_limit": {"type": ["integer", "string"]}, "rate_window": I,
              "proxy_protocol": {"type": "string", "enum": ["", "v1", "v2"]},
+             "server_http2": {"type": "boolean", "description": "Speak HTTP/2 to the servers, for gRPC"},
              "notify_mode": {"type": "string", "enum": ["servers", "outage", "off"],
                              "description": "Alert when any server is lost, only when the "
                                             "service has none left, or never"},

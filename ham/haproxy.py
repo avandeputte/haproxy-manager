@@ -6,10 +6,11 @@ import base64
 import functools
 import re
 import socket
+import time
 
 from .base import CERT_DIR, PORT
 from .config import merged
-from .util import _by_id, _sec, cert_path, rule_cond_ids
+from .util import _by_id, _sec, cert_path, rule_cond_ids, run
 from . import access, cloudflare, crowdsec, errorpages, oauth
 
 # --------------------------------------------------------------------------
@@ -143,6 +144,54 @@ def _rule_test(rule, conds):
     else:
         return ""
     return " %s %s" % (rule.get("test", "if"), expr)
+
+
+_UNITS = {"us": 0.001, "ms": 1, "s": 1000, "m": 60000, "h": 3600000, "d": 86400000}
+
+
+def _ms(value):
+    """An HAProxy time in milliseconds, or None when it is not one."""
+    m = re.fullmatch(r"\s*(\d+)\s*(us|ms|s|m|h|d)?\s*", str(value or ""))
+    return int(int(m.group(1)) * _UNITS[m.group(2) or "ms"]) if m else None
+
+
+_version = {"at": 0.0, "value": None}
+
+
+def haproxy_version():
+    """(major, minor) of the HAProxy on this node, or None when it cannot be
+    asked. Asked again every few minutes: a package upgrade changes it under
+    a running app."""
+    if time.time() - _version["at"] > 300:
+        rc, out = run(["haproxy", "-v"], timeout=10)
+        m = re.search(r"version (\d+)\.(\d+)", out or "") if rc == 0 else None
+        _version.update(at=time.time(), value=(int(m.group(1)), int(m.group(2))) if m else None)
+    return _version["value"]
+
+
+# `http-request set-timeout client` came with HAProxy 3.0; before it only the
+# server and tunnel timeouts could be set for one request.
+CLIENT_TIMEOUT_SINCE = (3, 0)
+
+
+def _long_client_timeout(pool, st):
+    """The client timeout a request for this pool should be given, or "".
+
+    A pool's server timeout says how long its connections are meant to last,
+    but the listener holds the visitor's side to the client timeout that
+    stands for everything, 50 s unless changed. A stream that is quiet in
+    both directions -- gRPC, with its request still open -- is cut by that,
+    whatever the pool says. So a pool that waits longer than the listener
+    lends the listener its patience, for its own requests. Never shorter:
+    a pool with a short server timeout leaves the client timeout alone.
+    """
+    if not pool or pool.get("mode", "http") != "http" or (pool.get("redirect_to") or "").strip():
+        return ""
+    own = _ms(pool.get("timeout_server"))
+    base = _ms(st.get("timeout_client") or "50s")
+    if own is None or base is None or own <= base:
+        return ""
+    return _sec(str(pool["timeout_server"]).strip())
 
 
 def _rule_line(rule, conds, backends):
@@ -460,6 +509,7 @@ def render_haproxy(cfg):
             requests.append("tcp-request inspect-delay 5s")
             requests.append("tcp-request content accept if { req_ssl_hello_type 1 }")
 
+        patience = []
         for rid in fe.get("rules") or []:
             r = rules.get(rid)
             if not r:
@@ -470,6 +520,17 @@ def render_haproxy(cfg):
             # Relative order is preserved inside each group, so first-match
             # routing and rule precedence are unchanged.
             (routes if ln.startswith("use_backend") else requests).append(ln)
+            if mode == "http" and r.get("type") == "use_backend":
+                wait, test = _long_client_timeout(backends.get(r.get("backend")), st), _rule_test(r, conds)
+                if wait and test:
+                    patience.append("http-request set-timeout client %s%s" % (wait, test))
+        # The client timeout of a service that waits longer than the listener
+        # does. The last of these to match is the one that holds, so they go
+        # in reverse: of two services a request could be for, the one that
+        # routes it -- the first -- has the last word. Only where HAProxy
+        # knows the directive; an older one keeps the listener's timeout.
+        if patience and (haproxy_version() or (0, 0)) >= CLIENT_TIMEOUT_SINCE:
+            requests.extend(reversed(patience))
 
         for ln in acls + requests + routes:
             A("    " + ln)
@@ -797,6 +858,23 @@ def render_haproxy(cfg):
             pp = PROXY_PROTOCOL.get(sv.get("proxy_protocol"))
             if pp:
                 parts.append(pp)
+            # HTTP/2 to the server, which gRPC cannot do without: HAProxy
+            # speaks HTTP/1.1 to a server unless told otherwise, whatever the
+            # visitor speaks to it. Over TLS it is offered and the server
+            # chooses, so one that only knows HTTP/1.1 still works; in the
+            # clear there is nothing to negotiate with, and it is HTTP/2 or
+            # nothing. An HTTP health check on the traffic port speaks the
+            # same, since a server that knows only HTTP/2 would fail any other.
+            if sv.get("http2") and mode == "http":
+                h2_check = bool(hc) and hc.get("type") == "http" and not sv.get("check_port")
+                if sv.get("ssl"):
+                    parts.append("alpn h2,http/1.1")
+                    if h2_check:
+                        parts.append("check-alpn h2,http/1.1")
+                else:
+                    parts.append("proto h2")
+                    if h2_check:
+                        parts.append("check-proto h2")
             if sv.get("backup"):
                 parts.append("backup")
             if use_cookie:

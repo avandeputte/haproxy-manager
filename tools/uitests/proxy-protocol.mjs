@@ -116,6 +116,10 @@ ok(opts({ proxy_protocol: "v1" }) === "send-proxy" && opts({ proxy_protocol: "" 
 
 // -- the publish form ----------------------------------------------------------
 ok(WIZ_FIELDS.some(f => f.k === "proxy_protocol"), "the publish form has it too");
+/* HTTP/2 to the server (#37) sits beside it, on the server and in the form */
+ok(E["haproxy/servers"].fields.some(f => f.k === "http2" && f.t === "bool") && WIZ_FIELDS.some(f => f.k === "server_http2" && f.t === "bool"),
+   "HTTP/2 to the server is a tick on the Real Server and in the publish form");
+ok(opts({ ssl: true, http2: true }) === "ssl, h2", "and the table says h2 for a server that has it");
 openWizard();
 document.querySelector("#f_url").value = "tcp://0.0.0.0:25";
 document.querySelector("#f_url").dispatchEvent(new window.Event("input"));
