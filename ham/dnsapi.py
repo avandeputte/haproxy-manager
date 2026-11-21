@@ -389,7 +389,7 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
                    stick_type=None, log_health_checks=False, check_port=None,
                    timeout_connect=None, timeout_server=None, service_id=None,
                    auth=None, oauth_opts=None, allow_src=None, notify_mode=None,
-                   rate_limit=None, rate_window=None, proxy_protocol=None,
+                   rate_limit=None, rate_window=None, proxy_protocol=None, server_http2=None,
                    allow_lists=None, error_pages=None, rules=None,
                    hsts=None, hsts_subdomains=None, redirect=None):
     """Create (or update) everything needed to serve `pub` from `tgts`.
@@ -506,6 +506,11 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
             srv["proxy_protocol"] = proxy_protocol
         elif proxy_protocol is not None:
             srv.pop("proxy_protocol", None)
+        # HTTP/2 to the servers, the same way: silence leaves them alone.
+        if server_http2 and not is_tcp:
+            srv["http2"] = True
+        elif server_http2 is not None:
+            srv.pop("http2", None)
         if srv["id"] not in srv_ids:
             srv_ids.append(srv["id"])
 

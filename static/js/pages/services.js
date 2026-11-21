@@ -74,6 +74,8 @@ export const WIZ_SECTIONS=[
      "and also works for tcp:// services. Set on every server behind this service. Only turn it on "+
      "when the servers are set up to expect it (nginx proxy_protocol, Postfix, Dovecot, Traefik...): "+
      "a server that is not refuses every connection."},
+  {k:"server_http2",l:"HTTP/2 to the servers",t:"bool",
+   h:"For gRPC, which needs HTTP/2 all the way to the server. HAProxy speaks HTTP/1.1 to a server unless this is ticked, whatever visitors speak to it. To an https:// server HTTP/2 is offered and the server chooses; to an http:// server it is HTTP/2 only, so tick it only for a server that expects that. Set on every server behind this service."},
  ]},
  {title:"Allowed networks",toggle:"allow_enabled",fields:[
   {k:"allow_enabled",l:"Only allow certain networks",t:"bool",
@@ -482,7 +484,7 @@ export async function servicesCard(){
         balance:s.balance,persistence:s.persistence,stick_type:s.stick_type,
         stick_size:s.stick_size,stick_expire:s.stick_expire,
         log_health_checks:s.log_health_checks,check_port:s.check_port,
-        proxy_protocol:s.proxy_protocol,
+        proxy_protocol:s.proxy_protocol,server_http2:s.server_http2,
         notify_mode:s.notify_mode,
         health:(s.health||{}).type,health_interval:(s.health||{}).interval,
         health_uri:(s.health||{}).uri,health_status:(s.health||{}).status,

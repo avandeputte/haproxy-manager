@@ -772,6 +772,23 @@ def render_haproxy(cfg):
             pp = PROXY_PROTOCOL.get(sv.get("proxy_protocol"))
             if pp:
                 parts.append(pp)
+            # HTTP/2 to the server, which gRPC cannot do without: HAProxy
+            # speaks HTTP/1.1 to a server unless told otherwise, whatever the
+            # visitor speaks to it. Over TLS it is offered and the server
+            # chooses, so one that only knows HTTP/1.1 still works; in the
+            # clear there is nothing to negotiate with, and it is HTTP/2 or
+            # nothing. An HTTP health check on the traffic port speaks the
+            # same, since a server that knows only HTTP/2 would fail any other.
+            if sv.get("http2") and mode == "http":
+                h2_check = bool(hc) and hc.get("type") == "http" and not sv.get("check_port")
+                if sv.get("ssl"):
+                    parts.append("alpn h2,http/1.1")
+                    if h2_check:
+                        parts.append("check-alpn h2,http/1.1")
+                else:
+                    parts.append("proto h2")
+                    if h2_check:
+                        parts.append("check-proto h2")
             if sv.get("backup"):
                 parts.append("backup")
             if use_cookie:

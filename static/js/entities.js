@@ -41,7 +41,7 @@ export const E={
  "haproxy/servers":{title:"Real Servers",one:"Real Server",add:"Add server",
   intro:"The upstream hosts traffic is forwarded to. Attach them to Backend Pools.",
   cols:[["name","Name"],["address","Address",r=>esc(r.address)+":"+esc(r.port)],
-        ["opts","Options",r=>[r.ssl?"ssl":"",PROXY_KEYWORD[r.proxy_protocol]||"",
+        ["opts","Options",r=>[r.ssl?"ssl":"",r.http2?"h2":"",PROXY_KEYWORD[r.proxy_protocol]||"",
                               r.backup?"backup":""].filter(Boolean).join(", ")||"—"],
         ["enabled","Enabled",r=>r.enabled!==false?t("yes"):t("no")]],
   fields:[
@@ -58,6 +58,7 @@ export const E={
      "and also works for tcp:// services. Only turn it on when the server is set up to expect it "+
      "(nginx proxy_protocol, Postfix, Dovecot, Traefik...): a server that is not refuses every "+
      "connection. Health checks to a separate check port are sent without it."},
+   {k:"http2",l:"HTTP/2 to the server",t:"bool",h:"For gRPC, which needs HTTP/2 all the way to the server. With Encrypt to server, HTTP/2 is offered and the server chooses (alpn h2,http/1.1); without it, HAProxy speaks HTTP/2 only (proto h2). HTTP pools only."},
    {k:"backup",l:"Backup server",t:"bool",h:"Only receives traffic when all non-backup servers are down"},
    {k:"description",l:"Description",t:"text"}]},
 
