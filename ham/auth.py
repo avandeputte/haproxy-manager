@@ -180,6 +180,7 @@ LOCAL_WRITE_PREFIXES = (
     "/api/webui",          # this node's own UI address, not shared
     "/api/unlock",         # lifting the lock cannot itself be blocked by it
     "/api/crowdsec/install",   # this node's own bouncer package
+    "/api/cloudflare/install", # this node's own cloudflared
     "/api/mcp",            # this node's MCP server and its token
     "/api/probes/run",     # probing from this node, which says itself why a passive one does not
 )

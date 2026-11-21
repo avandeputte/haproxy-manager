@@ -113,6 +113,18 @@ export const WIZ_SECTIONS=[
      "of these headers a client sends is stripped on every service, so the value is always this "+
      "proxy's word. Only safe while the app is reachable through the proxy alone."},
  ]},
+ /* Reached through Cloudflare's tunnel instead of -- or as well as -- this
+    node's own ports, with Cloudflare Access deciding who gets that far. */
+ {title:"Cloudflare (beta)",toggle:"cf_enabled",http:true,fields:[
+  {k:"cf_enabled",l:"Publish through Cloudflare",t:"bool",
+   h:"Beta. Visitors reach this service through your Cloudflare Tunnel: Apply adds the route, the DNS record and, when asked for below, the Access application. Needs no open port and no certificate here -- publish the service as http:// and Cloudflare serves it over HTTPS. Connect Cloudflare first, under Access > Cloudflare."},
+  {k:"cf_access",l:"Who may reach it",t:"select",o:["public","allow"],d:"public",
+   h:"With a sign-in, Cloudflare Access asks every visitor to sign in before the request reaches this node, and lets in only the identities listed below."},
+  {k:"cf_allow",l:"Allowed identities",t:"textarea",
+   h:"For the sign-in. One per line: an email, a whole domain as @example.com, or * for anyone your Cloudflare identity provider signs in."},
+  {k:"cf_only",l:"Through Cloudflare only",t:"bool",
+   h:"Refuse every request that did not come through the tunnel, so nobody on the LAN or on this node's own ports gets round the sign-in. Leave off to keep the service reachable directly as well."},
+ ]},
  /* Last: what a service picks for itself from the Advanced pages. The pages
     that stand for every service apply without being picked; HTTP only, as
     the answer is a page. Rules picked here are acted on inside the service's
@@ -130,6 +142,7 @@ export const WIZ_SECTIONS=[
 /* every field, in the order it is shown -- what the form reads and sends */
 export const WIZ_FIELDS=WIZ_SECTIONS.flatMap(sec=>sec.fields);
 /* the checkboxes that only stand for a section being on or off */
+export const CF_ACCESS_LABEL={public:"anyone -- no sign-in",allow:"a Cloudflare Access sign-in, for the identities below"};
 const SECTION_ONLY=["health_enabled","allow_enabled","rate_enabled"];
 /* which of the health_* rows make sense for each check kind */
 export const HEALTH_SHOWS={none:[],tcp:["health_interval"],ssl:["health_interval"],
@@ -265,6 +278,8 @@ export function openWizard(prefill){
   if(hsel)[...hsel.options].forEach(o=>{o.textContent=t(HEALTH_LABEL[o.value]||o.value);});
   const nsel=frm.querySelector("#f_notify_mode");
   if(nsel)[...nsel.options].forEach(o=>{o.textContent=t(NOTIFY_MODE_LABEL[o.value]||o.value);});
+  const csel=frm.querySelector("#f_cf_access");
+  if(csel)[...csel.options].forEach(o=>{o.textContent=t(CF_ACCESS_LABEL[o.value]||o.value);});
   const setRow=(k,on)=>{(rows[k]||[]).forEach(el=>{el.style.display=on?"":"none";});};
   const val=k=>((fieldEl(k)||{}).value||"");
   const on=k=>!!(fieldEl(k)||{}).checked;
@@ -333,10 +348,12 @@ export function openWizard(prefill){
     d.auth={enabled:d.auth_enabled,groups:d.auth_groups,realm:d.auth_realm,
             exempt:d.auth_exempt,exempt_lists:d.auth_exempt_lists};
     d.oauth={enabled:d.oauth_enabled,allow:d.oauth_allow,forward:d.oauth_forward};
+    d.cloudflare={enabled:!!d.cf_enabled,access:d.cf_access||"public",allow:d.cf_allow||"",only:!!d.cf_only};
     ["cert_mode","health_interval","health_uri","health_status","health_user",
      "health_method","health_version","health_host",
      "auth_enabled","auth_groups","auth_realm","auth_exempt","auth_exempt_lists",
-     "oauth_enabled","oauth_allow","oauth_forward"].forEach(k=>delete d[k]);
+     "oauth_enabled","oauth_allow","oauth_forward",
+     "cf_enabled","cf_access","cf_allow","cf_only"].forEach(k=>delete d[k]);
     return d;   // balance / persistence / stick_* / check_port / log_health_checks pass straight through
   };
   const show=(r,saved)=>{
@@ -380,7 +397,7 @@ export function openWizard(prefill){
      rows that should appear and disappear as the URL changes stayed as they
      were first drawn. */
   if(hsel)hsel.addEventListener("change",syncRows);
-  ["url","persistence","auth_enabled","oauth_enabled","action","hsts",...SECTION_ONLY].forEach(k=>{
+  ["url","persistence","auth_enabled","oauth_enabled","cf_enabled","action","hsts",...SECTION_ONLY].forEach(k=>{
     const el=fieldEl(k);
     if(el){el.addEventListener("change",syncRows);el.addEventListener("input",syncRows);
            el.addEventListener("blur",syncRows);}
@@ -450,6 +467,12 @@ export async function servicesCard(){
                esc(auth.exempt.split("\n").filter(Boolean).concat(auth.exempt_list_names||[]).join(", "))}):"")+"</div>":"")+
           ((s.oauth||{}).enabled?'<div class=sub>'+t("sign-in via SSO &mdash; {who}",{who:
              esc(((s.oauth||{}).allow||[]).map(a=>a==="*"?t("anyone the provider signs in"):a).join(", "))})+"</div>":"")+
+          ((s.cloudflare||{}).enabled?'<div class=sub>'+
+             ((s.cloudflare.access==="allow")
+               ?t("through Cloudflare &mdash; sign-in for {who}",{who:
+                  esc((s.cloudflare.allow||"").split("\n").filter(Boolean).map(a=>a==="*"?t("anyone the provider signs in"):a).join(", "))})
+               :t("through Cloudflare &mdash; no sign-in"))+
+             (s.cloudflare.only?", "+t("and only through it"):"")+"</div>":"")+
           (s.allow_src||(s.allow_list_names||[]).length?'<div class=sub>'+t("only from {networks}",{networks:
              esc(s.allow_src.split("\n").filter(Boolean).concat(s.allow_list_names||[]).join(", "))})+"</div>":"")+
           (s.rate_limit?'<div class=sub>'+(s.scheme==="tcp"
@@ -495,6 +518,8 @@ export async function servicesCard(){
         oauth_enabled:(s.oauth||{}).enabled,
         oauth_allow:((s.oauth||{}).allow||[]).join("\n"),
         oauth_forward:(s.oauth||{}).forward,
+        cf_enabled:(s.cloudflare||{}).enabled,cf_access:(s.cloudflare||{}).access,
+        cf_allow:(s.cloudflare||{}).allow,cf_only:(s.cloudflare||{}).only,
         allow_src:s.allow_src,allow_lists:s.allow_lists,
         error_pages:s.error_pages,rules:s.rules,
         hsts:s.hsts,hsts_subdomains:s.hsts_subdomains,

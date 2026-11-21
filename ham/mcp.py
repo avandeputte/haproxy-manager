@@ -206,6 +206,7 @@ def _item_path(args):
 COLLECTIONS = sorted("%s/%s" % (s, c) for s, cols in VALID_COLLECTIONS.items() for c in cols)
 SETTINGS_READ = {"haproxy": "/api/haproxy/settings", "acme": "/api/acme/settings",
                  "cluster": "/api/cluster/settings", "crowdsec": "/api/crowdsec/settings",
+                 "cloudflare": "/api/cloudflare/settings",
                  "notify": "/api/notify", "watchdog": "/api/watchdog"}
 SETTINGS_WRITE = {"haproxy": "/api/haproxy/settings", "acme": "/api/acme/settings"}
 # The log viewer's own sources, so the two cannot drift apart. "app" is what
@@ -231,6 +232,8 @@ def _service_body(s):
                      "exempt_lists": a.get("exempt_lists") or []},
             "oauth": {"enabled": o.get("enabled"), "allow": "\n".join(o.get("allow") or []),
                       "forward": o.get("forward")}}
+    if isinstance(s.get("cloudflare"), dict):
+        body["cloudflare"] = dict(s["cloudflare"])
     for k in ("balance", "persistence", "stick_type", "stick_size", "stick_expire",
               "log_health_checks", "check_port", "proxy_protocol", "notify_mode",
               "timeout_connect", "timeout_server", "allow_src", "allow_lists", "error_pages",
@@ -452,7 +455,7 @@ TOOLS = [
          lambda a: _get(_collection(a))),
     tool("get_settings", "Get settings",
          "Settings of one section: haproxy (timeouts, maxconn, IPv6, unknown hosts...), acme, "
-         "cluster (VRRP), crowdsec, notify, watchdog.",
+         "cluster (VRRP), crowdsec, cloudflare (the tunnel), notify, watchdog.",
          _schema({"section": {"type": "string", "enum": list(SETTINGS_READ)}}, ["section"]),
          t_settings),
     tool("get_haproxy_config", "Rendered haproxy.cfg",
@@ -552,6 +555,9 @@ TOOLS = [
              "auth": {"type": "object", "description": "Ask visitors to sign in: {enabled, "
                       "groups: [group ids], realm, exempt, exempt_lists}"},
              "oauth": {"type": "object", "description": "Single sign-on: {enabled, allow, forward}"},
+             "cloudflare": {"type": "object", "description": "Publish through the Cloudflare Tunnel (beta, "
+                            "HTTP services): {enabled, access: public|allow, allow: emails, @domains or * "
+                            "one per line, only: refuse what did not come through the tunnel}"},
              "allow_src": {"type": "string", "description": "Only these networks, space-separated"},
              "allow_lists": {"type": "array", "items": S, "description": "Address list ids"},
              "error_pages": {"type": "array", "items": S, "description": "Error page ids"},

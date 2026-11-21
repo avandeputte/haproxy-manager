@@ -51,6 +51,7 @@ stored = json.loads(CONF_PATH.read_text())
 for key in ("addresslists", "errorpages"):
     stored["haproxy"].pop(key)
 stored.pop("crowdsec")           # 2.0.0-beta.3 added the section; 1.100 never had it
+stored.pop("cloudflare")         # 2.4.0-beta.1 added this one
 stored["_meta"]["applied_hash"] = old_hash(stored)
 CONF_PATH.write_text(json.dumps(stored))
 

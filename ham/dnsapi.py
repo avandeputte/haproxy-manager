@@ -13,7 +13,7 @@ import uuid
 from .base import ACME_HOME, ACME_SH, _lock, app
 from .config import load_config, save_config
 from .util import _by_id, _sec, cert_details, cert_path, parse_domains, rule_cond_ids, run
-from . import access, acme, adcs, errorpages, validate, wizard, oauth
+from . import access, acme, adcs, cloudflare, errorpages, validate, wizard, oauth
 from .validate import plain_url as _plain_url
 
 # --------------------------------------------------------------------------
@@ -391,7 +391,7 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
                    auth=None, oauth_opts=None, allow_src=None, notify_mode=None,
                    rate_limit=None, rate_window=None, proxy_protocol=None,
                    allow_lists=None, error_pages=None, rules=None,
-                   hsts=None, hsts_subdomains=None, redirect=None):
+                   hsts=None, hsts_subdomains=None, redirect=None, cloudflare_opts=None):
     """Create (or update) everything needed to serve `pub` from `tgts`.
 
     Re-running for the same public host updates that mapping instead of adding
@@ -607,6 +607,31 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
             warns.append("A tcp:// service forwards a raw port, which carries no place "
                          "for a sign-in redirect, so OIDC was not applied.")
     oauth.validate_pool_oauth(cfg, pool_opts, existing_pool)
+    # Published through Cloudflare's tunnel, with Access in front when asked.
+    # Silence leaves the pool as it is; enabled:false clears it.
+    if cloudflare_opts is not None:
+        want = bool(cloudflare_opts.get("enabled")) and not is_tcp
+        cf_mode = cloudflare_opts.get("access") if cloudflare_opts.get("access") in cloudflare.ACCESS_MODES else "public"
+        entries, bad = oauth.parse_allow(cloudflare_opts.get("allow"))
+        if want and cf_mode == "allow":
+            if bad:
+                raise ValueError("not an email address or @domain: %s -- one per line, "
+                                 "or * for anyone who signs in" % ", ".join(bad[:3]))
+            if not entries:
+                raise ValueError("Cloudflare Access needs to know who may sign in: an email address "
+                                 "or @domain per line, or * for anyone your identity provider accepts")
+        pool_opts["cf_tunnel"] = want
+        pool_opts["cf_access"] = cf_mode if want else "public"
+        pool_opts["cf_access_allow"] = "\n".join(entries) if want and cf_mode == "allow" else ""
+        pool_opts["cf_only"] = bool(cloudflare_opts.get("only")) and want
+        if bool(cloudflare_opts.get("enabled")) and is_tcp:
+            warns.append("A tcp:// service cannot be published through Cloudflare here: the tunnel "
+                         "carries HTTP and HTTPS services only, so it was not applied.")
+        elif want and not cloudflare.configured(cfg):
+            warns.append("This service is marked for Cloudflare, but Cloudflare is not connected yet, so "
+                         "nothing is published there. Connect it under Access > Cloudflare, then Apply."
+                         + (" Until then the service refuses every request, because it is set to be "
+                            "reached through Cloudflare only." if pool_opts["cf_only"] else ""))
 
     # -- Health Monitor ---------------------------------------------------
     monitor = None

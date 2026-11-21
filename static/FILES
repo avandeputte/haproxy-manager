@@ -23,6 +23,7 @@ js/pages/acme.js
 js/pages/backup.js
 js/pages/certificates.js
 js/pages/conditions.js
+js/pages/cloudflare.js
 js/pages/crowdsec.js
 js/pages/cluster.js
 js/pages/history.js

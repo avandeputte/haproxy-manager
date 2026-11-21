@@ -114,6 +114,21 @@ DEFAULT_CONFIG = {
         "appsec_url": "",
         "appsec_reject_large": False,   # 413 for a body too large to inspect
     },
+    # Cloudflare Tunnel: services reached through Cloudflare, with Access in
+    # front of the ones that ask for it. Shared: every node runs the same
+    # connector with the same token, and Cloudflare spreads visitors over
+    # whichever of them are connected.
+    "cloudflare": {
+        "enabled": False,
+        "api_token": "",             # Tunnel, DNS and Access edit rights
+        "account_id": "",            # found from the token when it sees one account
+        "tunnel_name": "haproxy-manager",
+        "tunnel_id": "",             # filled in when the tunnel is made
+        "tunnel_token": "",          # what cloudflared presents; from the API
+        # The first of the loopback ports cloudflared reaches HAProxy on: one
+        # per listener that carries a service published this way.
+        "origin_port": 7811,
+    },
     # Cluster-wide VRRP settings: identical on every node, so they sync.
     "cluster": {
         # The name that should reach whichever node is currently active. It is
@@ -341,7 +356,7 @@ def _lacks_defaults(cfg):
             if isinstance(v, dict) and isinstance(dst.get(k), dict) and lacks(dst[k], v):
                 return True
         return False
-    parts = [(cfg.get(sec), DEFAULT_CONFIG[sec]) for sec in ("haproxy", "acme", "cluster", "crowdsec")]
+    parts = [(cfg.get(sec), DEFAULT_CONFIG[sec]) for sec in ("haproxy", "acme", "cluster", "crowdsec", "cloudflare")]
     parts.append(((cfg.get("local") or {}).get("keepalived"), DEFAULT_CONFIG["local"]["keepalived"]))
     return any(not isinstance(dst, dict) or lacks(dst, src) for dst, src in parts)
 
@@ -491,7 +506,8 @@ def shared_view(cfg):
             "access": cfg.get("access", {}),
             "cluster": cfg["cluster"],
             "notify": cfg.get("notify", {}),
-            "crowdsec": cfg.get("crowdsec", {})}
+            "crowdsec": cfg.get("crowdsec", {}),
+            "cloudflare": cfg.get("cloudflare", {})}
 
 
 def _fp(value):
@@ -714,6 +730,8 @@ def config_hash(cfg):
              "keepalived": cfg["local"]["keepalived"]}
     if "crowdsec" in cfg:
         parts["crowdsec"] = cfg["crowdsec"]
+    if "cloudflare" in cfg:
+        parts["cloudflare"] = cfg["cloudflare"]
     payload = json.dumps(parts, sort_keys=True)
     return hashlib.sha256(payload.encode()).hexdigest()
 

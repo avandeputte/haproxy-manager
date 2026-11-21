@@ -29,6 +29,12 @@ CROWDSEC_BOUNCER_CFG = Path(os.environ.get("HAM_CROWDSEC_BOUNCER_CFG",
                                            "/etc/crowdsec/bouncers/crowdsec-spoa-bouncer.yaml"))
 CROWDSEC_BIN = Path(os.environ.get("HAM_CROWDSEC_BIN", "/usr/bin/crowdsec-spoa-bouncer"))
 CROWDSEC_HTML = Path(os.environ.get("HAM_CROWDSEC_HTML", "/var/lib/crowdsec-haproxy-spoa-bouncer/html"))
+# Cloudflare Tunnel: the connector's binary, the file its token is handed over
+# in, and the unit this app writes for it under systemd.
+CLOUDFLARED_BIN = Path(os.environ.get("HAM_CLOUDFLARED_BIN", "/usr/bin/cloudflared"))
+CLOUDFLARED_ENV = Path(os.environ.get("HAM_CLOUDFLARED_ENV", str(DATA_DIR / "cloudflared.env")))
+CLOUDFLARED_UNIT_FILE = Path(os.environ.get("HAM_CLOUDFLARED_UNIT_FILE",
+                                            "/etc/systemd/system/ham-cloudflared.service"))
 KEEPALIVED_CFG = Path(os.environ.get("HAM_KEEPALIVED_CFG", "/etc/keepalived/keepalived.conf"))
 ACME_HOME = Path(os.environ.get("HAM_ACME_HOME", str(Path.home() / ".acme.sh")))
 ACME_SH = os.environ.get("HAM_ACME_SH", str(ACME_HOME / "acme.sh"))

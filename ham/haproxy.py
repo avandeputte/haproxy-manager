@@ -10,7 +10,7 @@ import socket
 from .base import CERT_DIR, PORT
 from .config import merged
 from .util import _by_id, _sec, cert_path, rule_cond_ids
-from . import access, crowdsec, errorpages, oauth
+from . import access, cloudflare, crowdsec, errorpages, oauth
 
 # --------------------------------------------------------------------------
 
@@ -263,6 +263,9 @@ def render_haproxy(cfg):
     configuration that leaves out the service publishing this node's own
     management UI.
     """
+    # Asked of the shared configuration, before this node's own objects join
+    # it: the tunnel's routes are one thing for the whole cluster.
+    cf_routes = cloudflare.routes(cfg)
     cfg = merged(cfg)
     hp = cfg["haproxy"]
     st = hp["settings"]
@@ -374,8 +377,20 @@ def render_haproxy(cfg):
             if b.strip():
                 for addr in _bind_addresses(b.strip(), st):
                     A("    bind %s%s" % (addr, ssl_suffix))
+        # Where cloudflared hands over what came down the tunnel: a loopback
+        # port of this listener's own, in the clear -- the visitor's TLS ended
+        # at Cloudflare.
+        cf_binds, cf_decl, cf_asks = ([], [], []) if mode != "http" else \
+            cloudflare.frontend_lines(cf_routes, fe)
+        for addr in cf_binds:
+            A("    bind %s" % addr)
         A("    mode %s" % mode)
         A("    option httplog" if mode == "http" else "    option tcplog")
+        # First of all: who the visitor is, when Cloudflare brought them --
+        # before the headers below are written from that address, and before
+        # anything is decided by it.
+        for ln in cf_decl + cf_asks:
+            A("    " + ln)
         if mode == "http" and fe.get("forwardfor", True):
             A("    option forwardfor")
             # The names some applications read instead: the visitor's address
@@ -403,6 +418,11 @@ def render_haproxy(cfg):
             routes.append("use_backend bk_acme_challenge if acme_challenge")
         if mode == "http" and fe.get("http_to_https") and not fe.get("ssl_enabled"):
             excl = " if !acme_challenge !{ ssl_fc }" if acme_on else " unless { ssl_fc }"
+            if cf_decl:
+                # Down the tunnel the visitor is on HTTPS already; sending
+                # them there again would never end.
+                excl = (" if !acme_challenge !{ ssl_fc } !cf_tunnel" if acme_on
+                        else " if !{ ssl_fc } !cf_tunnel")
             requests.append("http-request redirect scheme https code 301" + excl)
         if sso_on and mode == "http" and fe.get("ssl_enabled"):
             # The sign-in host: nothing but /.ham-sso/ lives on it, and this
@@ -539,6 +559,11 @@ def render_haproxy(cfg):
                       'string "This service is down for maintenance."')
             else:
                 A("    tcp-request content reject")
+        # Through Cloudflare only: what did not come down the tunnel stops
+        # here, before the allow-list -- which the tunnel's visitors are then
+        # still held to, by their own addresses.
+        for ln in cloudflare.backend_lines(cf_routes, be):
+            A("    " + ln)
         # Who may reach this pool by source address. Works for TCP too --
         # unlike the sign-in, an address needs no place in the protocol to
         # carry it. A list where every entry is malformed refuses everyone:

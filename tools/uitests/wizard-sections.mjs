@@ -70,8 +70,8 @@ const publish = async () => { sent = null; await findButton($("#dlgfoot"), "Publ
 // -- the shape ---------------------------------------------------------------
 openWizard();
 ok(headings().map(h => h.textContent).join("|") ===
-   "Service|Certificate|Health check|Balancing and timeouts|Allowed networks|Rate limiting|Sign-in|Single sign-on (OIDC)|Error pages|Rules",
-   "the form is ten sections, in this order: " + headings().map(h => h.textContent).join(", "));
+   "Service|Certificate|Health check|Balancing and timeouts|Allowed networks|Rate limiting|Sign-in|Single sign-on (OIDC)|Cloudflare (beta)|Error pages|Rules",
+   "the form is eleven sections, in this order: " + headings().map(h => h.textContent).join(", "));
 const order = [...document.querySelectorAll("#dlgbody .fsec, #dlgbody [data-field]")]
   .map(e => e.classList.contains("fsec") ? "#" + e.textContent : e.getAttribute("data-field"));
 ok(order.indexOf("#Rate limiting") < order.indexOf("rate_enabled") &&
@@ -82,8 +82,8 @@ ok(certHead.nextElementSibling.nextElementSibling.querySelector(".hint") &&
    order.indexOf("#Certificate") + 1 === order.indexOf("cert_mode"),
    "which certificate a host gets is said under the Certificate heading, before its fields");
 ok(WIZ_SECTIONS.filter(s => s.toggle).map(s => s.toggle).join(",") ===
-   "health_enabled,allow_enabled,rate_enabled,auth_enabled,oauth_enabled",
-   "five sections are optional, each opened by one checkbox");
+   "health_enabled,allow_enabled,rate_enabled,auth_enabled,oauth_enabled,cf_enabled",
+   "six sections are optional, each opened by one checkbox");
 ok(WIZ_SECTIONS.every(s => !s.toggle || s.fields[0].k === s.toggle), "and the checkbox is the first thing in each");
 ok(WIZ_FIELDS.length === WIZ_SECTIONS.reduce((n, s) => n + s.fields.length, 0), "WIZ_FIELDS is every section's fields, flat");
 

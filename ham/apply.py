@@ -11,12 +11,12 @@ import socket
 import tempfile
 import time
 
-from .base import (ACME_SH, CERT_DIR, CROWDSEC_SPOE, ERROR_DIR, HAPROXY_CFG, KEEPALIVED_CFG,
+from .base import (ACME_SH, CERT_DIR, CLOUDFLARED_ENV, CROWDSEC_SPOE, ERROR_DIR, HAPROXY_CFG, KEEPALIVED_CFG,
     VERSION, _lock, _requests, app, log)
 from .config import CLUSTER_KEYS, config_hash, load_config, merged, save_config, shared_objects, shared_parts
 from .util import _by_id, cert_details, cert_path, parse_domains, run
 from .validate import check_setting_types
-from . import acme, auth, cluster, crowdsec, errorpages, haproxy, keepalived, notify, sync, updates, vrrp, watchdog, wizard
+from . import acme, auth, cloudflare, cluster, crowdsec, errorpages, haproxy, keepalived, notify, sync, updates, vrrp, watchdog, wizard
 
 # --------------------------------------------------------------------------
 
@@ -396,6 +396,13 @@ def do_apply(cfg=None, allow_push=True):
             result["steps"].append(step)
         if warning:
             result.setdefault("warnings", []).append(warning)
+        # cloudflared, the same way: running while Cloudflare is on.
+        cf_files = cloudflare.write_files(cfg) if cloudflare.installed() else []
+        step, warning = cloudflare.ensure_service(cfg, changed=CLOUDFLARED_ENV.name in cf_files)
+        if step:
+            result["steps"].append(step)
+        if warning:
+            result.setdefault("warnings", []).append(warning)
         fd, staging = tempfile.mkstemp(suffix=".cfg")
         with os.fdopen(fd, "w") as f:
             f.write(text)
@@ -498,6 +505,15 @@ def do_apply(cfg=None, allow_push=True):
     # This node's own revision has just moved, so the health collected before
     # it would report this node as holding something it no longer holds.
     cluster.invalidate()
+    # Cloudflare is told once, by the node the change was made on, and after
+    # HAProxy here is ready for what Cloudflare will send. Outside the lock,
+    # like the push: it is a conversation over the network. A passive node
+    # re-applying what it holds says nothing -- it may be behind.
+    if allow_push and result.get("ok") and auth.node_role(cfg)[0] != "passive":
+        steps, warnings = cloudflare.reconcile(cfg)
+        result["steps"] += steps
+        if warnings:
+            result.setdefault("warnings", []).extend(warnings)
     if allow_push and cfg["local"]["sync"].get("auto_sync") and sync.enabled_peers(cfg):
         r = sync.sync_push(cfg)
         result["steps"].append("auto-sync to %d peer(s): " % len(sync.enabled_peers(cfg)) +
@@ -596,6 +612,7 @@ def api_status():
         "role": ("active" if held else "passive") if vips else "standalone",
         "dirty": cfg["_meta"].get("applied_hash") != config_hash(cfg),
         "crowdsec": crowdsec.summary(cfg),
+        "cloudflare": cloudflare.summary(cfg),
         # Which shared configuration this node holds. Two nodes with the same
         # fingerprint agree; different fingerprints mean one of them is behind,
         # and the revision says which.

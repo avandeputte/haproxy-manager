@@ -45,6 +45,7 @@ export const NAV=[
  ["p:sso","Single sign-on"],
  ["haproxy/addresslists","Address Lists"],
  ["p:crowdsec","CrowdSec"],
+ ["p:cloudflare","Cloudflare"],
  /* Settings last: everything here is something you set once and revisit
     rarely, unlike the pages above that you watch. */
  ["grp","SETTINGS","collapse"],
