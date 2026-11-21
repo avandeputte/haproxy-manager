@@ -131,6 +131,26 @@ ok(not any("timeout tunnel" in ln for ln in block("defaults"))
    and not any("timeout tunnel" in ln for ln in block("backend be_pg"))
    and any("timeout tunnel 1h" in ln for ln in block("backend be_app")),
    "the tunnel timeout is an HTTP pool's: a tcp:// service keeps its client and server timeouts")
+
+# A tcp:// service with a server timeout of its own: the listener's 50 s client
+# timeout must not cut it first (#35), and the WebSocket setting stays out of it.
+c = load_config()
+pg = [b for b in c["haproxy"]["backends"] if b["name"] == "pg"][0]
+pg["timeout_server"] = "8h"; save_config(c)
+ok("timeout server 8h" in block("backend be_pg") and "timeout tunnel 8h" in block("backend be_pg"),
+   "a tcp:// pool's server timeout is its tunnel timeout too, so the listener's client timeout does not cut it at 50 s")
+ok(not any("timeout tunnel 8h" in ln for ln in block("backend be_app")),
+   "and it stays that pool's own")
+c = load_config()
+pg = [b for b in c["haproxy"]["backends"] if b["name"] == "pg"][0]
+pg["custom"] = "timeout  tunnel 2h"; save_config(c)
+ok([ln for ln in block("backend be_pg") if "tunnel" in ln] == ["timeout  tunnel 2h"],
+   "a tunnel timeout written in the pool's Extra directives is the only one")
+c = load_config()
+pg = [b for b in c["haproxy"]["backends"] if b["name"] == "pg"][0]
+pg["custom"] = ""; pg["timeout_server"] = ""; save_config(c)
+ok(not any("timeout tunnel" in ln for ln in block("backend be_pg")),
+   "without a server timeout of its own a tcp:// pool gets no tunnel timeout")
 r = client.put("/api/haproxy/settings", headers=H, json={"timeout_tunnel": "forever"})
 ok(r.status_code == 400 and "timeout_tunnel" in r.get_json()["error"], "a tunnel timeout that is not a time is refused")
 

@@ -696,6 +696,16 @@ def render_haproxy(cfg):
         # connection and this would replace the client and server timeouts.
         if mode == "http" and (st.get("timeout_tunnel") or "").strip():
             A("    timeout tunnel %s" % _sec(st["timeout_tunnel"].strip()))
+        # A tcp:// service is a tunnel from its first byte, and HAProxy holds
+        # both halves to their own timeout: the listener's `timeout client`
+        # (the 50 s in `defaults`) cut an idle session, or a query the server
+        # was still working on, whatever `timeout server` said here. The
+        # tunnel timeout replaces both, so the pool's server timeout is the
+        # one that counts. A pool that names its own in Extra directives
+        # keeps that.
+        if (mode == "tcp" and be.get("timeout_server")
+                and not re.search(r"(?mi)^\s*timeout\s+tunnel\b", be.get("custom") or "")):
+            A("    timeout tunnel %s" % _sec(str(be["timeout_server"])))
         use_cookie = be.get("persistence") == "cookie" and mode == "http"
         if use_cookie:
             A("    cookie %s insert indirect nocache" % (be.get("cookie_name") or "SRVID"))
