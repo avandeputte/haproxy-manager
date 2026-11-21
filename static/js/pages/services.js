@@ -68,7 +68,7 @@ export const WIZ_SECTIONS=[
   {k:"stick_size",l:"Stick table size",t:"text",d:"50k"},
   {k:"stick_expire",l:"Stick table expiry",t:"text",d:"30m"},
   {k:"timeout_connect",l:"Connect timeout",t:"text",h:"Optional, for this pool only, e.g. 5s"},
-  {k:"timeout_server",l:"Server timeout",t:"text",h:"Optional, for this pool only, e.g. 30s. Long-lived connections such as databases usually need more than the default."},
+  {k:"timeout_server",l:"Server timeout",t:"text",h:"Optional, for this pool only, e.g. 30s. Long-lived connections such as databases usually need more than the default. On a tcp:// service it is also how long a connection may sit idle, in either direction."},
   {k:"proxy_protocol",l:"PROXY protocol",t:"select",o:PROXY_OPTIONS,d:"",
    h:"Tells the servers the visitor's real address, the way X-Forwarded-For does for HTTP, "+
      "and also works for tcp:// services. Set on every server behind this service. Only turn it on "+
