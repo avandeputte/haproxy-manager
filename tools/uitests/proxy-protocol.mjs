@@ -52,7 +52,7 @@ globalThis.fetch = async (u, o) => {
 
 const { E } = await import(REPO + "/static/js/entities.js");
 const { fieldRow, readForm } = await import(REPO + "/static/js/core.js");
-const { openWizard, servicesCard, WIZ_FIELDS } = await import(REPO + "/static/js/pages/services.js");
+const { openWizard, servicesCard, WIZ_FIELDS, WIZ_SECTIONS } = await import(REPO + "/static/js/pages/services.js");
 
 let fail = 0;
 const ok = (c, m) => { console.log((c ? "  PASS  " : "  FAIL  ") + m); if (!c) fail++; };
@@ -127,6 +127,10 @@ document.querySelector("#f_target").value = "10.0.0.25:25";
 const wsel = document.querySelector("#f_proxy_protocol");
 ok(!!wsel && wsel.value === "", "it opens off for a new service");
 ok(!rowHidden("proxy_protocol"), "and is shown for a tcp:// service");
+ok(rowHidden("server_http2"), "HTTP/2 to the servers is not: a raw port carries bytes");
+const svcKeys = WIZ_SECTIONS.find(s => s.title === "Service").fields.map(f => f.k);
+ok(svcKeys.indexOf("proxy_protocol") === svcKeys.indexOf("target") + 1 && svcKeys.indexOf("server_http2") === svcKeys.indexOf("target") + 2,
+   "both sit in the Service section, right under where the servers are named");
 wsel.value = "v2";
 sent = null;
 await findButton(document.querySelector("#dlgfoot"), "Publish").onclick();

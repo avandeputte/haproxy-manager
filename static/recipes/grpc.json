@@ -1,0 +1,19 @@
+{
+  "name": "gRPC service",
+  "category": "Web",
+  "summary": "HTTPS with HTTP/2 all the way to the servers, and streams that may stay open for a day.",
+  "notes": "gRPC needs HTTP/2 from the visitor to the server, and HAProxy speaks HTTP/1.1 to a server unless HTTP/2 to the servers is ticked, which this does. The example servers are https://; for a server that speaks gRPC in the clear, give it as http:// and it is spoken HTTP/2 only. The check is a plain connect, since a server that answers nothing but gRPC fails an HTTP one. The server timeout is how long a stream may sit silent: on HAProxy 3.0 or later the visitor's side follows it, on an older one add timeout client to the listener's Extra directives.",
+  "fields": {
+    "url": "https://grpc.example.com",
+    "target": "grpc1=https://10.0.0.10:443, grpc2=https://10.0.0.11:443",
+    "server_http2": true,
+    "balance": "roundrobin",
+    "persistence": "none",
+    "health": "tcp",
+    "health_interval": "5s",
+    "timeout_server": "24h",
+    "timeout_connect": "5s",
+    "cert_mode": "auto",
+    "http_redirect": true
+  }
+}

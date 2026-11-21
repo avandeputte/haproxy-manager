@@ -23,6 +23,14 @@ export const WIZ_SECTIONS=[
      "A path like /api is allowed on a single URL, and tcp://0.0.0.0:3306 forwards a raw TCP port."},
   {k:"target",l:"Forward to",t:"text",
    h:"e.g. http://192.168.1.100:1781. Several (comma separated) are load balanced, and each may be named: galera1=192.168.1.81:3306"},
+  /* how the servers are spoken to: beside where they are named */
+  {k:"proxy_protocol",l:"PROXY protocol",t:"select",o:PROXY_OPTIONS,d:"",
+   h:"Tells the servers the visitor's real address, the way X-Forwarded-For does for HTTP, "+
+     "and also works for tcp:// services. Set on every server behind this service. Only turn it on "+
+     "when the servers are set up to expect it (nginx proxy_protocol, Postfix, Dovecot, Traefik...): "+
+     "a server that is not refuses every connection."},
+  {k:"server_http2",l:"HTTP/2 to the servers",t:"bool",
+   h:"For gRPC, which needs HTTP/2 all the way to the server. HAProxy speaks HTTP/1.1 to a server unless this is ticked, whatever visitors speak to it. To an https:// server HTTP/2 is offered and the server chooses; to an http:// server it is HTTP/2 only, so tick it only for a server that expects that. Set on every server behind this service."},
   {k:"redirect_to",l:"Redirect to",t:"text",h:"e.g. https://new.example.com"},
   {k:"redirect_code",l:"Redirect code",t:"select",d:301,o:[{value:301,label:"301 moved permanently"},{value:302,label:"302 found"},{value:307,label:"307 temporary, same method"},{value:308,label:"308 permanent, same method"}]},
   {k:"redirect_keep_path",l:"Keep the path",t:"bool",d:true,h:"/a?b here arrives as /a?b there; off sends every request to the address as given."},
@@ -69,13 +77,6 @@ export const WIZ_SECTIONS=[
   {k:"stick_expire",l:"Stick table expiry",t:"text",d:"30m"},
   {k:"timeout_connect",l:"Connect timeout",t:"text",h:"Optional, for this pool only, e.g. 5s"},
   {k:"timeout_server",l:"Server timeout",t:"text",h:"Optional, for this pool only, e.g. 30s. Long-lived connections such as databases usually need more than the default. On a tcp:// service it is also how long a connection may sit idle, in either direction."},
-  {k:"proxy_protocol",l:"PROXY protocol",t:"select",o:PROXY_OPTIONS,d:"",
-   h:"Tells the servers the visitor's real address, the way X-Forwarded-For does for HTTP, "+
-     "and also works for tcp:// services. Set on every server behind this service. Only turn it on "+
-     "when the servers are set up to expect it (nginx proxy_protocol, Postfix, Dovecot, Traefik...): "+
-     "a server that is not refuses every connection."},
-  {k:"server_http2",l:"HTTP/2 to the servers",t:"bool",
-   h:"For gRPC, which needs HTTP/2 all the way to the server. HAProxy speaks HTTP/1.1 to a server unless this is ticked, whatever visitors speak to it. To an https:// server HTTP/2 is offered and the server chooses; to an http:// server it is HTTP/2 only, so tick it only for a server that expects that. Set on every server behind this service."},
  ]},
  {title:"Allowed networks",toggle:"allow_enabled",fields:[
   {k:"allow_enabled",l:"Only allow certain networks",t:"bool",
@@ -308,6 +309,8 @@ export function openWizard(prefill){
     /* forward or redirect: the target, or where to and how */
     setRow("action",!isTcp);
     setRow("target",!redirecting);
+    setRow("proxy_protocol",!redirecting);
+    setRow("server_http2",!redirecting&&!isTcp);
     ["redirect_to","redirect_code","redirect_keep_path"].forEach(k=>setRow(k,redirecting));
     setRow("hsts_subdomains",!isTcp&&on("hsts"));
     /* a raw TCP port has no HTTP for a rule to act on */
