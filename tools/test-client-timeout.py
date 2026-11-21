@@ -12,7 +12,6 @@ know the directive, nothing is written. Never shortened, never for tcp://.
 """
 import os
 import pathlib
-import re
 import shutil
 import subprocess
 import sys
@@ -81,6 +80,27 @@ ok(max(all_lines.index(g) for g in got) < min(all_lines.index(r) for r in routes
 ok(waits((3, 4)) == got, "the same on a newer HAProxy")
 ok(waits((2, 8)) == [] and waits((2, 4)) == [], "an HAProxy before 3.0 does not know the directive, and gets none")
 ok(waits(None) == [], "nor does a node where HAProxy cannot be asked its version")
+
+# a service that does not wait, ahead of one that does on the same host, keeps the listener's timeout
+publish("http://grpc.example.com/api", name="api")
+got = waits((3, 0))
+routes = [ln for ln in lines((3, 0)) if ln.startswith("use_backend be_")]
+ok(routes.index(next(r for r in routes if "be_api" in r)) < routes.index(next(r for r in routes if "be_grpc " in r)),
+   "a path of the patient service's host, routed ahead of it")
+back = "http-request set-timeout client 50s if acl_host-grpc acl_path-api"
+ok(back in got and len(got) == 3 and got.index(back) > got.index(next(g for g in got if " 24h " in g)),
+   "takes the listener's timeout back for its own requests, after the line it undoes: %s" % got)
+ok(not any("quick" in ln or "short" in ln for ln in got), "a service on another host has nothing to take back")
+c = load_config()
+fe = [f for f in c["haproxy"]["frontends"] if f.get("mode") != "tcp"][0]
+fe["default_backend"] = [b for b in c["haproxy"]["backends"] if b["name"] == "grpc"][0]["id"]
+save_config(c)
+got = waits((3, 0))
+ok(got[0] == "http-request set-timeout client 24h" and sum(" 50s if " in ln for ln in got) == 3,
+   "a patient default pool gives what no rule routes its patience, and every service that does not wait takes it back: %s" % got)
+c = load_config()
+[f for f in c["haproxy"]["frontends"] if f.get("mode") != "tcp"][0]["default_backend"] = ""
+save_config(c)
 
 c = load_config()
 c["haproxy"]["settings"]["timeout_client"] = "48h"

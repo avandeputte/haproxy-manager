@@ -23,15 +23,18 @@ globalThis.MutationObserver = class { observe(){} };
 globalThis.localStorage = { getItem: () => null, setItem(){}, removeItem(){} };
 globalThis.setTimeout = () => 0;
 
-globalThis.confirm = () => true;
 let settings = { enabled: false, has_api_token: false, account_id: "", tunnel_name: "haproxy-manager", tunnel_id: "", origin_port: 7811,
                  status: { installed: false, version: "", service: "missing", connected: false, configured: false, hosts: [], in_step: true } };
 const connected = { installed: true, version: "2026.11.1", service: "active", connected: true, configured: true,
                     hosts: ["shop.example.com"], in_step: false };
-let sent = null, lastPath = null;
+let sent = null, lastPath = null, refuse = false, asked = [];
+globalThis.confirm = m => { asked.push(String(m)); return true; };
 globalThis.fetch = async (u, o) => {
   const path = String(u).replace(/^\/api\//, "").split("?")[0];
   if (o && o.body) { sent = JSON.parse(o.body); lastPath = path; }
+  /* Cloudflare will not have it: the first Disconnect is refused, the one that forgets is not */
+  if (path === "cloudflare/disconnect" && refuse && !sent.forget)
+    return { ok: false, status: 502, json: async () => ({ ok: false, error: "the tunnel was not removed there: it broke" }), text: async () => "" };
   const bodies = {
     "cloudflare/settings": o && o.method === "PUT" ? { ok: true, status: connected } : settings,
     "cloudflare/install": { ok: true, message: "installed", status: { installed: true, version: "2026.11.1", service: "inactive", hosts: [], in_step: true } },
@@ -86,7 +89,14 @@ ok(!!findButton(content, "Sync now") && !!findButton(content, "Disconnect"), "a 
 await findButton(content, "Sync now").onclick();
 ok(lastPath === "cloudflare/sync" && !content.textContent.includes("Cloudflare is behind"), "Sync now tells Cloudflare and redraws: no longer behind");
 await findButton(content, "Disconnect").onclick();
-ok(lastPath === "cloudflare/disconnect", "Disconnect asks first, then takes the tunnel away");
+ok(lastPath === "cloudflare/disconnect" && !sent.forget && asked.length === 1, "Disconnect asks first, then takes the tunnel away");
+settings = Object.assign({}, settings, { status: connected });
+await renderCloudflare();
+refuse = true; asked = [];
+await findButton(content, "Disconnect").onclick();
+ok(asked.length === 2 && asked[1].includes("it broke") && asked[1].includes("Forget the tunnel on this installation anyway?")
+   && lastPath === "cloudflare/disconnect" && sent.forget === true,
+   "refused by Cloudflare, it says why and offers to forget the tunnel here -- and does, when told to");
 
 console.log(fail ? `\n${fail} failed` : "\nthe page says what the node and the tunnel are doing, and sends what was typed");
 process.exit(fail ? 1 : 0);

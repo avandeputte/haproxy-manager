@@ -419,7 +419,7 @@ def api_services():
             "maintenance": bool(pool.get("maintenance")),
             "check_port": first.get("check_port") or "",
             "proxy_protocol": first.get("proxy_protocol") or "",
-            "server_http2": bool(first.get("http2")),
+            "server_http2": bool(pool.get("server_http2") or first.get("http2")),
             "timeout_connect": pool.get("timeout_connect") or "",
             "timeout_server": pool.get("timeout_server") or "",
             # Whether visitors are asked to sign in, and who is let through.

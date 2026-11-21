@@ -48,9 +48,10 @@ SESSION = "24h"
 ACCESS_MODES = ("public", "allow")
 _HOST = re.compile(r"^(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$")
 
-# What was last told to Cloudflare from this node, so an Apply that changes
-# nothing there asks nothing of it.
-STATE = DATA_DIR / "cloudflare-state.json"
+# A route this app wrote: to HAProxy on the node's own loopback. Anything else
+# in the tunnel's routing was put there by somebody, and is theirs.
+_OUR_SERVICE = re.compile(r"^http://127\.0\.0\.1:\d+$")
+DNS_COMMENT = "haproxy-manager"
 
 
 class CloudflareError(Exception):
@@ -185,10 +186,25 @@ def frontend_lines(found, fe):
 
 
 def backend_lines(found, be):
-    """A pool reached through Cloudflare only: everything that did not come
-    down the tunnel is refused. Without a tunnel to come down, that is
-    everything -- a service half-protected is not a little protected."""
-    if not (be.get("cf_tunnel") and be.get("cf_only")) or be.get("mode", "http") != "http":
+    """What a pool says about the tunnel.
+
+    One that is not published through Cloudflare refuses whatever came down
+    it. The tunnel routes by host name alone, so a service ticked for one
+    path of a host would otherwise bring the host's other services to the
+    internet with it -- and with no sign-in, since Access covers the path
+    that asked for one.
+
+    One reached through Cloudflare only refuses everything else. Without a
+    tunnel to come down, that is everything -- a service half-protected is
+    not a little protected.
+    """
+    if be.get("mode", "http") != "http":
+        return []
+    if not be.get("cf_tunnel"):
+        ports = sorted({r["port"] for r in found})
+        return (["http-request deny deny_status 403 if { dst_port %s }" % " ".join(str(p) for p in ports)]
+                if ports else [])
+    if not be.get("cf_only"):
         return []
     ports = sorted({r["port"] for r in found if r["pool"] == be.get("id")})
     if not ports:
@@ -260,7 +276,12 @@ def find_account(token, account_id=""):
 
 
 def connect(token, account_id, name):
-    """Make the tunnel, or find the one of that name: (account, tunnel id, tunnel token)."""
+    """Make the tunnel: (account, tunnel id, tunnel token).
+
+    A tunnel of that name that is already there is used only while it is
+    empty. One with routes or connections is somebody's -- a NAS, another
+    installation -- and Apply would replace its routes with this one's.
+    """
     account = find_account(token, account_id)
     found = _call(token, "GET", "/accounts/%s/cfd_tunnel" % account,
                   params={"name": name, "is_deleted": "false"}).get("result") or []
@@ -270,6 +291,15 @@ def connect(token, account_id, name):
         if tunnel.get("config_src") not in (None, "cloudflare"):
             raise CloudflareError("a tunnel named \"%s\" exists, but it is configured from a file on its "
                                   "own machine; choose another tunnel name" % name)
+        held = (_call(token, "GET", "/accounts/%s/cfd_tunnel/%s/configurations" % (account, tunnel["id"]))
+                .get("result") or {}).get("config") or {}
+        hosts = [i.get("hostname") for i in held.get("ingress") or [] if isinstance(i, dict) and i.get("hostname")]
+        if hosts or tunnel.get("connections"):
+            raise CloudflareError(
+                "a tunnel named \"%s\" is already in use in this account (%s). Using it here would replace "
+                "its routes. Choose another tunnel name, or delete that tunnel in Cloudflare first."
+                % (name, (", ".join(hosts[:3]) + (", ..." if len(hosts) > 3 else "")) if hosts
+                   else "a connector is connected to it"))
     else:
         tunnel = _call(token, "POST", "/accounts/%s/cfd_tunnel" % account,
                        body={"name": name, "config_src": "cloudflare"}).get("result") or {}
@@ -322,11 +352,162 @@ def _fingerprint(cfg):
     return hashlib.sha256(json.dumps(desired(cfg), sort_keys=True).encode()).hexdigest()
 
 
-def _told():
-    try:
-        return json.loads(STATE.read_text()).get("fingerprint") or ""
-    except (OSError, ValueError, AttributeError):
-        return ""
+def _told(cfg):
+    """What Cloudflare was last told, by whichever node told it. Kept in the
+    shared configuration, so the node that takes over knows what the last
+    one said, and a passive node can say whether Cloudflare is behind."""
+    return settings_of(cfg).get("told") or ""
+
+
+def _remember(fp):
+    """Record what Cloudflare now holds. Not part of what Apply compares:
+    saying it leaves nothing unapplied."""
+    with _lock:
+        cfg = load_config()
+        if _told(cfg) != fp and isinstance(cfg.get("cloudflare"), dict):
+            cfg["cloudflare"]["told"] = fp
+            save_config(cfg)
+
+
+def _apps_for(token, account, hosts):
+    """The Access applications on these host names, whatever path they are
+    for: (the ones made here by domain, the domains of the others)."""
+    ours, theirs = {}, set()
+    if not hosts:
+        return ours, theirs
+    for a in _all(token, "/accounts/%s/access/apps" % account):
+        domain = a.get("domain") or ""
+        if domain.split("/", 1)[0] not in hosts:
+            continue
+        if "policies" not in a:
+            a["policies"] = _all(token, "/accounts/%s/access/apps/%s/policies" % (account, a["id"]))
+        if _ours(a):
+            ours[domain] = a
+        else:
+            theirs.add(domain)
+    return ours, theirs
+
+
+def _drop_dns(token, zones, host, target):
+    """Remove the record that points a name at this tunnel, if it is the one
+    made here: same target, and this app's mark on it."""
+    zone = _zone_for(zones, host)
+    if not zone:
+        return []
+    out = []
+    for x in _call(token, "GET", "/zones/%s/dns_records" % zone["id"],
+                   params={"name": host, "type": "CNAME"}).get("result") or []:
+        if (x.get("content") or "").lower() == target and (x.get("comment") or "") == DNS_COMMENT:
+            _call(token, "DELETE", "/zones/%s/dns_records/%s" % (zone["id"], x["id"]))
+            out.append("cloudflare: DNS record for %s removed" % host)
+    return out
+
+
+def _reconcile(cfg, also=()):
+    """Bring Cloudflare in step: (steps, warnings, pending). Raises
+    CloudflareError when Cloudflare would not have it. `also` are host names
+    to treat as published before, whatever the tunnel says. `pending` means
+    something was left for the next Apply to try again."""
+    s = settings_of(cfg)
+    token, account, tid = (s.get("api_token") or "").strip(), s.get("account_id"), s.get("tunnel_id")
+    want = [r for r in routes(cfg) if r["valid"]]
+    steps, pending = [], False
+    warnings = ["\"%s\" is not a host name Cloudflare can route, so it is not published through the tunnel"
+                % r["host"] for r in routes(cfg) if not r["valid"]]
+    target = "%s.cfargotunnel.com" % tid
+    prev = (_call(token, "GET", "/accounts/%s/cfd_tunnel/%s/configurations" % (account, tid))
+            .get("result") or {}).get("config") or {}
+    prev_ingress = prev.get("ingress") or []
+    named = [i for i in prev_ingress if isinstance(i, dict) and i.get("hostname")]
+    # Only the routes this app wrote are its to change. One somebody added to
+    # the tunnel in the dashboard stays where it is.
+    foreign = [i for i in named if not _OUR_SERVICE.match(str(i.get("service") or ""))]
+    prev_hosts = [i["hostname"] for i in named if i not in foreign] + list(also)
+    want_hosts = []
+    for r in want:
+        if r["host"] not in want_hosts:
+            want_hosts.append(r["host"])
+
+    # 1. Access: an application per host and path that asks for a sign-in.
+    wanted_apps = {r["host"] + r["path"]: r for r in want if r["access"] == "allow"}
+    ours, theirs = _apps_for(token, account, set(prev_hosts) | set(want_hosts))
+    for domain, r in wanted_apps.items():
+        policy = {"name": POLICY_NAME, "decision": "allow", "include": _include(r["allow"]), "precedence": 1}
+        if domain in theirs and domain not in ours:
+            warnings.append("%s already has an Access application that was not made here; it was left "
+                            "as it is, and decides who gets in" % domain)
+            continue
+        body = {"name": r["name"], "domain": domain, "type": "self_hosted",
+                "session_duration": SESSION, "app_launcher_visible": False}
+        if domain not in ours:
+            made = _call(token, "POST", "/accounts/%s/access/apps" % account, body=body).get("result") or {}
+            _call(token, "POST", "/accounts/%s/access/apps/%s/policies" % (account, made["id"]), body=policy)
+            steps.append("cloudflare: Access application for %s" % domain)
+            continue
+        have = ours[domain]
+        if have.get("name") != r["name"]:
+            _call(token, "PUT", "/accounts/%s/access/apps/%s" % (account, have["id"]), body=body)
+        held = next(p for p in have["policies"] if p.get("name") == POLICY_NAME)
+        if held.get("include") != policy["include"] or held.get("decision") != "allow":
+            _call(token, "PUT", "/accounts/%s/access/apps/%s/policies/%s" % (account, have["id"], held["id"]),
+                  body=policy)
+            steps.append("cloudflare: Access policy for %s updated" % domain)
+
+    # 2. The tunnel's routes. This app's own are written whole; anybody
+    #    else's follow them untouched, and so does everything else Cloudflare
+    #    keeps in the same document. Cloudflare takes the first route that
+    #    matches: exact names before wildcards, the deeper wildcard before
+    #    the shallower. Sorted, too, so the same services in another order
+    #    are the same document.
+    port_of = {}
+    for r in want:
+        port_of.setdefault(r["host"], r["port"])
+    mine = [{"hostname": h, "service": "http://127.0.0.1:%d" % port_of[h], "originRequest": {}} for h in want_hosts]
+    mine.sort(key=lambda i: (i["hostname"].startswith("*."), -i["hostname"].count("."), i["hostname"]))
+    last = [i for i in prev_ingress if isinstance(i, dict) and not i.get("hostname")][-1:] \
+        or [{"service": "http_status:404"}]
+    ingress = mine + [i for i in foreign if i["hostname"] not in want_hosts] + last
+    if ingress != prev_ingress:
+        _call(token, "PUT", "/accounts/%s/cfd_tunnel/%s/configurations" % (account, tid),
+              body={"config": dict(prev, ingress=ingress)})
+        steps.append("cloudflare: tunnel routes for %d host name(s)" % len(mine))
+
+    # 3. DNS: the name points at the tunnel. A record that is already there
+    #    and points elsewhere is somebody's, and is left alone -- and asked
+    #    about again at the next Apply, by when it may be gone.
+    zones = _all(token, "/zones") if (want_hosts or prev_hosts) else []
+    for host in want_hosts:
+        zone = _zone_for(zones, host)
+        if not zone:
+            pending = True
+            warnings.append("%s is in no zone this API token can see, so it has no DNS record; "
+                            "the tunnel is ready for it" % host)
+            continue
+        records = _call(token, "GET", "/zones/%s/dns_records" % zone["id"], params={"name": host}).get("result") or []
+        records = [x for x in records if x.get("type") in ("A", "AAAA", "CNAME")]
+        if any(x.get("type") == "CNAME" and (x.get("content") or "").lower() == target for x in records):
+            continue
+        if records:
+            x = records[0]
+            pending = True
+            warnings.append("%s already has a DNS record (%s %s), so visitors still go there and not "
+                            "through the tunnel. Delete it in Cloudflare, then Apply again."
+                            % (host, x.get("type"), x.get("content")))
+            continue
+        _call(token, "POST", "/zones/%s/dns_records" % zone["id"],
+              body={"type": "CNAME", "name": host, "content": target, "proxied": True, "comment": DNS_COMMENT})
+        steps.append("cloudflare: DNS record for %s" % host)
+    for host in dict.fromkeys(prev_hosts):
+        if host not in want_hosts:
+            steps += _drop_dns(token, zones, host, target)
+
+    # 4. Access applications nothing asks for any more, last: a service is
+    #    unpublished before its sign-in goes.
+    for domain, a in ours.items():
+        if domain not in wanted_apps:
+            _call(token, "DELETE", "/accounts/%s/access/apps/%s" % (account, a["id"]))
+            steps.append("cloudflare: Access application for %s removed" % domain)
+    return steps, warnings, pending
 
 
 def reconcile(cfg, force=False):
@@ -334,133 +515,24 @@ def reconcile(cfg, force=False):
 
     Access first, then the route, then the name: a service that asks for a
     sign-in is never reachable for a moment without one. Skipped when nothing
-    it would say has changed since this node last said it.
+    it would say has changed since Cloudflare was last told -- unless that
+    telling left something undone.
     """
     s = settings_of(cfg)
-    token, account, tid = (s.get("api_token") or "").strip(), s.get("account_id"), s.get("tunnel_id")
-    if not (token and account and tid):
+    if not ((s.get("api_token") or "").strip() and s.get("account_id") and s.get("tunnel_id")):
         return [], []
     fp = _fingerprint(cfg)
-    if not force and fp == _told():
+    if not force and fp == _told(cfg):
         return [], []
-    want = [r for r in routes(cfg) if r["valid"]]
-    steps, warnings = [], []
-    warnings += ["\"%s\" is not a host name Cloudflare can route, so it is not published through the tunnel"
-                 % r["host"] for r in routes(cfg) if not r["valid"]]
-    target = "%s.cfargotunnel.com" % tid
     try:
-        prev = (_call(token, "GET", "/accounts/%s/cfd_tunnel/%s/configurations" % (account, tid))
-                .get("result") or {}).get("config") or {}
-        prev_ingress = prev.get("ingress") or []
-        prev_hosts = [i.get("hostname") for i in prev_ingress if isinstance(i, dict) and i.get("hostname")]
-
-        # 1. Access: an application per host that asks for a sign-in.
-        wanted_apps = {r["host"] + r["path"]: r for r in want if r["access"] == "allow"}
-        domains = set(wanted_apps) | set(prev_hosts) | {r["host"] + r["path"] for r in want}
-        ours, theirs = {}, set()
-        if domains:
-            for a in _all(token, "/accounts/%s/access/apps" % account):
-                if a.get("domain") not in domains:
-                    continue
-                if "policies" not in a:
-                    a["policies"] = _all(token, "/accounts/%s/access/apps/%s/policies" % (account, a["id"]))
-                if _ours(a):
-                    ours[a["domain"]] = a
-                else:
-                    theirs.add(a["domain"])
-        for domain, r in wanted_apps.items():
-            policy = {"name": POLICY_NAME, "decision": "allow", "include": _include(r["allow"]), "precedence": 1}
-            if domain in theirs and domain not in ours:
-                warnings.append("%s already has an Access application that was not made here; it was left "
-                                "as it is, and decides who gets in" % domain)
-                continue
-            body = {"name": r["name"], "domain": domain, "type": "self_hosted",
-                    "session_duration": SESSION, "app_launcher_visible": False}
-            if domain not in ours:
-                made = _call(token, "POST", "/accounts/%s/access/apps" % account, body=body).get("result") or {}
-                _call(token, "POST", "/accounts/%s/access/apps/%s/policies" % (account, made["id"]), body=policy)
-                steps.append("cloudflare: Access application for %s" % domain)
-                continue
-            have = ours[domain]
-            if have.get("name") != r["name"]:
-                _call(token, "PUT", "/accounts/%s/access/apps/%s" % (account, have["id"]), body=body)
-            mine = next(p for p in have["policies"] if p.get("name") == POLICY_NAME)
-            if mine.get("include") != policy["include"] or mine.get("decision") != "allow":
-                _call(token, "PUT", "/accounts/%s/access/apps/%s/policies/%s" % (account, have["id"], mine["id"]),
-                      body=policy)
-                steps.append("cloudflare: Access policy for %s updated" % domain)
-
-        # 2. The tunnel's routes, whole. Anything else Cloudflare keeps in the
-        #    same document is handed back as it was.
-        ingress = [{"hostname": r["host"], "service": "http://127.0.0.1:%d" % r["port"], "originRequest": {}}
-                   for r in want]
-        seen, uniq = set(), []
-        for i in ingress:                      # a host with two paths is one route
-            if i["hostname"] not in seen:
-                seen.add(i["hostname"])
-                uniq.append(i)
-        # Cloudflare takes the first route that matches: exact names before
-        # wildcards, the deeper wildcard before the shallower. Sorted, too, so
-        # the same services in another order are the same document.
-        uniq.sort(key=lambda i: (i["hostname"].startswith("*."), -i["hostname"].count("."), i["hostname"]))
-        ingress = uniq + [{"service": "http_status:404"}]
-        if ingress != prev_ingress:
-            _call(token, "PUT", "/accounts/%s/cfd_tunnel/%s/configurations" % (account, tid),
-                  body={"config": dict(prev, ingress=ingress)})
-            steps.append("cloudflare: tunnel routes for %d host name(s)" % len(uniq))
-
-        # 3. DNS: the name points at the tunnel. A record that is already
-        #    there and points elsewhere is somebody's, and is left alone.
-        want_hosts = list(seen)
-        zones = _all(token, "/zones") if (want_hosts or prev_hosts) else []
-        for host in want_hosts:
-            zone = _zone_for(zones, host)
-            if not zone:
-                warnings.append("%s is in no zone this API token can see, so it has no DNS record; "
-                                "the tunnel is ready for it" % host)
-                continue
-            records = _call(token, "GET", "/zones/%s/dns_records" % zone["id"], params={"name": host}).get("result") or []
-            records = [x for x in records if x.get("type") in ("A", "AAAA", "CNAME")]
-            if any(x.get("type") == "CNAME" and (x.get("content") or "").lower() == target for x in records):
-                continue
-            if records:
-                x = records[0]
-                warnings.append("%s already has a DNS record (%s %s), so visitors still go there and not "
-                                "through the tunnel. Delete it in Cloudflare, then Apply again."
-                                % (host, x.get("type"), x.get("content")))
-                continue
-            _call(token, "POST", "/zones/%s/dns_records" % zone["id"],
-                  body={"type": "CNAME", "name": host, "content": target, "proxied": True,
-                        "comment": "haproxy-manager"})
-            steps.append("cloudflare: DNS record for %s" % host)
-        for host in prev_hosts:
-            if host in seen:
-                continue
-            zone = _zone_for(zones, host)
-            if not zone:
-                continue
-            for x in _call(token, "GET", "/zones/%s/dns_records" % zone["id"],
-                           params={"name": host, "type": "CNAME"}).get("result") or []:
-                if (x.get("content") or "").lower() == target:
-                    _call(token, "DELETE", "/zones/%s/dns_records/%s" % (zone["id"], x["id"]))
-                    steps.append("cloudflare: DNS record for %s removed" % host)
-
-        # 4. Access applications nothing asks for any more, last: a service is
-        #    unpublished before its sign-in goes.
-        for domain, a in ours.items():
-            if domain not in wanted_apps:
-                _call(token, "DELETE", "/accounts/%s/access/apps/%s" % (account, a["id"]))
-                steps.append("cloudflare: Access application for %s removed" % domain)
+        steps, warnings, pending = _reconcile(cfg)
     except CloudflareError as e:
         log.warning("cloudflare: not brought in step: %s", e)
-        return steps, warnings + ["Cloudflare was not brought in step with this configuration: %s. "
-                                  "What is published there is as it was; Apply again, or use "
-                                  "Sync now under Access > Cloudflare." % e]
-    try:
-        STATE.parent.mkdir(parents=True, exist_ok=True)
-        STATE.write_text(json.dumps({"fingerprint": fp, "at": time.time()}))
-    except OSError:
-        pass
+        return [], ["Cloudflare was not brought in step with this configuration: %s. "
+                    "What is published there may be partly as it was; Apply again, or use "
+                    "Sync now under Access > Cloudflare." % e]
+    # Something left undone is not remembered as done: the next Apply asks again.
+    _remember("" if pending else fp)
     return steps, warnings
 
 
@@ -625,7 +697,7 @@ def status(cfg):
             "service": service_state() if installed() else "missing",
             "configured": configured(cfg), "connected": connected(cfg),
             "tunnel_id": s.get("tunnel_id") or "", "hosts": sorted({r["host"] for r in found}),
-            "in_step": _fingerprint(cfg) == _told() if (s.get("tunnel_id") and s.get("api_token")) else True}
+            "in_step": _fingerprint(cfg) == _told(cfg) if (s.get("tunnel_id") and s.get("api_token")) else True}
 
 
 # --------------------------------------------------------------------------
@@ -721,40 +793,92 @@ def api_cloudflare_sync():
     record or an application somebody removed in the dashboard."""
     cfg = load_config()
     if not connected(cfg):
-        return jsonify({"ok": False, "message": "not connected to a tunnel yet"}), 400
+        return jsonify({"ok": False, "error": "not connected to a tunnel yet"}), 400
     steps, warnings = reconcile(cfg, force=True)
+    cfg = load_config()                                  # what was remembered is in it now
     return jsonify({"ok": not warnings, "steps": steps, "warnings": warnings, "status": status(cfg),
                     "message": "\n".join(steps + warnings) or "Cloudflare already holds exactly this"})
 
 
+def _tunnel_gone(token, account, tid):
+    """Is the tunnel no longer in Cloudflare: deleted in the dashboard, or
+    named by a configuration put back from before a Disconnect."""
+    try:
+        t = _call(token, "GET", "/accounts/%s/cfd_tunnel/%s" % (account, tid)).get("result") or {}
+    except CloudflareError as e:
+        if "not found" in str(e).lower():
+            return True
+        raise
+    return bool(t.get("deleted_at"))
+
+
 @app.post("/api/cloudflare/disconnect")
 def api_cloudflare_disconnect():
-    """Take everything made here out of Cloudflare, the tunnel last, and forget it."""
+    """Take everything made here out of Cloudflare, the tunnel last, and forget it.
+
+    Switched off and applied first, so cloudflared stops here and on the
+    other nodes: Cloudflare will not delete a tunnel that is connected. With
+    {"forget": true} nothing is asked of Cloudflare: the way out when it will
+    not answer, or the tunnel is already gone there.
+
+    The lock is held only to change the configuration, never across a
+    conversation with Cloudflare.
+    """
+    body = request.get_json(force=True, silent=True) or {}
+    forget = bool(body.get("forget"))
+    from . import apply   # here, not at the top: apply imports this module
     with _lock:
         cfg = load_config()
         s = settings_of(cfg)
         if not s.get("tunnel_id"):
-            return jsonify({"ok": False, "message": "not connected to a tunnel"}), 400
+            return jsonify({"ok": False, "error": "not connected to a tunnel"}), 400
+        # What is published, read as if it were on: a Disconnect that failed
+        # halfway left it switched off, and is tried again from there.
+        asked = dict(cfg, cloudflare=dict(s, enabled=True))
+        hosts = sorted({r["host"] for r in routes(asked) if r["valid"]})
         s["enabled"] = False
         cfg["cloudflare"] = s
-        steps, warnings = reconcile(cfg, force=True)       # off: no routes, no records, no applications
-        if warnings:
-            return jsonify({"ok": False, "message": "\n".join(warnings)}), 502
-        step, _warning = ensure_service(cfg)
-        if step:
-            steps.append(step)
+        save_config(cfg)
+    token, account, tid = (s.get("api_token") or "").strip(), s.get("account_id"), s["tunnel_id"]
+    res = apply.do_apply()
+    steps = [x for x in res.get("steps") or [] if x.startswith(("cloudflare", "cloudflared"))]
+    if not forget:
         try:
-            # Cloudflare refuses to delete a tunnel that still has connections.
-            _call(s["api_token"], "DELETE", "/accounts/%s/cfd_tunnel/%s/connections" % (s["account_id"], s["tunnel_id"]))
-            _call(s["api_token"], "DELETE", "/accounts/%s/cfd_tunnel/%s" % (s["account_id"], s["tunnel_id"]))
-            steps.append("cloudflare: tunnel \"%s\" deleted" % s.get("tunnel_name"))
+            if _tunnel_gone(token, account, tid):
+                # No routes to read what was published from: what this
+                # configuration published is cleared, by name.
+                target = "%s.cfargotunnel.com" % tid
+                zones = _all(token, "/zones") if hosts else []
+                for host in hosts:
+                    steps += _drop_dns(token, zones, host, target)
+                for domain, a in _apps_for(token, account, set(hosts))[0].items():
+                    _call(token, "DELETE", "/accounts/%s/access/apps/%s" % (account, a["id"]))
+                    steps.append("cloudflare: Access application for %s removed" % domain)
+                steps.append("cloudflare: the tunnel was already gone there")
+            else:
+                more, _warnings, _pending = _reconcile(load_config(), also=hosts)   # off: nothing is wanted
+                steps += more
+                # Cloudflare refuses to delete a tunnel that still has connections.
+                _call(token, "DELETE", "/accounts/%s/cfd_tunnel/%s/connections" % (account, tid))
+                _call(token, "DELETE", "/accounts/%s/cfd_tunnel/%s" % (account, tid))
+                steps.append("cloudflare: tunnel \"%s\" deleted" % s.get("tunnel_name"))
         except CloudflareError as e:
-            return jsonify({"ok": False, "message": "the tunnel was emptied, but not deleted: %s" % e}), 502
-        s["tunnel_id"], s["tunnel_token"] = "", ""
+            # "error" is what the interface shows for an answer that is not a success.
+            return jsonify({"ok": False, "steps": steps, "status": status(load_config()),
+                            "error": "Cloudflare is switched off here, but the tunnel was not removed "
+                                     "there: %s. Try Disconnect again, or forget the tunnel on this "
+                                     "installation and remove what is left in Cloudflare by hand." % e}), 502
+    with _lock:
+        cfg = load_config()
+        s = settings_of(cfg)
+        s["tunnel_id"], s["tunnel_token"], s["told"] = "", "", ""
         cfg["cloudflare"] = s
         save_config(cfg)
-        STATE.unlink(missing_ok=True)
-        return jsonify({"ok": True, "steps": steps, "status": status(cfg), "message": "\n".join(steps)})
+    apply.do_apply()                       # the other nodes forget it too
+    if forget:
+        steps.append("cloudflare: the tunnel is forgotten here; nothing was asked of Cloudflare")
+    cfg = load_config()
+    return jsonify({"ok": True, "steps": steps, "status": status(cfg), "message": "\n".join(steps)})
 
 
 # Cloudflare's own package repository. Its key is fetched over HTTPS and held
@@ -800,4 +924,5 @@ def api_cloudflare_install():
     ok, message = install()
     if ok:
         TRIED.unlink(missing_ok=True)
-    return jsonify({"ok": ok, "message": message, "status": status(load_config())}), (200 if ok else 500)
+    return jsonify({"ok": ok, "message": message, "error": "" if ok else message,
+                    "status": status(load_config())}), (200 if ok else 500)

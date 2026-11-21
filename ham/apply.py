@@ -514,6 +514,9 @@ def do_apply(cfg=None, allow_push=True):
         result["steps"] += steps
         if warnings:
             result.setdefault("warnings", []).extend(warnings)
+        # What was told is noted in the shared configuration, so the push
+        # below carries it: the other nodes then know Cloudflare is in step.
+        cfg = load_config()
     if allow_push and cfg["local"]["sync"].get("auto_sync") and sync.enabled_peers(cfg):
         r = sync.sync_push(cfg)
         result["steps"].append("auto-sync to %d peer(s): " % len(sync.enabled_peers(cfg)) +

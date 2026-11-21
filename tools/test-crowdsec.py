@@ -389,6 +389,16 @@ ok(fe.index("set-var(txn.cs_stream)") < fe.index("wait-for-body") < fe.index("st
    "in that order: what it is, whether to wait, then the questions")
 ok(crowdsec._and(" if a b || c", "x") == " if a b x || c x" and crowdsec._and("", "x") == " if x",
    "a rule with alternatives marks a stream in each of them")
+# a service on a path of the gRPC service's host, routed ahead of it, takes its requests back
+r = client.post("/api/wizard/publish", headers=H, json={
+    "url": "http://grpc.example.com/admin", "target": "10.0.0.8:80", "certificate": False,
+    "http_redirect": False, "dry_run": False})
+fe = haproxy.render_haproxy(load_config())
+fe = fe[fe.index("frontend fe_http-80"):fe.index("\n\n", fe.index("frontend fe_http-80"))]
+marks = [ln.strip() for ln in fe.splitlines() if "set-var(txn.cs_stream)" in ln]
+ok(len(marks) == 2 and marks[0].endswith(" cs_grpc") and marks[1].startswith("http-request set-var(txn.cs_stream) bool(0) if ")
+   and "path" in marks[1] and "cs_grpc" not in marks[1],
+   "a request another service takes is not a stream, whatever it says it is: %s" % marks)
 apply._selfsigned_placeholder(CERT_DIR / "stand-in.pem", ["stand-in"])
 crowdsec.write_files(load_config())
 text = haproxy.render_haproxy(load_config())

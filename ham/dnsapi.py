@@ -506,10 +506,10 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
             srv["proxy_protocol"] = proxy_protocol
         elif proxy_protocol is not None:
             srv.pop("proxy_protocol", None)
-        # HTTP/2 to the servers, the same way: silence leaves them alone.
-        if server_http2 and not is_tcp:
-            srv["http2"] = True
-        elif server_http2 is not None:
+        # HTTP/2 to the servers is the service's, kept on its pool below: a
+        # server can be shared with another service, which did not ask for
+        # it. One a beta before this left on the server is taken off.
+        if server_http2 is not None:
             srv.pop("http2", None)
         if srv["id"] not in srv_ids:
             srv_ids.append(srv["id"])
@@ -534,6 +534,9 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
     }
     if redirect:
         pool_opts["notify_mode"] = "off"         # no servers to lose
+    # HTTP/2 to the servers, for gRPC. Silence leaves the pool as it is.
+    if server_http2 is not None:
+        pool_opts["server_http2"] = bool(server_http2) and not is_tcp
     # HSTS, sent over HTTPS only. Silence leaves the pool as it is.
     if hsts is not None:
         pool_opts["hsts"] = bool(hsts) and not is_tcp

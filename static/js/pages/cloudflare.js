@@ -52,7 +52,7 @@ export async function renderCloudflare(){
     h:s.has_api_token?"Leave empty to keep the stored one"
       :"From the Cloudflare dashboard: My Profile > API Tokens > Create Token > Custom token, with Account: Cloudflare Tunnel: Edit, Account: Access: Apps and Policies: Edit, Zone: DNS: Edit and Zone: Zone: Read, for the zones your services are in."},
    {k:"account_id",l:"Account ID",t:"text",h:"Optional when the token sees one account. It is on the right of a zone's Overview page."},
-   {k:"tunnel_name",l:"Tunnel name",t:"text",d:"haproxy-manager",h:"The tunnel made in your account, or joined when one of that name is already there -- the other nodes of a cluster share it."},
+   {k:"tunnel_name",l:"Tunnel name",t:"text",d:"haproxy-manager",h:"The tunnel made in your account. One of that name that is already there is used only while it is empty: a tunnel with routes or a connector is somebody's, and is refused. The other nodes of a cluster share this one."},
    {k:"origin_port",l:"First loopback port",t:"text",d:"7811",h:"cloudflared reaches HAProxy on 127.0.0.1, on one port per listener that carries a published service, counted up from this one. Change it only if something else on the node uses these ports."},
    {k:"enabled",l:"Enable Cloudflare",t:"bool",h:"cloudflared runs on every node, and the services ticked for it are published. Test the token first; takes effect at the next Apply."},
   ];
@@ -103,7 +103,17 @@ export async function renderCloudflare(){
       try{
         const r=await api("cloudflare/disconnect","POST",{});
         showText("Cloudflare",r.message);renderCloudflare();refreshStatus();
-      }catch(e){msg.textContent="";showText("Cloudflare",e.message);}
+      }catch(e){
+        /* Cloudflare would not have it -- the tunnel gone there, the token
+           revoked. The way out is to forget it here, said as what it is. */
+        msg.textContent="";
+        if(!confirm(e.message+"\n\n"+t("Cloudflare could not be cleaned up. Forget the tunnel on this installation anyway? What is left in Cloudflare then has to be removed there by hand."))){renderCloudflare();refreshStatus();return;}
+        try{
+          const r=await api("cloudflare/disconnect","POST",{forget:true});
+          showText("Cloudflare",r.message);
+        }catch(e2){showText("Cloudflare",e2.message);}
+        renderCloudflare();refreshStatus();
+      }
     }));
   }
   foot.appendChild(msg);

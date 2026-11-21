@@ -76,7 +76,11 @@ ok(" ssl verify none send-proxy-v2 alpn h2,http/1.1 backup" in line, "it sits wi
 line = server_line("api1", render({"ssl": True, "http2": True}, monitor={"type": "http", "http_uri": "/healthz"}))
 ok(" check " in line + " " and "check-alpn h2,http/1.1" in line, "an HTTP health check speaks what the traffic speaks: " + line)
 line = server_line("api1", render({"http2": True}, monitor={"type": "http"}))
-ok("check-proto h2" in line and "proto h2" in line, "in the clear too: " + line)
+ok(line.endswith(" proto h2") and "check-proto" not in line, "in the clear the check takes the server's protocol by itself: " + line)
+line = server_line("api1", render({"http2": True, "check_port": 8080}, monitor={"type": "http"}))
+ok("proto h2 check-proto h1" in line, "and a check on a separate port has to be told it is not HTTP/2: " + line)
+line = server_line("api1", render({"ssl": True}, server_http2=True))
+ok(line.endswith("alpn h2,http/1.1"), "asked for on the pool, every server of it gets it: " + line)
 line = server_line("api1", render({"ssl": True, "http2": True}, monitor={"type": "tcp"}))
 ok("check-alpn" not in line, "a connect check needs no protocol: " + line)
 line = server_line("api1", render({"ssl": True, "http2": True, "check_port": 8008}, monitor={"type": "http"}))
@@ -115,14 +119,34 @@ def service():
 
 svc = service()
 ok(svc.get("server_http2") is True, "the Services page gets it back for the edit form")
+c = load_config()
+ok(all("http2" not in s for s in c["haproxy"]["servers"])
+   and [b for b in c["haproxy"]["backends"] if b["name"] == svc["pool"]][0].get("server_http2") is True,
+   "it is kept on the service's pool, not on servers another service may share")
+r = client.post("/api/wizard/publish", headers=H, json={
+    "url": "http://plain.example.com", "target": "a=https://10.0.0.31:443", "certificate": False,
+    "http_redirect": False, "health": {"type": "tcp"}, "dry_run": False})
+plain = r.get_json().get("preview", "")
+both = [ln.strip() for ln in plain.splitlines() if ln.strip().startswith("server a ")]
+ok(len(both) == 2 and sorted(ln.endswith("alpn h2,http/1.1") for ln in both) == [False, True],
+   "a second service on the same server does not speak HTTP/2 to it for that: %s" % both)
 r = client.post("/api/wizard/publish", headers=H, json=dict(base, service_id=svc.get("id")))
 ok(r.status_code == 200 and service().get("server_http2") is True, "an edit that does not mention it leaves it alone")
 r = client.post("/api/wizard/publish", headers=H, json=dict(base, service_id=svc.get("id"), server_http2=False))
 ok(r.status_code == 200 and service().get("server_http2") is False, "an edit sending it false switches it off")
-ok(all("http2" not in s for s in load_config()["haproxy"]["servers"]), "and leaves no trace on the servers")
+ok(all("http2" not in s for s in load_config()["haproxy"]["servers"])
+   and not any(b.get("server_http2") for b in load_config()["haproxy"]["backends"]), "and leaves no trace")
+# a beta before this kept it on the server: still honoured, shown, and taken off by the form
+c = load_config()
+c["haproxy"]["servers"][0]["http2"] = True
+save_config(c)
+ok(service().get("server_http2") is True, "one left on a server by an earlier beta still shows as ticked")
+r = client.post("/api/wizard/publish", headers=H, json=dict(base, service_id=svc.get("id"), server_http2=False))
+ok(service().get("server_http2") is False and all("http2" not in s for s in load_config()["haproxy"]["servers"]),
+   "and unticking it in the form takes it off the server too")
 r = client.post("/api/wizard/publish", headers=H, json={"url": "tcp://0.0.0.0:5432", "target": "10.0.0.9:5432",
                                                         "health": {"type": "tcp"}, "dry_run": False, "server_http2": True})
-ok(r.status_code == 200 and all("http2" not in s for s in load_config()["haproxy"]["servers"]),
+ok(r.status_code == 200 and not any(b.get("server_http2") for b in load_config()["haproxy"]["backends"]),
    "a tcp:// service does not take it")
 
 print("\n" + ("%d failed" % len(fails) if fails else "the servers are spoken to in HTTP/2 where asked"))

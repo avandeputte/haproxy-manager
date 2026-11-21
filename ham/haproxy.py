@@ -194,6 +194,58 @@ def _long_client_timeout(pool, st):
     return _sec(str(pool["timeout_server"]).strip())
 
 
+def _hosts_of(rule, conds):
+    """The host names a rule can match, or None when that cannot be told
+    from its conditions: none of them names a host, or one is negated."""
+    hosts = set()
+    for cid in rule_cond_ids(rule):
+        c = conds.get(cid)
+        if c and c.get("type") == "host_matches" and c.get("value"):
+            if c.get("negate"):
+                return None
+            hosts.add(str(c["value"]).strip().lower())
+    return frozenset(hosts) or None
+
+
+def _may_overlap(a, b):
+    """Could one request match both rules? Two rules that name different
+    hosts cannot; anything less certain is taken as yes."""
+    if a is None or b is None:
+        return True
+    return not a.isdisjoint(b) or any("*" in h for h in a | b)
+
+
+def _last_word(routed, catch_all=None):
+    """Lines that set something per request, so that it follows the routing.
+
+    `routed` is the listener's routing rules in order: (test, hosts, value),
+    value empty for a rule that sets nothing. HAProxy routes by the first
+    rule that matches, but of several lines that set the same thing the last
+    to match holds. So the lines go in reverse, and a rule that sets nothing
+    takes it back where a later rule it shadows would have set it: the rule
+    that routes a request is then the one that decides. `catch_all` is the
+    value for what no rule routes. Returns [(test, value or None)].
+    """
+    out, armed = [], []
+    if catch_all:
+        out.append(("", catch_all))
+        armed.append(None)
+    for test, hosts, value in reversed(routed):
+        if value:
+            out.append((test, value))
+            armed.append(hosts)
+        elif any(_may_overlap(hosts, h) for h in armed):
+            out.append((test, None))
+    return out
+
+
+def _speaks_grpc(pool, servers):
+    """Is this pool's service gRPC: HTTP/2 to its servers, asked for on the
+    service or on one of its servers."""
+    return bool(pool) and pool.get("mode", "http") == "http" and bool(
+        pool.get("server_http2") or any((servers.get(sid) or {}).get("http2") for sid in pool.get("servers") or []))
+
+
 def _rule_line(rule, conds, backends):
     suffix = _rule_test(rule, conds)
     t = rule.get("type")
@@ -456,15 +508,14 @@ def render_haproxy(cfg):
         # CrowdSec first: a banned address is answered before anything else
         # is done for it. HTTP only -- the answer is a page.
         if mode == "http":
-            # The services on this listener that speak gRPC, by the test
-            # that routes to them: HTTP/2 to a server is what marks one.
-            streams = []
-            for rid in fe.get("rules") or []:
-                r = rules.get(rid)
-                pool = backends.get(r.get("backend")) if r and r.get("type") == "use_backend" else None
-                if pool and pool.get("mode", "http") == "http" and any(
-                        (servers.get(sid) or {}).get("http2") for sid in pool.get("servers") or []):
-                    streams.append(_rule_test(r, conds))
+            # Which requests are gRPC streams: the ones a service that speaks
+            # gRPC is routed by -- and only when that service is the one that
+            # takes them, so a rule ahead of it on the same host takes its
+            # requests back.
+            streams = _last_word([
+                (_rule_test(r, conds), _hosts_of(r, conds), _speaks_grpc(backends.get(r.get("backend")), servers))
+                for r in (rules.get(rid) for rid in fe.get("rules") or [])
+                if r and r.get("type") == "use_backend" and backends.get(r.get("backend"))])
             decl, asks = crowdsec.frontend_lines(cfg, _src_acl, streams)
             acls.extend(decl)
             requests.extend(asks)
@@ -518,7 +569,7 @@ def render_haproxy(cfg):
             requests.append("tcp-request inspect-delay 5s")
             requests.append("tcp-request content accept if { req_ssl_hello_type 1 }")
 
-        patience = []
+        routed = []
         for rid in fe.get("rules") or []:
             r = rules.get(rid)
             if not r:
@@ -530,16 +581,17 @@ def render_haproxy(cfg):
             # routing and rule precedence are unchanged.
             (routes if ln.startswith("use_backend") else requests).append(ln)
             if mode == "http" and r.get("type") == "use_backend":
-                wait, test = _long_client_timeout(backends.get(r.get("backend")), st), _rule_test(r, conds)
-                if wait and test:
-                    patience.append("http-request set-timeout client %s%s" % (wait, test))
+                routed.append((_rule_test(r, conds), _hosts_of(r, conds),
+                               _long_client_timeout(backends.get(r.get("backend")), st)))
         # The client timeout of a service that waits longer than the listener
-        # does. The last of these to match is the one that holds, so they go
-        # in reverse: of two services a request could be for, the one that
-        # routes it -- the first -- has the last word. Only where HAProxy
-        # knows the directive; an older one keeps the listener's timeout.
-        if patience and (haproxy_version() or (0, 0)) >= CLIENT_TIMEOUT_SINCE:
-            requests.extend(reversed(patience))
+        # does, for the requests that service takes: the default pool's for
+        # what no rule routes, and the listener's own given back where a
+        # service that does not wait shadows one that does. Only where
+        # HAProxy knows the directive; an older one keeps the listener's.
+        if mode == "http" and (haproxy_version() or (0, 0)) >= CLIENT_TIMEOUT_SINCE:
+            own = _sec(str(st.get("timeout_client") or "50s").strip())
+            for test, wait in _last_word(routed, _long_client_timeout(backends.get(fe.get("default_backend")), st)):
+                requests.append("http-request set-timeout client %s%s" % (wait or own, test))
 
         for ln in acls + requests + routes:
             A("    " + ln)
@@ -872,18 +924,23 @@ def render_haproxy(cfg):
             # visitor speaks to it. Over TLS it is offered and the server
             # chooses, so one that only knows HTTP/1.1 still works; in the
             # clear there is nothing to negotiate with, and it is HTTP/2 or
-            # nothing. An HTTP health check on the traffic port speaks the
-            # same, since a server that knows only HTTP/2 would fail any other.
-            if sv.get("http2") and mode == "http":
-                h2_check = bool(hc) and hc.get("type") == "http" and not sv.get("check_port")
+            # nothing. Asked for on the service -- its pool -- or on this one
+            # server. An HTTP health check on the traffic port speaks the
+            # same, since a server that knows only HTTP/2 would fail any
+            # other; one on a separate check port is another service, and is
+            # spoken HTTP/1.1 to. In the clear a check takes the server's
+            # protocol unless told, so there it is the other port that has
+            # to be told.
+            if (be.get("server_http2") or sv.get("http2")) and mode == "http":
+                http_check = bool(hc) and hc.get("type") == "http"
                 if sv.get("ssl"):
                     parts.append("alpn h2,http/1.1")
-                    if h2_check:
+                    if http_check and not sv.get("check_port"):
                         parts.append("check-alpn h2,http/1.1")
                 else:
                     parts.append("proto h2")
-                    if h2_check:
-                        parts.append("check-proto h2")
+                    if http_check and sv.get("check_port"):
+                        parts.append("check-proto h1")
             if sv.get("backup"):
                 parts.append("backup")
             if use_cookie:

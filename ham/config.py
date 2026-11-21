@@ -128,6 +128,9 @@ DEFAULT_CONFIG = {
         # The first of the loopback ports cloudflared reaches HAProxy on: one
         # per listener that carries a service published this way.
         "origin_port": 7811,
+        # What Cloudflare was last told, as a fingerprint: set by the node
+        # that told it, read by all of them. Not part of what Apply compares.
+        "told": "",
     },
     # Cluster-wide VRRP settings: identical on every node, so they sync.
     "cluster": {
@@ -731,7 +734,9 @@ def config_hash(cfg):
     if "crowdsec" in cfg:
         parts["crowdsec"] = cfg["crowdsec"]
     if "cloudflare" in cfg:
-        parts["cloudflare"] = cfg["cloudflare"]
+        # Without the note of what Cloudflare was last told: writing it down
+        # changes nothing HAProxy serves, and must not read as unapplied.
+        parts["cloudflare"] = {k: v for k, v in cfg["cloudflare"].items() if k != "told"}
     payload = json.dumps(parts, sort_keys=True)
     return hashlib.sha256(payload.encode()).hexdigest()
 

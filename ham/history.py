@@ -211,6 +211,10 @@ def api_history_restore(name):
             part = view.get(section)
             if isinstance(part, dict):
                 cfg[section] = _merge_defaults(part, DEFAULT_CONFIG[section])
+        # What Cloudflare was told then is not what it holds now: the next
+        # Apply has to say all of it again.
+        if isinstance(cfg.get("cloudflare"), dict):
+            cfg["cloudflare"]["told"] = ""
         save_config(cfg)
         rev = int(cfg["_meta"].get("shared_rev") or 0)
     log.info("restored the configuration of %s (revision %s) as revision %d",

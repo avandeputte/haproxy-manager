@@ -81,6 +81,7 @@ export const E={
    {k:"timeout_connect",l:"Connect timeout",t:"text",h:"For this pool only, e.g. 5s"},
    {k:"timeout_server",l:"Server timeout",t:"text",h:"For this pool only, e.g. 30s"},
    {k:"timeout_check",l:"Check timeout",t:"text",h:"For this pool only"},
+   {k:"server_http2",l:"HTTP/2 to the servers",t:"bool",h:"For gRPC, which needs HTTP/2 all the way to the server. HAProxy speaks HTTP/1.1 to a server unless this is ticked, whatever visitors speak to it. To an https:// server HTTP/2 is offered and the server chooses; to an http:// server it is HTTP/2 only, so tick it only for a server that expects that. Set on every server behind this service. With CrowdSec AppSec on, the bodies of gRPC requests to such a service are not inspected: a stream has no end to wait for."},
    {k:"stick_type",l:"Stick table type",t:"select",o:["ip","ipv6"],d:"ip",h:"HAProxy spells the IPv4 type \"ip\"; \"ipv4\" is not valid"},
    {k:"stick_size",l:"Stick table size",t:"text",h:"For source persistence, e.g. 50k"},
    {k:"stick_expire",l:"Stick table expiry",t:"text",h:"For source persistence, e.g. 30m"},

@@ -376,9 +376,56 @@ ok(res["ok"] is True and any("was not brought in step" in w and "it broke" in w 
 ok(client.get("/api/cloudflare/settings", headers=H).get_json()["status"]["in_step"] is False, "and the page says it is behind")
 cf.broken = ""
 res = tell()
-ok("new.example.com" in [i.get("hostname") for i in cf.config[tid]["ingress"]]
-   and client.get("/api/cloudflare/settings", headers=H).get_json()["status"]["in_step"] is True,
-   "the next Apply tries again, and catches up")
+ok("new.example.com" in [i.get("hostname") for i in cf.config[tid]["ingress"]], "the next Apply tries again, and catches up")
+
+# something left undone is asked about again: the record that was in the way, once it is gone
+ok(client.get("/api/cloudflare/settings", headers=H).get_json()["status"]["in_step"] is False
+   and load_config()["cloudflare"]["told"] == "",
+   "while a name still has somebody's record, Cloudflare is not counted as in step")
+cf.calls.clear()
+res = tell()
+ok(cf.calls and any("wiki.example.com already has a DNS record" in w for w in res["warnings"]),
+   "so an Apply that changes nothing here still asks, and says so again")
+kept = cf.records.pop("mine")
+res = tell()
+ok("cloudflare: DNS record for wiki.example.com" in res["steps"]
+   and any(r["name"] == "wiki.example.com" and r["content"] == tid + ".cfargotunnel.com" for r in cf.records.values()),
+   "with the record deleted in Cloudflare, the next Apply makes the one for the tunnel")
+told = load_config()["cloudflare"]["told"]
+ok(told and client.get("/api/cloudflare/settings", headers=H).get_json()["status"]["in_step"] is True,
+   "and now it is in step -- noted in the shared configuration, for every node to read")
+ok("told" in shared_view(load_config())["cloudflare"], "the note travels with the configuration to the other nodes")
+c = load_config()
+before_hash = config_hash(c)
+c["cloudflare"]["told"] = "something else"
+ok(config_hash(c) == before_hash, "and writing it down is not an unapplied change")
+cf.calls.clear()
+tell()
+ok(not cf.calls, "in step, an Apply asks nothing of Cloudflare")
+cf.records["mine"] = dict(kept, name="elsewhere.example.com")
+
+# a route somebody added to the tunnel in the dashboard, and its record, are theirs
+cf.config[tid]["ingress"].insert(0, {"hostname": "cam.example.com", "service": "http://192.168.1.9:80"})
+cf.records["cam"] = {"id": "cam", "zone": "z1", "type": "CNAME", "name": "cam.example.com", "content": tid + ".cfargotunnel.com"}
+publish("http://extra.example.com", name="extra", cloudflare={"enabled": True})
+tell()
+hosts = [i.get("hostname") for i in cf.config[tid]["ingress"]]
+ok("cam.example.com" in hosts and "extra.example.com" in hosts and hosts.index("extra.example.com") < hosts.index("cam.example.com")
+   and hosts[-1] is None and "cam" in cf.records,
+   "a route added to the tunnel by hand stays, after this app's own, and so does its DNS record")
+
+# a service on one path of a host: its sign-in is found again, and the rest of the host stays in
+publish("http://shop.example.com/admin", name="shopadmin", cloudflare={"enabled": True, "access": "allow", "allow": "a@example.com"})
+tell()
+ok(any(a["domain"] == "shop.example.com/admin" for a in cf.apps.values()), "a service on a path gets its Access application for that path")
+ok("http-request deny deny_status 403 if { dst_port %d }" % port in block("backend be_plain"),
+   "a service that is not published refuses what comes down the tunnel: a path of its host being published does not publish it")
+ok(not any("dst_port" in ln for ln in block("backend be_shopadmin")), "the published one takes it")
+publish("http://shop.example.com/admin", name="shopadmin", service_id=service("shopadmin")["id"], cloudflare={"enabled": False})
+res = tell()
+ok("cloudflare: Access application for shop.example.com/admin removed" in res["steps"]
+   and not any(a["domain"] == "shop.example.com/admin" for a in cf.apps.values()),
+   "and unticked, the application for the path is removed, not left behind")
 
 # unpublishing takes away what was made, and only that
 publish("http://shop.example.com", name="shop", service_id=service("shop")["id"], cloudflare={"enabled": False})
@@ -392,25 +439,73 @@ ok("cloudflare: DNS record for shop.example.com removed" in steps and "cloudflar
 writes = [p for m, p, _ in cf.calls if m != "GET"]
 ok(writes.index(next(p for p in writes if p.endswith("/configurations"))) < writes.index(next(p for p in writes if "/access/apps/" in p)),
    "the route goes before the sign-in does")
-ok("dst_port" not in "\n".join(block("backend be_shop")) and "http-request deny" not in "\n".join(block("backend be_shop")),
-   "and the service answers on its own port again")
+ok(block("backend be_shop").count("http-request deny deny_status 403 if { dst_port %d }" % port) == 1
+   and not any("unless" in ln for ln in block("backend be_shop")),
+   "and the service answers on its own port again, and no longer through the tunnel")
 ok(cf.records["mine"]["content"] == "203.0.113.9" and "hand" in cf.apps, "what was not made here is still there")
 
 # ---- off, and gone ---------------------------------------------------------------------------
 put({"enabled": False})
 ok("cf_tunnel" not in text(), "switched off: HAProxy forgets the loopback port")
 res = tell()
-ok(cf.config[tid]["ingress"] == [{"service": "http_status:404"}]
-   and not any((r.get("content") or "").endswith("cfargotunnel.com") for r in cf.records.values())
-   and list(cf.apps) == ["hand"], "and the next Apply empties the tunnel: no routes, no records, no applications of its own")
+ok(cf.config[tid]["ingress"] == [{"hostname": "cam.example.com", "service": "http://192.168.1.9:80"}, {"service": "http_status:404"}]
+   and [r["id"] for r in cf.records.values() if (r.get("content") or "").endswith("cfargotunnel.com")] == ["cam"]
+   and list(cf.apps) == ["hand"],
+   "and the next Apply empties the tunnel of what was made here: its routes, its records, its applications -- and nothing else")
 step, _w = cloudflare.ensure_service(load_config())
 ok(step == "cloudflared stopped: Cloudflare is off" and not CLOUDFLARED_ENV.exists(), "cloudflared is stopped, and its token file removed")
+# Disconnect applies twice -- off, then forgotten -- and an Apply here waits out
+# HAProxy's restart check each time; what an Apply does was shown above.
+applied = []
+apply.do_apply = lambda *a, **k: applied.append(1) or {"ok": True, "steps": []}
 r = client.post("/api/cloudflare/disconnect", headers=H, json={})
 c = load_config()["cloudflare"]
+ok(len(applied) == 2 and c["told"] == "", "it is switched off and applied before Cloudflare is asked, and applied again once forgotten")
 ok(r.status_code == 200 and not cf.tunnels and c["tunnel_id"] == "" and c["tunnel_token"] == "" and c["enabled"] is False,
    "Disconnect deletes the tunnel and forgets it")
 ok(c["api_token"] == "good-token", "the API token stays, for connecting again")
 ok(client.post("/api/cloudflare/disconnect", headers=H, json={}).status_code == 400, "there is nothing to disconnect twice")
+
+# ---- a tunnel that is somebody's is not taken over ---------------------------------------------
+nas = "99999999-0000-0000-0000-000000000001"
+cf.tunnels[nas] = {"id": nas, "name": "nas", "config_src": "cloudflare", "connections": []}
+cf.config[nas] = {"ingress": [{"hostname": "nas.example.com", "service": "http://192.168.1.2:5000"}, {"service": "http_status:404"}]}
+r = put({"enabled": True, "tunnel_name": "nas"}, 400)
+ok("already in use" in r["error"] and "nas.example.com" in r["error"] and load_config()["cloudflare"]["tunnel_id"] == ""
+   and cf.config[nas]["ingress"][0]["hostname"] == "nas.example.com",
+   "a tunnel of that name with routes is refused, by name, and left exactly as it was")
+cf.config[nas] = {"ingress": [{"service": "http_status:404"}]}
+cf.tunnels[nas]["connections"] = [{"id": "c1"}]
+r = put({"enabled": True, "tunnel_name": "nas"}, 400)
+ok("a connector is connected to it" in r["error"], "so is one with no routes that something is connected to")
+cf.tunnels[nas]["connections"] = []
+put({"enabled": True, "tunnel_name": "nas"})
+ok(load_config()["cloudflare"]["tunnel_id"] == nas, "an empty one of that name is used")
+
+# ---- Disconnect when Cloudflare will not have it -----------------------------------------------
+publish("http://shop.example.com", name="shop", service_id=service("shop")["id"], cloudflare={"enabled": True, "access": "allow", "allow": "a@example.com"})
+tell()
+ok(any(a["domain"] == "shop.example.com" for a in cf.apps.values()) and any(r["name"] == "shop.example.com" for r in cf.records.values()),
+   "published again, on the new tunnel")
+cf.broken = "/cfd_tunnel/" + nas
+r = client.post("/api/cloudflare/disconnect", headers=H, json={})
+c = load_config()["cloudflare"]
+ok(r.status_code == 502 and "forget the tunnel" in r.get_json()["error"] and c["tunnel_id"] == nas and c["enabled"] is False,
+   "Cloudflare failing leaves it switched off but still known, and says how to get out")
+del cf.tunnels[nas]                    # deleted in the dashboard, meanwhile
+cf.broken = ""
+r = client.post("/api/cloudflare/disconnect", headers=H, json={})
+c = load_config()["cloudflare"]
+ok(r.status_code == 200 and c["tunnel_id"] == "" and "already gone" in r.get_json()["message"],
+   "a tunnel already gone from Cloudflare can still be disconnected")
+ok(not any(a["domain"] == "shop.example.com" for a in cf.apps.values()) and not any(r["name"] == "shop.example.com" for r in cf.records.values()),
+   "and what this configuration published on it is cleared, by name")
+put({"enabled": True, "tunnel_name": "third"})
+cf.calls.clear()
+r = client.post("/api/cloudflare/disconnect", headers=H, json={"forget": True})
+c = load_config()["cloudflare"]
+ok(r.status_code == 200 and not cf.calls and c["tunnel_id"] == "" and len(cf.tunnels) == 1,
+   "forgetting asks nothing of Cloudflare: the tunnel stays there, and is gone here")
 cloudflare.install = real_install
 
 print("\n%d failed" % len(fails) if fails else "\nall passed")
