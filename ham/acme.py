@@ -378,6 +378,12 @@ def acme_issue(cfg, cert, force=False):
     return res
 
 
+_DOMAIN_RE = re.compile(
+    r"^(\*\.)?(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*$"
+)
+_DNS_PROVIDER_RE = re.compile(r"^[A-Za-z0-9_]+$")
+
+
 def _acme_issue(cfg, cert, force=False):
     if is_custom(cert):
         # Whatever asked -- a button, the wizard, MCP -- an uploaded
@@ -448,11 +454,16 @@ def _acme_run_issue(cfg, cert, acc, ch, doms, force, trace):
 
     args = ["--issue"] + server_args(acc)
     for d in doms:
+        if not _DOMAIN_RE.match(d):
+            return {"ok": False, "error": "invalid domain name: %s" % d}
         args += ["-d", d]
     args += ["--keylength", KEYLEN.get(cert.get("key_type", "ec-256"), "ec-256")]
     env = {}
     if ch.get("method") == "dns01":
-        args += ["--dns", ch.get("dns_provider", "")]
+        dns_provider = ch.get("dns_provider", "")
+        if not _DNS_PROVIDER_RE.match(dns_provider):
+            return {"ok": False, "error": "invalid dns provider: %s" % dns_provider}
+        args += ["--dns", dns_provider]
         args += challenge_alias_args(ch, doms)
         for line in (ch.get("dns_credentials") or "").splitlines():
             if "=" not in line:
