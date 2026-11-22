@@ -26,11 +26,12 @@ export async function renderUpdates(){
       :t("Checked once a day against <span class=mono>{repo}</span> ({ref}).",{repo:esc(v.repo),ref:esc(v.ref)}))+
     (v.error?" "+t("Last check failed: {error}",{error:esc(v.error)}):"")+"</p>";
   const row=document.createElement("div");row.style.marginTop="14px";
-  const msg=document.createElement("div");msg.className="hint";msg.style.marginTop="12px";
-  /* Betas: the same version file on the beta branch, read only by a node that
-     has asked. Changing the answer checks again at once, so the page never
-     shows an update the node has just said it does not want, or hides one it
-     has just asked for. */
+  const msg=document.createElement("div");msg.className="hint";msg.style.marginTop="12px";msg.id="update_msg";
+  /* Betas: the same version file on the beta branch, read only once asked
+     for. The choice is the cluster's, so the server makes it on the node
+     holding the virtual IP whichever node this page is open on, and says
+     where. Changing the answer checks again at once, so the page never shows
+     an update that has just been declined, or hides one just asked for. */
   const chan=document.createElement("label");chan.style.cssText="display:block;margin-bottom:10px";
   const beta=document.createElement("input");beta.type="checkbox";beta.id="f_update_beta";beta.checked=!!v.beta;
   chan.appendChild(beta);
@@ -38,15 +39,22 @@ export async function renderUpdates(){
   const bh=document.createElement("div");bh.className="hint";
   bh.textContent=t("A beta is published to try a change out before it becomes a release. It can still "+
     "change, and a node on a beta takes the release when it comes. Updating the other nodes "+
-    "from here moves them to the same version, beta or not.");
+    "from here moves them to the same version, beta or not.")+
+    (v.peers?" "+t("In a cluster the choice is shared: every node offers the same versions."):"");
   chan.appendChild(bh);
   beta.addEventListener("change",async()=>{
     beta.disabled=true;msg.textContent=t("Checking...");
     try{
-      await api("local","PUT",{updates:{beta:beta.checked}});
+      const want=beta.checked;
+      const r=await api("version/beta","PUT",{beta:want});
       await api("version/check","POST",{});
       await renderUpdates();
-    }catch(e){msg.textContent=e.message;beta.disabled=false;}
+      /* the page was drawn again: say on the new one where the choice went */
+      const note=document.getElementById("update_msg");
+      if(note&&r&&r.made_on)
+        note.textContent=t("Set on {node}, which holds the virtual IP.",{node:r.made_on})+
+          (r.here?"":" "+t("This node takes it with the next sync."));
+    }catch(e){msg.textContent=e.message;beta.checked=!beta.checked;beta.disabled=false;}
   });
   row.appendChild(chan);
   /* Updating a cluster one node at a time means visiting each one and waiting.

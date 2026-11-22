@@ -10,6 +10,7 @@ import os
 import re
 import shlex
 import shutil
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -17,9 +18,9 @@ import urllib.request
 from .base import (BETA_REF, DATA_DIR, INSTALL_URL, PEER_CONNECT_TIMEOUT, PEER_READ_TIMEOUT,
     UPDATE_CHECK_HOURS, UPDATE_REF, UPDATE_REPO, VERSION, VERSION_URL, _lock,
     _requests, app, log)
-from .config import load_config, save_config
+from .config import config_hash, load_config, save_config
 from .util import run
-from . import notify, peering, sync
+from . import auth, notify, peering, sync
 
 # --------------------------------------------------------------------------
 
@@ -54,7 +55,123 @@ def is_prerelease(v):
 
 
 def wants_beta(cfg):
-    return bool(((cfg.get("local") or {}).get("updates") or {}).get("beta"))
+    """Whether betas are offered: the cluster's choice, so every node offers
+    the same versions whichever of them the page is opened on."""
+    return bool((cfg.get("cluster") or {}).get("beta_updates"))
+
+
+class Refused(Exception):
+    """The beta choice could not be made, with the reason for whoever asked."""
+
+
+def set_beta(value, forwarded=False):
+    """Say whether this installation is offered betas.
+
+    A shared setting, so it is changed where shared settings are: on the node
+    holding the virtual IP. A passive node passes the choice there and takes
+    the configuration back at once, so the page that asked shows the answer;
+    the other nodes get it at the active node's next round.
+
+    Returns {ok, beta, changed, made_on, here}: made_on names the node that
+    made the change when it was not this one, and here says whether this
+    node holds the choice yet.
+    """
+    value = bool(value)
+    cfg = load_config()
+    read_only, why = auth.readonly_state(cfg)
+    if read_only:
+        if forwarded:
+            raise Refused("this node does not hold the virtual IP either, so the choice was not made")
+        peer = sync.active_peer(cfg)
+        if peer is None:
+            raise Refused("This node is passive, and no other node answered as the one holding the "
+                          "virtual IP, so there is nowhere to make the choice. " + why)
+        url, who = (peer.get("url") or "").rstrip("/"), peer.get("name") or peer.get("url")
+        try:
+            r = _requests.put(url + "/api/version/beta", json={"beta": value, "forwarded": True},
+                              headers={"X-API-Key": peer.get("api_key", "")},
+                              timeout=(PEER_CONNECT_TIMEOUT, PEER_READ_TIMEOUT),
+                              verify=bool(peer.get("verify_tls")))
+            try:
+                d = r.json()
+            except Exception:
+                d = {}
+        except Exception as e:
+            raise Refused("This node is passive, and passing the choice to %s, which holds the "
+                          "virtual IP, failed: %s" % (who, peering.peer_error(e, url, PEER_READ_TIMEOUT)))
+        if r.status_code in (404, 405):
+            raise Refused("This node is passive, and %s, which holds the virtual IP, runs a version "
+                          "from before the choice was the cluster's. Update it first." % who)
+        if r.status_code != 200 or not isinstance(d, dict) or not d.get("ok"):
+            raise Refused("This node is passive, and %s, which holds the virtual IP, refused the "
+                          "choice: %s" % (who, (d or {}).get("error") or "HTTP %d" % r.status_code))
+        log.info("betas %s: the choice was made on %s, which holds the virtual IP",
+                 "on" if value else "off", who)
+        try:
+            sync.catch_up(load_config())
+        except Exception:
+            log.exception("taking the configuration back from %s failed", who)
+        return {"ok": True, "beta": value, "changed": bool(d.get("changed")), "made_on": who,
+                "here": wants_beta(load_config()) == value}
+    with _lock:
+        cur = load_config()
+        changed = wants_beta(cur) != value
+        if changed:
+            # Nothing HAProxy serves depends on it, so a configuration that
+            # was applied is still applied: the marker moves with the change.
+            clean = cur["_meta"].get("applied_hash") == config_hash(cur)
+            cur["cluster"]["beta_updates"] = value
+            if clean:
+                cur["_meta"]["applied_hash"] = config_hash(cur)
+            save_config(cur)
+            log.info("betas are %s for this installation", "offered" if value else "no longer offered")
+    return {"ok": True, "beta": value, "changed": changed, "made_on": "", "here": True}
+
+
+def adopt_own_tick():
+    """Hand a tick from before 2.4.1 to the cluster. True once nothing is left.
+
+    The tick used to be each node's own. A node that had it passes it on --
+    made here when this node may change shared settings, sent to the node
+    holding the virtual IP when it may not -- and from then on its own record
+    is only a copy of the cluster's. An unticked node has nothing to pass on.
+    """
+    cfg = load_config()
+    own = cfg["local"].get("updates")
+    if isinstance(own, dict) and own.get("shared"):
+        if bool(own.get("beta")) != wants_beta(cfg):
+            # The copy fell behind: a version from before 2.4.1 took the
+            # cluster's choice on this node and knew nothing of the copy.
+            with _lock:
+                save_config(load_config())
+        return True
+    if isinstance(own, dict) and own.get("beta") and not wants_beta(cfg):
+        try:
+            out = set_beta(True)
+        except Refused as e:
+            log.info("this node's own beta tick is not the cluster's yet: %s", e)
+            return False
+        log.info("this node's own beta tick is now the cluster's%s",
+                 " (made on %s)" % out["made_on"] if out.get("made_on") else "")
+    with _lock:
+        cur = load_config()
+        cur["local"]["updates"] = {"beta": wants_beta(cur), "shared": True}
+        save_config(cur)
+    return True
+
+
+def _check_soon():
+    threading.Thread(target=check_for_update, daemon=True).start()
+
+
+def _follow_the_cluster(before, after):
+    """The choice arrived from another node: look again now, not tomorrow, so
+    this node offers what the node it was made on offers."""
+    if bool(before.get("beta_updates")) != bool(after.get("beta_updates")):
+        _check_soon()
+
+
+sync.after_receive.append(_follow_the_cluster)
 
 
 def _read_version_url(url):
@@ -252,6 +369,23 @@ def api_version():
     })
 
 
+@app.put("/api/version/beta")
+def api_version_beta():
+    """Whether betas are offered, for the whole installation. From the page,
+    or from a passive node passing the choice on (forwarded)."""
+    body = request.get_json(force=True, silent=True) or {}
+    if not isinstance(body.get("beta"), bool):
+        return jsonify({"ok": False, "error": "beta must be true or false"}), 400
+    forwarded = bool(body.get("forwarded"))
+    try:
+        out = set_beta(body["beta"], forwarded=forwarded)
+    except Refused as e:
+        return jsonify({"ok": False, "error": str(e)}), 409
+    if forwarded and out["changed"]:
+        _check_soon()           # nobody is looking at this node's page to ask
+    return jsonify(out)
+
+
 @app.post("/api/version/check")
 def api_version_check():
     info = check_for_update()
@@ -408,8 +542,19 @@ def api_update_log():
 
 def _update_loop():
     """Check GitHub once a day."""
+    def hand_over():
+        try:
+            return adopt_own_tick()
+        except Exception:
+            log.exception("handing this node's beta tick to the cluster failed; it tries again")
+            return False
+    # Straight away, so the Updates page of a node just updated does not show
+    # the tick off for its first half minute; a node that has to pass it to
+    # another gets a second go below, once that one has had time to restart.
+    settled = hand_over()
     time.sleep(30)                      # let the service settle before the first check
     while True:
+        settled = settled or hand_over()
         try:
             cfg = load_config()
             last = (cfg["_meta"].get("update") or {}).get("checked") or ""
@@ -426,7 +571,9 @@ def _update_loop():
             # Survive anything, but say so: a check that dies quietly is
             # discovered as a node that stopped noticing new versions.
             log.exception("the daily update check failed; it tries again in an hour")
-        time.sleep(3600)
+        # A tick still to hand over waits on another node -- one being
+        # updated, usually -- so it is tried again sooner than the hour.
+        time.sleep(3600 if settled else 300)
 
 
 # --------------------------------------------------------------------------

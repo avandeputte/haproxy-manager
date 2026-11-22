@@ -151,6 +151,11 @@ DEFAULT_CONFIG = {
         # that name exists.
         "track_mode": "responding",
         "custom": "",
+        # Whether the daily version check also reads the beta branch. The
+        # cluster's choice, not a node's: a cluster runs one version, and a
+        # node that offered betas alone showed a different Updates page from
+        # the others -- and from itself, once the virtual IP had moved.
+        "beta_updates": False,
     },
     "notify": {
         # Shared, so it is configured once and propagates: every node then
@@ -194,9 +199,11 @@ DEFAULT_CONFIG = {
                   "iterations": 0, "updated": ""},
         "session_secret": "",      # HMAC key for session cookies; rotating it logs everyone out
         "session_hours": 12,
-        # Whether the daily version check also reads the beta branch. Per
-        # node: it is a choice about this node, and an update started here
-        # carries its branch to the other nodes anyway.
+        # A copy of cluster.beta_updates, kept in step by save_config for what
+        # reads this file from outside -- the Proxmox container's update
+        # script. Until 2.4.1 this was the setting itself, one per node; a
+        # record without "shared" is such a tick, not yet handed to the
+        # cluster (updates.adopt_own_tick).
         "updates": {"beta": False},
         "keepalived": {
             "enabled": False,
@@ -648,6 +655,9 @@ def save_config(cfg):
         # a configuration from a peer sets both fields first, so adopting is
         # not itself counted as a change.
         meta = cfg.setdefault("_meta", {})
+        mirror = (cfg.get("local") or {}).get("updates")
+        if isinstance(mirror, dict) and mirror.get("shared"):
+            mirror["beta"] = bool((cfg.get("cluster") or {}).get("beta_updates"))
         fp = shared_fingerprint(cfg)
         if fp != meta.get("shared_fp"):
             meta["shared_fp"] = fp

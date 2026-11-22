@@ -1527,6 +1527,10 @@ export default {
 
 /* ---- updates.js: the beta channel ---- */
 "Also offer beta versions": "Tilbyd også betaversioner",
+"In a cluster the choice is shared: every node offers the same versions.": "I en klynge er valget fælles: alle noder tilbyder de samme versioner.",
+"Set on {node}, which holds the virtual IP.": "Sat på {node}, som holder den virtuelle IP.",
+"This node takes it with the next sync.": "Denne node får det ved næste synkronisering.",
+"beta must be true or false": "beta skal være true eller false",
 "A beta is published to try a change out before it becomes a release. It can still change, and a node on a beta takes the release when it comes. Updating the other nodes from here moves them to the same version, beta or not.": "En beta udgives for at prøve en ændring, før den bliver en udgivelse. Den kan stadig ændre sig, og en node på en beta tager udgivelsen, når den kommer. Opdateres de andre noder herfra, flyttes de til samme version, beta eller ej.",
 "beta": "beta",
 "Checked once a day against <span class=mono>{repo}</span> ({ref}, and {beta} for betas).": "Tjekkes én gang om dagen mod <span class=mono>{repo}</span> ({ref}, og {beta} for betaversioner).",

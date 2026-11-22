@@ -11,7 +11,7 @@ from .base import _lock, app, log
 from .config import VALID_COLLECTIONS, load_config, merged, save_config
 from .util import _by_id, _sec, rule_cond_ids
 from .validate import check_pool, check_setting_types
-from . import access, acme, apply, errorpages, haproxy, oauth
+from . import access, acme, apply, errorpages, haproxy, oauth, updates
 
 
 def _check_item(sec, col, cfg, item):
@@ -207,10 +207,15 @@ def local_settings():
         for key in ("api_key", "node_url"):
             if key in body:
                 cfg["local"][key] = body[key].strip() if isinstance(body[key], str) else body[key]
-        if isinstance(body.get("updates"), dict) and "beta" in body["updates"]:
-            cfg["local"].setdefault("updates", {})["beta"] = bool(body["updates"]["beta"])
         save_config(cfg)
-        return jsonify(cfg["local"])
+    # Until 2.4.1 the beta tick was saved here, as this node's own. It is the
+    # cluster's now; whatever still asks for it this way gets the same thing.
+    if isinstance(body.get("updates"), dict) and "beta" in body["updates"]:
+        try:
+            updates.set_beta(body["updates"]["beta"])
+        except updates.Refused as e:
+            return jsonify({"error": str(e)}), 409
+    return jsonify(load_config()["local"])
 
 
 def _paragraphs(text):

@@ -719,12 +719,7 @@ def _run(t, args):
 
 def _active_peer(cfg):
     """The other node that says it holds the virtual IP, or None."""
-    peers = sync.enabled_peers(cfg)
-    if not peers or _requests is None:
-        return None
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(peers))) as ex:
-        found = list(ex.map(lambda p: (p, peering._query_peer(p, brief=True)), peers))
-    return next((p for p, n in found if n.get("reachable") and n.get("vip_held")), None)
+    return sync.active_peer(cfg)
 
 
 def _forward(name, args):
