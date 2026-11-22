@@ -1527,6 +1527,10 @@ export default {
 
 /* ---- updates.js: the beta channel ---- */
 "Also offer beta versions": "Tarjoa myös betaversioita",
+"In a cluster the choice is shared: every node offers the same versions.": "Klusterissa valinta on yhteinen: jokainen solmu tarjoaa samat versiot.",
+"Set on {node}, which holds the virtual IP.": "Asetettu solmulla {node}, jolla on virtuaalinen IP.",
+"This node takes it with the next sync.": "Tämä solmu saa sen seuraavassa synkronoinnissa.",
+"beta must be true or false": "beta-arvon on oltava true tai false",
 "A beta is published to try a change out before it becomes a release. It can still change, and a node on a beta takes the release when it comes. Updating the other nodes from here moves them to the same version, beta or not.": "Beta julkaistaan, jotta muutosta voi kokeilla ennen kuin siitä tulee julkaisu. Se voi vielä muuttua, ja betalla oleva solmu ottaa julkaisun, kun se tulee. Muiden solmujen päivittäminen täältä vie ne samaan versioon, beta tai ei.",
 "beta": "beta",
 "Checked once a day against <span class=mono>{repo}</span> ({ref}, and {beta} for betas).": "Tarkistetaan kerran päivässä lähteestä <span class=mono>{repo}</span> ({ref}, ja {beta} betoja varten).",

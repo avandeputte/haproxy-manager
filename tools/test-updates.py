@@ -7,7 +7,9 @@ A beta is the VERSION file on another branch. The rules under test: the
 ordering that puts 1.95.0-beta.1 above 1.94.1 and below 1.95.0; that the
 beta branch is only read once asked for and never turns a failed read into a
 failed check; that a beta seen while wanted is withdrawn the moment it is
-not; and that an update names the branch it installs, and hands it on.
+not; that an update names the branch it installs, and hands it on; and that
+asking for betas is the cluster's choice, made on the node holding the
+virtual IP whichever node was asked (#39).
 """
 import os
 import pathlib
@@ -20,8 +22,8 @@ os.environ["HAM_DRY_RUN"] = "1"
 os.environ.pop("HAM_VERSION_URL", None)
 
 import ham; ham   # noqa: E402
-from ham import updates   # noqa: E402
-from ham.config import load_config, save_config   # noqa: E402
+from ham import auth, sync, updates   # noqa: E402
+from ham.config import config_hash, load_config, save_config, shared_view   # noqa: E402
 
 fails = []
 
@@ -105,18 +107,48 @@ v = client.get("/api/version", headers=H).get_json()
 ok(v["latest"] == "1.94.2" and v["available"] is False and v["latest_ref"] == "main",
    "a check with betas off finds the release: %s" % v["latest"])
 
-r = client.put("/api/local", headers=H, json={"updates": {"beta": True}})
-ok(r.status_code == 200 and r.get_json()["updates"]["beta"] is True, "the setting is saved")
-ok(client.get("/api/local", headers=H).get_json()["updates"]["beta"] is True, "and read back")
+c = load_config()
+c["_meta"]["applied_hash"] = config_hash(c)          # a node with nothing waiting
+save_config(c)
+rev = load_config()["_meta"]["shared_rev"]
+r = client.put("/api/version/beta", headers=H, json={"beta": True})
+d = r.get_json()
+ok(r.status_code == 200 and d["beta"] is True and d["changed"] is True and d["made_on"] == "" and d["here"] is True,
+   "the choice is saved, on this node: %s" % d)
+c = load_config()
+ok(c["cluster"]["beta_updates"] is True and shared_view(c)["cluster"]["beta_updates"] is True,
+   "in the shared configuration, where every node gets it")
+ok(c["_meta"]["shared_rev"] == rev + 1, "as a new revision, so the other nodes are behind until they have it")
+ok(c["_meta"]["applied_hash"] == config_hash(c), "and nothing is left waiting for an Apply")
+ok(client.get("/api/version", headers=H).get_json()["beta"] is True, "and read back")
+r = client.put("/api/version/beta", headers=H, json={"beta": True})
+ok(r.get_json()["changed"] is False and load_config()["_meta"]["shared_rev"] == rev + 1,
+   "asking again changes nothing")
+ok(client.put("/api/version/beta", headers=H, json={"beta": "yes"}).status_code == 400,
+   "anything but true or false is refused")
 client.post("/api/version/check", headers=H)
 v = client.get("/api/version", headers=H).get_json()
 ok(v["latest"] == "1.95.0-beta.1" and v["available"] is True and v["latest_is_beta"] is True
    and v["latest_ref"] == "beta", "with betas on the beta is offered, marked, with its branch")
 
-client.put("/api/local", headers=H, json={"updates": {"beta": False}})
+c = load_config()
+c["haproxy"]["settings"]["maxconn"] = 4001             # something does wait now
+save_config(c)
+client.put("/api/version/beta", headers=H, json={"beta": False})
 v = client.get("/api/version", headers=H).get_json()
 ok(v["latest"] == "" and v["available"] is False and v["latest_ref"] == "main",
    "switching betas off withdraws the offer before any new check")
+c = load_config()
+ok(c["_meta"]["applied_hash"] != config_hash(c), "a change that was waiting for an Apply still is")
+c["haproxy"]["settings"]["maxconn"] = 4000
+save_config(c)
+
+# what asked the old way, this node's own settings, gets the same thing
+r = client.put("/api/local", headers=H, json={"updates": {"beta": True}})
+ok(r.status_code == 200 and load_config()["cluster"]["beta_updates"] is True,
+   "the tick sent the way it was before 2.4.1 is the cluster's too")
+client.put("/api/local", headers=H, json={"updates": {"beta": False}})
+ok(load_config()["cluster"]["beta_updates"] is False, "and so is the untick")
 
 # ---- a package install takes the release's package ------------------------------------
 import pathlib as _pl
@@ -134,7 +166,7 @@ ok("releases/download/v2.0.0-beta.8/haproxy-manager_2.0.0.beta.8_all.deb" in sh 
    and "DPkg::Lock::Timeout" in sh and "release may not be cut yet" in sh,
    "a deb node fetches the release's package and installs it with apt, and says so when there is none")
 ok("dnf install" in updates._package_shell("2.0.0", "rpm"), "an rpm node with dnf")
-client.put("/api/local", headers=H, json={"updates": {"beta": True}})
+client.put("/api/version/beta", headers=H, json={"beta": True})
 client.post("/api/version/check", headers=H)
 c = load_config()
 ok(updates._package_version(None, c) == "1.95.0-beta.1" and updates._package_version("beta", c) == "1.95.0-beta.1",
@@ -142,7 +174,7 @@ ok(updates._package_version(None, c) == "1.95.0-beta.1" and updates._package_ver
 ok(updates._package_version("main", c) == "1.94.2", "another ref: that ref's VERSION, read now")
 v = client.get("/api/version", headers=H).get_json()
 ok(v["install_kind"] == "deb", "and the page is told how the node was installed")
-client.put("/api/local", headers=H, json={"updates": {"beta": False}})
+client.put("/api/version/beta", headers=H, json={"beta": False})
 _mark.unlink()
 
 # ---- the update names its branch ----------------------------------------
@@ -160,5 +192,109 @@ except ValueError:
 r = client.post("/api/update", headers=H, json={"ref": "$(evil)"})
 ok(r.status_code == 400, "over the API too: %s" % r.get_json().get("error", ""))
 
-print("\n" + ("%d failed" % len(fails) if fails else "a node can ask for betas, and only then gets them"))
+# ---- a tick from before 2.4.1 was the node's own: it is handed to the cluster ----------
+def own(record):
+    c = load_config()
+    c["local"]["updates"] = record
+    c["cluster"]["beta_updates"] = False
+    save_config(c)
+
+
+own({"beta": True})
+ok(not updates.wants_beta(load_config()), "a node's own tick is not what is read any more")
+ok(updates.adopt_own_tick() is True and load_config()["cluster"]["beta_updates"] is True,
+   "a ticked node hands its tick to the cluster")
+ok(load_config()["local"]["updates"] == {"beta": True, "shared": True},
+   "and its own record is from then on a copy, for what reads the file from outside")
+client.put("/api/version/beta", headers=H, json={"beta": False})
+ok(load_config()["local"]["updates"] == {"beta": False, "shared": True}, "the copy follows the cluster's choice")
+ok(updates.adopt_own_tick() is True and load_config()["cluster"]["beta_updates"] is False,
+   "and is never handed over a second time")
+own({"beta": False})
+ok(updates.adopt_own_tick() is True and load_config()["cluster"]["beta_updates"] is False
+   and load_config()["local"]["updates"]["shared"] is True, "an unticked node has nothing to hand over")
+import json as _json   # noqa: E402
+from ham.base import CONF_PATH   # noqa: E402
+stored = _json.loads(CONF_PATH.read_text())
+stored["cluster"]["beta_updates"] = True            # as a 2.4.0 on this node would have taken it:
+stored["local"]["updates"] = {"beta": False, "shared": True}   # without touching the copy
+CONF_PATH.write_text(_json.dumps(stored))
+rev = load_config()["_meta"]["shared_rev"]
+ok(updates.adopt_own_tick() is True and load_config()["local"]["updates"] == {"beta": True, "shared": True},
+   "a copy that fell behind the cluster's choice is put right")
+ok(load_config()["cluster"]["beta_updates"] is True, "the choice itself is not touched by that")
+client.put("/api/version/beta", headers=H, json={"beta": False})
+
+# ---- a passive node passes the choice to the node holding the virtual IP ---------------
+real_ro, real_peer, real_req, real_catch = auth.readonly_state, sync.active_peer, updates._requests, sync.catch_up
+from flask import has_request_context, request as _rq   # noqa: E402
+PASSIVE_WHY = "This node is passive."
+# this one app plays both nodes: passive when asked by the page or by its own
+# loop, the active one when the call arrives from the other node (forwarded)
+auth.readonly_state = lambda cfg: ((False, "") if has_request_context() and (_rq.get_json(silent=True) or {}).get("forwarded")
+                                   else (True, PASSIVE_WHY))
+sync.active_peer = lambda cfg: {"name": "node-a", "url": "http://node-a", "api_key": "upd-key"}
+caught = []
+sync.catch_up = lambda cfg: caught.append(1)
+
+
+class FakeRequests:
+    """The peer is this same app: the choice lands on /api/version/beta here."""
+    sent = []
+
+    @classmethod
+    def put(cls, url, json=None, headers=None, **kw):
+        cls.sent.append((url, json))
+        r = client.put(url.replace("http://node-a", ""), json=json, headers=headers)
+        return type("R", (), {"status_code": r.status_code, "json": lambda self: r.get_json()})()
+
+
+updates._requests = FakeRequests
+checks = []
+real_soon = updates._check_soon
+updates._check_soon = lambda: checks.append(1)
+r = client.put("/api/version/beta", headers=H, json={"beta": True})
+d = r.get_json()
+ok(r.status_code == 200 and d["made_on"] == "node-a" and d["changed"] is True, "on a passive node the choice is made on node-a: %s" % d)
+ok(FakeRequests.sent[-1] == ("http://node-a/api/version/beta", {"beta": True, "forwarded": True}),
+   "passed on once, marked as passed on")
+ok(load_config()["cluster"]["beta_updates"] is True, "and it took there")
+ok(caught == [1], "the passive node then takes the configuration back, rather than waiting for the next round")
+ok(checks == [1], "and the node it was made on looks for the beta at once, with nobody at its page to ask")
+
+own({"beta": True})
+caught.clear()
+ok(updates.adopt_own_tick() is True and load_config()["cluster"]["beta_updates"] is True,
+   "a passive node's own tick from before 2.4.1 reaches the cluster the same way")
+
+# the node asked to make it is passive too: it does not pass it on again
+auth.readonly_state = lambda cfg: (True, PASSIVE_WHY)
+r = client.put("/api/version/beta", headers=H, json={"beta": False, "forwarded": True})
+ok(r.status_code == 409 and "virtual IP" in r.get_json()["error"], "a choice passed on is never passed on twice: %s" % r.get_json()["error"])
+
+# nobody holds the virtual IP, or the node that does is from before 2.4.1
+sync.active_peer = lambda cfg: None
+r = client.put("/api/version/beta", headers=H, json={"beta": False})
+ok(r.status_code == 409 and "no other node answered" in r.get_json()["error"], "with no active node, it says so")
+own({"beta": True})
+ok(updates.adopt_own_tick() is False and load_config()["local"]["updates"] == {"beta": True},
+   "and a tick that could not be handed over is kept, to be tried again")
+sync.active_peer = lambda cfg: {"name": "node-a", "url": "http://node-a", "api_key": "upd-key"}
+FakeRequests.put = classmethod(lambda cls, url, **kw: type("R", (), {"status_code": 404, "json": lambda self: {}})())
+r = client.put("/api/version/beta", headers=H, json={"beta": True})
+ok(r.status_code == 409 and "Update it first" in r.get_json()["error"],
+   "an active node from before 2.4.1 is named as the thing to update: %s" % r.get_json()["error"])
+ok(updates.adopt_own_tick() is False, "and the tick waits for it")
+auth.readonly_state, sync.active_peer, updates._requests, sync.catch_up = real_ro, real_peer, real_req, real_catch
+
+# ---- the choice arriving from another node ---------------------------------------------
+checks.clear()
+updates._follow_the_cluster({"beta_updates": False}, {"beta_updates": True})
+updates._follow_the_cluster({"beta_updates": True}, {"beta_updates": True, "vips": "10.0.0.9"})
+updates._follow_the_cluster({}, {"beta_updates": False})
+ok(checks == [1], "a node that receives a changed choice checks again at once, and only then")
+ok(updates._follow_the_cluster in sync.after_receive, "and that is hooked to every configuration received")
+updates._check_soon = real_soon
+
+print("\n" + ("%d failed" % len(fails) if fails else "betas are asked for once, for every node"))
 sys.exit(1 if fails else 0)

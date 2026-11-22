@@ -15,6 +15,14 @@ import uuid
 from .base import (CERT_DIR, PEER_CONNECT_TIMEOUT, PEER_READ_TIMEOUT,
     PUSH_READ_TIMEOUT, _lock, _requests, app, log)
 from .config import DEFAULT_CONFIG, _merge_defaults, load_config, save_config, shared_fingerprint, shared_view
+
+# Called with the cluster settings as they were and as they are, once a
+# configuration from another node has been taken and applied: for what has to
+# follow a shared setting on this node. Defined before the imports below,
+# because the modules that add to it are imported by them while this one is
+# still loading.
+after_receive = []
+
 from . import apply, auth, cluster, peering, webui
 
 # --------------------------------------------------------------------------
@@ -38,6 +46,17 @@ def shared_payload(cfg):
 
 def enabled_peers(cfg):
     return [p for p in (cfg["local"]["sync"].get("peers") or []) if p.get("enabled", True) and p.get("url")]
+
+
+def active_peer(cfg):
+    """The other node that says it holds the virtual IP, or None."""
+    peers = enabled_peers(cfg)
+    if not peers or _requests is None:
+        return None
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(peers))) as ex:
+        found = list(ex.map(lambda p: (p, peering._query_peer(p, brief=True)), peers))
+    return next((p for p, n in found if n.get("reachable") and n.get("vip_held")), None)
+
 
 
 def push_admin(cfg):
@@ -428,6 +447,7 @@ def _receive_locked(cfg, data, conf, source=None):
                      % (socket.gethostname(), mine, theirs, socket.gethostname(),
                         socket.gethostname())}), 409
 
+    cluster_before = dict(cfg.get("cluster") or {})
     # A straight replacement. This node's own objects are not in these sections
     # -- they live under local -- so there is nothing to rescue afterwards.
     if "haproxy" in conf:
@@ -542,4 +562,9 @@ def _receive_locked(cfg, data, conf, source=None):
     log.info("received configuration from %s at revision %d",
              source, cfg["_meta"]["shared_rev"])
     res = apply.do_apply(cfg, allow_push=False)  # never re-push: avoids sync loops
+    for hook in after_receive:
+        try:
+            hook(cluster_before, dict(cfg.get("cluster") or {}))
+        except Exception:
+            log.exception("a step that follows a received configuration failed")
     return jsonify({"ok": res.get("ok", False), "node": socket.gethostname(), "applied": res})

@@ -1527,6 +1527,10 @@ export default {
 
 /* ---- updates.js: the beta channel ---- */
 "Also offer beta versions": "Auch Betaversionen anbieten",
+"In a cluster the choice is shared: every node offers the same versions.": "In einem Cluster gilt die Wahl für alle: Jeder Knoten bietet dieselben Versionen an.",
+"Set on {node}, which holds the virtual IP.": "Auf {node} gesetzt, der die virtuelle IP hält.",
+"This node takes it with the next sync.": "Dieser Knoten übernimmt es bei der nächsten Synchronisierung.",
+"beta must be true or false": "beta muss true oder false sein",
 "A beta is published to try a change out before it becomes a release. It can still change, and a node on a beta takes the release when it comes. Updating the other nodes from here moves them to the same version, beta or not.": "Eine Beta wird veröffentlicht, um eine Änderung auszuprobieren, bevor sie zu einer Version wird. Sie kann sich noch ändern, und ein Knoten auf einer Beta übernimmt die Version, sobald sie erscheint. Werden die anderen Knoten von hier aus aktualisiert, landen sie auf derselben Version, Beta oder nicht.",
 "beta": "Beta",
 "Checked once a day against <span class=mono>{repo}</span> ({ref}, and {beta} for betas).": "Einmal täglich gegen <span class=mono>{repo}</span> ({ref}, und {beta} für Betas) geprüft.",
