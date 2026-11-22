@@ -36,6 +36,44 @@ _ALIAS_NAME = re.compile(r"^(?=.{1,253}$)([A-Za-z0-9_]([A-Za-z0-9_-]{0,61}[A-Za-
 NO_ALIAS = "no"
 _ALIAS_PREFIX = "_acme-challenge."
 
+# acme.sh keeps what it is given in conf files of the form KEY='value', and
+# later runs those files as shell code: a quote in a value ends the string and
+# the rest runs as root. The account e-mail lands in the CA's conf, which the
+# next --issue reads; the DNS hook name and the domain names in the
+# certificate's own. A domain name is also a directory name to acme.sh. So
+# each of the three is held to a shape that has no quote, no $, no slash and
+# no leading dash -- checked when saved, and again before acme.sh runs, for a
+# configuration that came by sync, restore or an older version.
+_LABEL = r"[A-Za-z0-9_]([A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?"
+_DOMAIN_NAME = re.compile(r"^(?=.{1,253}$)(\*\.)?%s(\.%s)*$" % (_LABEL, _LABEL))
+_IPV6 = re.compile(r"^[0-9A-Fa-f:]{2,39}$")
+_DNS_HOOK = re.compile(r"^[A-Za-z0-9_]{1,64}$")
+_EMAIL = re.compile(r"^(?=.{3,254}$)[A-Za-z0-9._%+=-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$")
+
+
+def check_domains(doms):
+    """Raise ValueError naming the first domain name acme.sh must not be given."""
+    for d in doms:
+        if not (_DOMAIN_NAME.match(d) or (":" in d and _IPV6.match(d))):
+            raise ValueError("%r is not a domain name: letters, digits, - and _ in labels "
+                             "separated by dots, optionally starting with *." % d)
+
+
+def check_dns_hook(ch):
+    """Raise ValueError when a DNS-01 challenge type's hook name could be more than a name."""
+    hook = ch.get("dns_provider") or ""
+    if ch.get("method") == "dns01" and hook and not (isinstance(hook, str) and _DNS_HOOK.match(hook)):
+        raise ValueError("%r is not a DNS API hook name: it is a name such as dns_cf, "
+                         "letters, digits and _ only" % (hook,))
+
+
+def check_email(acc):
+    """Raise ValueError when an ACME account's e-mail address holds what acme.sh cannot keep."""
+    mail = acc.get("email") or ""
+    if mail and not (isinstance(mail, str) and _EMAIL.match(mail)):
+        raise ValueError("%r is not an e-mail address this node can give acme.sh: letters, "
+                         "digits and . _ %% + = - before the @, a domain after it" % (mail,))
+
 
 def parse_challenge_alias(value):
     """The alias domains typed on a challenge type, as a list.
@@ -82,9 +120,13 @@ def check_alias_count(ch, doms, cert_name=""):
 def check_challenge(item, cfg=None):
     """What a challenge type is refused for when it is saved: an alias that
     is not a host name, and a list of them that does not fit a certificate
-    already using it -- that certificate's next renewal would fail."""
+    already using it -- that certificate's next renewal would fail -- and a
+    DNS hook name that is not a plain name."""
     if item.get("method") != "dns01":
         return                      # the alias is not used, and not shown
+    if isinstance(item.get("dns_provider"), str):
+        item["dns_provider"] = item["dns_provider"].strip()
+    check_dns_hook(item)
     names = parse_challenge_alias(item.get("challenge_alias"))
     item["challenge_alias"] = " ".join(names)
     if not cfg or not item.get("id"):
@@ -96,9 +138,11 @@ def check_challenge(item, cfg=None):
 
 def check_certificate(cfg, item):
     """A certificate whose domain names no longer fit its challenge type's
-    per-domain aliases is refused when saved, not at its next renewal."""
+    per-domain aliases is refused when saved, not at its next renewal, and
+    so is one with a name acme.sh must not be given."""
     if is_custom(item):
         return
+    check_domains(parse_domains(item))
     ch = _by_id(cfg["acme"]["challenges"]).get(item.get("challenge"))
     if not ch or ch.get("method") != "dns01":
         return
@@ -191,6 +235,9 @@ SYSTEM_BUNDLES = ("/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-b
 def check_account(acc):
     """What an ACME account refuses before it is stored. Raises ValueError with why."""
     ca = acc.get("ca") or "letsencrypt"
+    if isinstance(acc.get("email"), str):
+        acc["email"] = acc["email"].strip()
+    check_email(acc)
     if ca in NO_EAB:
         # The editor hides the EAB rows for these, so what was typed for
         # another CA before switching must not stay behind, unseen: one of
@@ -394,6 +441,13 @@ def _acme_issue(cfg, cert, force=False):
     doms = parse_domains(cert)
     if not doms:
         return {"ok": False, "error": "certificate has no domain names"}
+    # Saving refuses these, but a synced, restored or older configuration has
+    # not been through that, and acme.sh would keep them as shell code.
+    try:
+        check_domains(doms)
+        check_dns_hook(ch)
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
     if ch.get("method") == "dns01":
         # Checked before anything is asked of the CA: an alias list that does
         # not fit is this node's own configuration, and saving refuses it, but

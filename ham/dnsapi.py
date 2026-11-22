@@ -198,9 +198,10 @@ def api_wizard_certificate():
     domains = [d for d in re.split(r"[\s,]+", body.get("domains") or "") if d]
     if not domains:
         return jsonify({"ok": False, "error": "at least one domain name is required"}), 400
-    bad = [d for d in domains if not re.match(r"^\*?[A-Za-z0-9_.-]+$", d)]
-    if bad:
-        return jsonify({"ok": False, "error": "not a domain name: %s" % ", ".join(bad[:3])}), 400
+    try:
+        acme.check_domains(domains)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
 
     acts, warns = [], []
     dry_run = bool(body.get("dry_run"))
