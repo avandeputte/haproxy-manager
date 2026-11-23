@@ -37,7 +37,7 @@ from .util import run_script
 # The release the image carries and a node installs on demand. The weekly
 # upstream check (.github/workflows/upstream.yml) moves this, the Dockerfile's
 # ARG and install.sh together; tools/check-docs.py holds them to one value.
-A2C_VERSION = "0.46.4"
+A2C_VERSION = "0.47.1"
 A2C_DEB = ("https://github.com/grindsa/acme2certifier/releases/download/%(v)s/"
            "acme2certifier_%(v)s-1_all.deb")
 # Its .rpm is two packages: the program, under /opt/acme2certifier, and the

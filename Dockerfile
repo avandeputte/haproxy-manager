@@ -15,10 +15,10 @@ FROM debian:trixie-slim
 # stock package is always an old LTS. That repository tracks one branch per
 # suite, for amd64 and arm64, and publishes each point release as it comes.
 ARG HAPROXY_BRANCH=3.4
-ARG ACME_VERSION=3.1.6
+ARG ACME_VERSION=3.1.7
 # acme2certifier, for certificates from Active Directory Certificate Services
 # (ham/adcs.py pins the same release for nodes that install it on demand).
-ARG A2C_VERSION=0.46.4
+ARG A2C_VERSION=0.47.1
 
 ENV DEBIAN_FRONTEND=noninteractive
 
