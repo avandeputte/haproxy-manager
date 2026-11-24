@@ -214,7 +214,7 @@ ok(any("not connected yet" in w and "refuses every request" in w for w in r.get(
 ok("http-request deny deny_status 403" in block("backend be_shop") and "cf_tunnel" not in text(),
    "through Cloudflare only, with no tunnel: every request is refused, not let in")
 sv = service("shop")["cloudflare"]
-ok(sv == {"enabled": True, "access": "allow", "allow": "me@example.com\n@example.org", "only": True},
+ok(sv == {"enabled": True, "access": "allow", "allow": "me@example.com\n@example.org", "only": True, "countries": ""},
    "the service says how it is published, the addresses lowercased")
 publish("http://shop.example.com", 400, name="shop", service_id=service("shop")["id"],
         cloudflare={"enabled": True, "access": "allow", "allow": "not an address"})

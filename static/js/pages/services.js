@@ -125,6 +125,8 @@ export const WIZ_SECTIONS=[
    h:"With a sign-in, Cloudflare Access asks every visitor to sign in before the request reaches this node, and lets in only the identities listed below."},
   {k:"cf_allow",l:"Allowed identities",t:"textarea",
    h:"For the sign-in. One per line: an email, a whole domain as @example.com, or * for anyone your Cloudflare identity provider signs in."},
+  {k:"cf_countries",l:"Only from these countries",t:"text",
+   h:"Two-letter country codes, such as US or US CA GB. Visitors through Cloudflare from anywhere else are blocked by Cloudflare's Firewall before they reach the tunnel. Empty for everywhere. Needs Zone WAF: Edit on the API token, and Through Cloudflare only to cover this node's own ports too."},
   {k:"cf_only",l:"Through Cloudflare only",t:"bool",
    h:"Refuse every request that did not come through the tunnel, so nobody on the LAN or on this node's own ports gets round the sign-in. Leave off to keep the service reachable directly as well."},
  ]},
@@ -353,12 +355,12 @@ export function openWizard(prefill){
     d.auth={enabled:d.auth_enabled,groups:d.auth_groups,realm:d.auth_realm,
             exempt:d.auth_exempt,exempt_lists:d.auth_exempt_lists};
     d.oauth={enabled:d.oauth_enabled,allow:d.oauth_allow,forward:d.oauth_forward};
-    d.cloudflare={enabled:!!d.cf_enabled,access:d.cf_access||"public",allow:d.cf_allow||"",only:!!d.cf_only};
+    d.cloudflare={enabled:!!d.cf_enabled,access:d.cf_access||"public",allow:d.cf_allow||"",only:!!d.cf_only,countries:d.cf_countries||""};
     ["cert_mode","health_interval","health_uri","health_status","health_user",
      "health_method","health_version","health_host",
      "auth_enabled","auth_groups","auth_realm","auth_exempt","auth_exempt_lists",
      "oauth_enabled","oauth_allow","oauth_forward",
-     "cf_enabled","cf_access","cf_allow","cf_only"].forEach(k=>delete d[k]);
+     "cf_enabled","cf_access","cf_allow","cf_only","cf_countries"].forEach(k=>delete d[k]);
     return d;   // balance / persistence / stick_* / check_port / log_health_checks pass straight through
   };
   const show=(r,saved)=>{
@@ -477,6 +479,7 @@ export async function servicesCard(){
                ?t("through Cloudflare &mdash; sign-in for {who}",{who:
                   esc((s.cloudflare.allow||"").split("\n").filter(Boolean).map(a=>a==="*"?t("anyone the provider signs in"):a).join(", "))})
                :t("through Cloudflare &mdash; no sign-in"))+
+             (s.cloudflare.countries?", "+t("from {countries} only",{countries:esc(s.cloudflare.countries)}):"")+
              (s.cloudflare.only?", "+t("and only through it"):"")+"</div>":"")+
           (s.allow_src||(s.allow_list_names||[]).length?'<div class=sub>'+t("only from {networks}",{networks:
              esc(s.allow_src.split("\n").filter(Boolean).concat(s.allow_list_names||[]).join(", "))})+"</div>":"")+
@@ -525,6 +528,7 @@ export async function servicesCard(){
         oauth_forward:(s.oauth||{}).forward,
         cf_enabled:(s.cloudflare||{}).enabled,cf_access:(s.cloudflare||{}).access,
         cf_allow:(s.cloudflare||{}).allow,cf_only:(s.cloudflare||{}).only,
+        cf_countries:(s.cloudflare||{}).countries,
         allow_src:s.allow_src,allow_lists:s.allow_lists,
         error_pages:s.error_pages,rules:s.rules,
         hsts:s.hsts,hsts_subdomains:s.hsts_subdomains,

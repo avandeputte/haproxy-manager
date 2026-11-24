@@ -557,7 +557,9 @@ TOOLS = [
              "oauth": {"type": "object", "description": "Single sign-on: {enabled, allow, forward}"},
              "cloudflare": {"type": "object", "description": "Publish through the Cloudflare Tunnel ("
                             "HTTP services): {enabled, access: public|allow, allow: emails, @domains or * "
-                            "one per line, only: refuse what did not come through the tunnel}"},
+                            "one per line, only: refuse what did not come through the tunnel, countries: "
+                            "two-letter codes such as \"US CA\" -- visitors through Cloudflare from anywhere "
+                            "else are blocked by a Firewall rule; empty for everywhere}"},
              "allow_src": {"type": "string", "description": "Only these networks, space-separated"},
              "allow_lists": {"type": "array", "items": S, "description": "Address list ids"},
              "error_pages": {"type": "array", "items": S, "description": "Error page ids"},

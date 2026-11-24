@@ -11,8 +11,10 @@ The tunnel is managed remotely: Cloudflare holds its routing, this module
 tells it. For each HTTP service ticked "through Cloudflare" it keeps three
 things in step at Apply -- the tunnel's route for the host name, the DNS
 record that points the name at the tunnel, and the Access application with its
-policy. Only what it made is ever changed: a DNS record that points at this
-tunnel, an Access application holding the policy named below.
+policy -- and, for a service limited to countries, a Firewall custom rule in
+the zone. Only what it made is ever changed: a DNS record that points at this
+tunnel, an Access application holding the policy named below, the custom rule
+with the ref below.
 
 cloudflared reaches HAProxy, not the servers: on a loopback port added to the
 listener that carries the service, so health checks, rules, rate limits and
@@ -53,9 +55,72 @@ _HOST = re.compile(r"^(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]([a-z0-
 _OUR_SERVICE = re.compile(r"^http://127\.0\.0\.1:\d+$")
 DNS_COMMENT = "haproxy-manager"
 
+# The countries a service may be limited to: ISO 3166-1 alpha-2, as Cloudflare
+# names a visitor's country, plus Cloudflare's own XK (Kosovo), T1 (Tor) and
+# XX (no country known).
+COUNTRIES = frozenset((
+    "AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR "
+    "BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ "
+    "EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW "
+    "GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY "
+    "KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV "
+    "MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY "
+    "QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG "
+    "TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM "
+    "ZW XK T1 XX").split())
+# Codes people write that are not ISO's, and what they mean.
+_COUNTRY_SLIPS = {"UK": "GB", "EL": "GR"}
+
+# The one Firewall custom rule this app keeps in a zone, and how it is told
+# from the zone's other rules. Every service limited to countries in that
+# zone is a part of it: the Free plan allows five custom rules a zone.
+WAF_REF = "haproxy-manager-countries"
+WAF_DESCRIPTION = "haproxy-manager: services limited to countries (managed by haproxy-manager)"
+WAF_PHASE = "http_request_firewall_custom"
+WAF_MAX_EXPRESSION = 4096
+
 
 class CloudflareError(Exception):
-    pass
+    status = 0
+
+
+def parse_countries(value):
+    """The country codes typed for a service: (codes, refused). Upper-cased,
+    each once, in the order given; separated by spaces, commas or lines."""
+    if isinstance(value, (list, tuple)):
+        value = " ".join(str(x) for x in value)
+    codes, bad = [], []
+    for tok in re.split(r"[\s,;]+", str(value or "").strip()):
+        if not tok:
+            continue
+        code = tok.upper()
+        if code in COUNTRIES:
+            if code not in codes:
+                codes.append(code)
+        else:
+            bad.append(tok)
+    return codes, bad
+
+
+def check_countries(value):
+    """The stored form of a country list, or ValueError saying which code is wrong."""
+    codes, bad = parse_countries(value)
+    if bad:
+        hint = ["%s (did you mean %s?)" % (b, _COUNTRY_SLIPS[b.upper()]) if b.upper() in _COUNTRY_SLIPS
+                else b for b in bad[:3]]
+        raise ValueError("not a two-letter country code: %s -- use ISO codes such as US, CA or GB"
+                         % ", ".join(hint))
+    return " ".join(codes)
+
+
+def _route_countries(value):
+    """What a stored list limits a route to. A list that is set but holds no
+    code this app knows (a restored or hand-edited configuration) admits
+    nobody rather than everybody: a limit misread must not open a service."""
+    codes, bad = parse_countries(value)
+    if bad and not codes:
+        return ["ZZ"]                       # no visitor is in ZZ
+    return codes
 
 
 def settings_of(cfg):
@@ -106,7 +171,7 @@ def check(new, cur):
                          "different name or account is a different tunnel." % cur.get("tunnel_name"))
     if new.get("enabled") and not new.get("api_token"):
         raise ValueError("Cloudflare needs an API token with Cloudflare Tunnel, Access: Apps and Policies "
-                         "and DNS, all Edit, and Zone Read")
+                         "and DNS, all Edit, and Zone Read -- and Zone WAF: Edit to limit services to countries")
 
 
 # --------------------------------------------------------------------------
@@ -158,7 +223,8 @@ def routes(cfg):
                             "pool": pool["id"], "name": pool.get("name") or host,
                             "frontend": fe["id"], "port": base + idx,
                             "access": pool.get("cf_access") if pool.get("cf_access") in ACCESS_MODES else "public",
-                            "allow": entries})
+                            "allow": entries,
+                            "countries": _route_countries(pool.get("cf_countries"))})
     return out
 
 
@@ -245,7 +311,9 @@ def _call(token, method, path, body=None, params=None):
     if not data.get("success"):
         why = "; ".join("%s (%s)" % (e.get("message"), e.get("code")) for e in data.get("errors") or []
                         if isinstance(e, dict))
-        raise CloudflareError(why or "Cloudflare answered %d" % r.status_code)
+        err = CloudflareError(why or "Cloudflare answered %d" % r.status_code)
+        err.status = r.status_code
+        raise err
     return data
 
 
@@ -345,6 +413,7 @@ def desired(cfg):
     s = settings_of(cfg)
     return {"tunnel": s.get("tunnel_id") or "", "account": s.get("account_id") or "",
             "routes": [[r["host"], r["path"], r["port"], r["access"], r["allow"], r["name"]]
+                       + ([r["countries"]] if r["countries"] else [])
                        for r in routes(cfg) if r["valid"]]}
 
 
@@ -403,6 +472,143 @@ def _drop_dns(token, zones, host, target):
     return out
 
 
+# --------------------------------------------------------------------------
+# countries: one Firewall custom rule per zone
+
+def _q(text):
+    """A string literal in Cloudflare's rules language."""
+    return '"%s"' % str(text).replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _host_test(host):
+    # wildcard is case-insensitive and on every plan; * spans dots, as the
+    # listener's own *.example.com does.
+    return ("http.host wildcard %s" % _q(host)) if host.startswith("*.") else ("http.host eq %s" % _q(host))
+
+
+def _covers(wild, host):
+    """Does the wildcard host name take in this (more particular) one."""
+    return wild.startswith("*.") and host != wild and host.endswith(wild[1:])
+
+
+def _claim(r, everyone):
+    """The requests Cloudflare should take to be this route's. The tunnel
+    routes by host name, so a host's paths are told apart here: a route owns
+    its path, less the longer paths and the more particular host names that
+    other routes own, as the listener sends them on."""
+    parts = [_host_test(r["host"])]
+    if r["path"]:
+        parts.append("starts_with(http.request.uri.path, %s)" % _q(r["path"]))
+    for o in everyone:
+        if o is r:
+            continue
+        if o["host"] == r["host"]:
+            if len(o["path"]) > len(r["path"]) and o["path"].startswith(r["path"]):
+                parts.append("not starts_with(http.request.uri.path, %s)" % _q(o["path"]))
+        elif _covers(r["host"], o["host"]):
+            mine = _host_test(o["host"])
+            if o["path"] and len(o["path"]) > len(r["path"]):
+                mine = "(%s and starts_with(http.request.uri.path, %s))" % (mine, _q(o["path"]))
+            parts.append("not %s" % mine)
+    return " and ".join(parts)
+
+
+def firewall_expressions(found, zones):
+    """What each zone's rule should say: {zone id: (zone name, expression)}.
+    A zone none of whose services is limited to countries is not in it."""
+    everyone = [r for r in found if r["valid"]]
+    by_zone = {}
+    for r in everyone:
+        if not r["countries"]:
+            continue
+        zone = _zone_for(zones, r["host"])
+        if not zone:
+            continue
+        clause = "(%s and not ip.src.country in {%s})" % (
+            _claim(r, everyone), " ".join(_q(c) for c in r["countries"]))
+        name, clauses = by_zone.setdefault(zone["id"], (zone["name"], []))
+        if clause not in clauses:
+            clauses.append(clause)
+    return {zid: (name, " or ".join(clauses)) for zid, (name, clauses) in by_zone.items()}
+
+
+def _waf_rule(expression):
+    return {"ref": WAF_REF, "description": WAF_DESCRIPTION, "expression": expression,
+            "action": "block", "enabled": True}
+
+
+def _ours_waf(rule):
+    return isinstance(rule, dict) and (rule.get("ref") == WAF_REF or rule.get("description") == WAF_DESCRIPTION)
+
+
+def _entrypoint(token, zone_id):
+    """The zone's custom rules ruleset, or None when it has none yet."""
+    try:
+        return _call(token, "GET", "/zones/%s/rulesets/phases/%s/entrypoint" % (zone_id, WAF_PHASE)).get("result")
+    except CloudflareError as e:
+        if e.status == 404:
+            return None
+        raise
+
+
+def _no_waf_right(e):
+    return CloudflareError("the API token may not change this zone's Firewall rules (%s). Give it Zone WAF: "
+                           "Edit, which limiting a service to countries needs" % e)
+
+
+def _firewall(token, zones, found, hosts):
+    """Bring the country rule of every zone these host names are in into
+    step: (steps, warnings, pending). Only the rule this app made is read,
+    changed or removed; the zone's other rules are not touched, and keep
+    their order. A zone where nothing is limited is only cleared, and a token
+    without the right to look leaves it as it is: before 2.5 none was made."""
+    steps, warnings, pending = [], [], False
+    wanted = firewall_expressions(found, zones)
+    seen = {}
+    for h in hosts:
+        z = _zone_for(zones, h)
+        if z:
+            seen[z["id"]] = z["name"]
+    for zid, (name, _expr) in wanted.items():
+        seen[zid] = name
+    for zid, name in seen.items():
+        expr = wanted.get(zid, (name, ""))[1]
+        if expr and len(expr) > WAF_MAX_EXPRESSION:
+            pending = True
+            warnings.append("the country rule for %s would be %d characters, more than Cloudflare's %d, so it "
+                            "was not written: limit fewer services in that zone, or group them on one host name"
+                            % (name, len(expr), WAF_MAX_EXPRESSION))
+            continue
+        try:
+            rs = _entrypoint(token, zid)
+        except CloudflareError as e:
+            if not expr:
+                continue                    # nothing wanted, nothing it may see
+            raise _no_waf_right(e) if e.status in (401, 403) else e
+        mine = next((x for x in (rs or {}).get("rules") or [] if _ours_waf(x)), None)
+        try:
+            if not expr:
+                if mine:
+                    _call(token, "DELETE", "/zones/%s/rulesets/%s/rules/%s" % (zid, rs["id"], mine["id"]))
+                    steps.append("cloudflare: country rule for %s removed" % name)
+                continue
+            body = _waf_rule(expr)
+            if rs is None:
+                _call(token, "PUT", "/zones/%s/rulesets/phases/%s/entrypoint" % (zid, WAF_PHASE),
+                      body={"rules": [body]})
+                steps.append("cloudflare: country rule for %s" % name)
+            elif not mine:
+                _call(token, "POST", "/zones/%s/rulesets/%s/rules" % (zid, rs["id"]), body=body)
+                steps.append("cloudflare: country rule for %s" % name)
+            elif (mine.get("expression") != expr or mine.get("action") != "block"
+                  or mine.get("enabled") is False or mine.get("ref") != WAF_REF):
+                _call(token, "PATCH", "/zones/%s/rulesets/%s/rules/%s" % (zid, rs["id"], mine["id"]), body=body)
+                steps.append("cloudflare: country rule for %s updated" % name)
+        except CloudflareError as e:
+            raise _no_waf_right(e) if e.status in (401, 403) else e
+    return steps, warnings, pending
+
+
 def _reconcile(cfg, also=()):
     """Bring Cloudflare in step: (steps, warnings, pending). Raises
     CloudflareError when Cloudflare would not have it. `also` are host names
@@ -453,6 +659,14 @@ def _reconcile(cfg, also=()):
                   body=policy)
             steps.append("cloudflare: Access policy for %s updated" % domain)
 
+    # 1b. Countries: the zone's Firewall rule, before the route, so a service
+    #     limited to countries is never reachable from elsewhere for a moment.
+    zones = _all(token, "/zones") if (want_hosts or prev_hosts) else []
+    more, warned, waiting = _firewall(token, zones, want, set(prev_hosts) | set(want_hosts))
+    steps += more
+    warnings += warned
+    pending = pending or waiting
+
     # 2. The tunnel's routes. This app's own are written whole; anybody
     #    else's follow them untouched, and so does everything else Cloudflare
     #    keeps in the same document. Cloudflare takes the first route that
@@ -475,7 +689,6 @@ def _reconcile(cfg, also=()):
     # 3. DNS: the name points at the tunnel. A record that is already there
     #    and points elsewhere is somebody's, and is left alone -- and asked
     #    about again at the next Apply, by when it may be gone.
-    zones = _all(token, "/zones") if (want_hosts or prev_hosts) else []
     for host in want_hosts:
         zone = _zone_for(zones, host)
         if not zone:
@@ -774,6 +987,25 @@ def api_cloudflare_test():
         except CloudflareError as e:
             parts.append("Access did not answer it (%s) -- open Zero Trust once in the dashboard, and "
                          "check the token has Access: Apps and Policies" % e)
+        if zones:
+            # Zone WAF can be given for some zones and not others, so each is
+            # asked; a token that sees very many is asked about the first 25.
+            asked = zones[:25]
+            denied = []
+            for z in asked:
+                try:
+                    _entrypoint(token, z["id"])
+                except CloudflareError:
+                    denied.append(z["name"])
+            if not denied:
+                parts.append("it may manage Firewall rules, so services can be limited to countries")
+            elif len(denied) == len(asked):
+                parts.append("it may not manage Firewall rules in any zone: limiting a service to countries "
+                             "needs Zone WAF: Edit as well")
+            else:
+                parts.append("it may manage Firewall rules in %d of %d zone(s), so services in those can be "
+                             "limited to countries; not in %s" % (len(asked) - len(denied), len(asked),
+                                                                  ", ".join(denied[:3]) + (", ..." if len(denied) > 3 else "")))
         if s.get("tunnel_id") and account == s.get("account_id"):
             t = _call(token, "GET", "/accounts/%s/cfd_tunnel/%s" % (account, s["tunnel_id"])).get("result") or {}
             parts.append("tunnel \"%s\" is %s, with %d connection(s)"
@@ -854,6 +1086,7 @@ def api_cloudflare_disconnect():
                 for domain, a in _apps_for(token, account, set(hosts))[0].items():
                     _call(token, "DELETE", "/accounts/%s/access/apps/%s" % (account, a["id"]))
                     steps.append("cloudflare: Access application for %s removed" % domain)
+                steps += _firewall(token, zones, [], hosts)[0]
                 steps.append("cloudflare: the tunnel was already gone there")
             else:
                 more, _warnings, _pending = _reconcile(load_config(), also=hosts)   # off: nothing is wanted

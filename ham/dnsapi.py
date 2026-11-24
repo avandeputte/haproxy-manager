@@ -633,6 +633,12 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
         pool_opts["cf_access"] = cf_mode if want else "public"
         pool_opts["cf_access_allow"] = "\n".join(entries) if want and cf_mode == "allow" else ""
         pool_opts["cf_only"] = bool(cloudflare_opts.get("only")) and want
+        countries = cloudflare.check_countries(cloudflare_opts.get("countries")) if want else ""
+        pool_opts["cf_countries"] = countries
+        if countries and not pool_opts["cf_only"]:
+            warns.append("Visitors through Cloudflare are limited to %s, but this service is also reachable "
+                         "on this node's own ports, where nobody's country is checked. Tick Through "
+                         "Cloudflare only to close that." % ", ".join(countries.split()))
         if bool(cloudflare_opts.get("enabled")) and is_tcp:
             warns.append("A tcp:// service cannot be published through Cloudflare here: the tunnel "
                          "carries HTTP and HTTPS services only, so it was not applied.")

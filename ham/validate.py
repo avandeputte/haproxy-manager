@@ -92,6 +92,11 @@ def check_pool(item):
             raise ValueError("the rate window must be between 1 and 3600 seconds")
     # A redirect: the wizard checks these, the Backend Pools editor and the
     # API store what they are given, and the renderer writes it out.
+    # Countries for Cloudflare: a code it would never see is a typo, and a
+    # limit nobody can meet is the one outcome worse than an error.
+    if item.get("cf_countries"):
+        from .cloudflare import check_countries   # here: cloudflare imports more than this module may
+        item["cf_countries"] = check_countries(item["cf_countries"])
     to = str(item.get("redirect_to") or "").strip()
     if to and not plain_url(to):
         raise ValueError("a redirect needs an address starting with http:// or https://")
