@@ -192,7 +192,11 @@ def api_setup_join():
                 # has never heard of fails closed and refuses everyone, and a
                 # node without the notification settings alerts nobody -- both
                 # until the first push happens to arrive.
-                for section in ("haproxy", "acme", "access", "cluster", "notify"):
+                # (CrowdSec and Cloudflare were missing until 2.5.1, so a node
+                # joined a cluster without them and then sat at the same
+                # revision with a different configuration -- issue #44.)
+                for section in ("haproxy", "acme", "access", "cluster", "notify",
+                                "crowdsec", "cloudflare"):
                     if isinstance(conf.get(section), dict):
                         cfg[section] = _merge_defaults(conf[section], DEFAULT_CONFIG[section])
                 mine = (cfg["local"].get("node_url") or "").rstrip("/").lower()

@@ -629,7 +629,9 @@ def api_status():
         "config_objects_capped": objects is None,
         # Set when this node took a configuration and then did not match it,
         # which can only mean something node-specific travelled with it.
-        "config_leak": cfg["_meta"].get("config_leak") or None,
+        # Only one this version recorded: before 2.5.1 a rolling upgrade
+        # recorded one that was the versions' difference, not a leak (#44).
+        "config_leak": _leak_note(cfg),
         "certs": certs,
         "acme_installed": Path(ACME_SH).exists(),
         "renews_here": acme.renewal_runs_here(cfg)[0],
@@ -641,6 +643,11 @@ def api_status():
     if brief:
         out["brief"] = True     # so a reader can tell "left out" from "none"
     return jsonify(out)
+
+
+def _leak_note(cfg):
+    note = cfg["_meta"].get("config_leak")
+    return note if isinstance(note, dict) and note.get("version") == VERSION else None
 
 
 @app.get("/api/ping")

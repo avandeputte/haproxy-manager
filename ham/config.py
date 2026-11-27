@@ -662,6 +662,12 @@ def save_config(cfg):
         if fp != meta.get("shared_fp"):
             meta["shared_fp"] = fp
             meta["shared_rev"] = int(meta.get("shared_rev") or 0) + 1
+            # A change made here is what the peers take next, from this node:
+            # a note that this node once took something it did not match is
+            # about a configuration that no longer exists. Only a receive or
+            # this clears it, and the node holding the virtual IP seldom
+            # receives -- which is how the note outlived its cause (#44).
+            meta.pop("config_leak", None)
         _snapshot(cfg, fp)
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         # The previous configuration, kept beside the current one. haproxy.cfg

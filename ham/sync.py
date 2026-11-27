@@ -13,7 +13,7 @@ import time
 import uuid
 
 from .base import (CERT_DIR, PEER_CONNECT_TIMEOUT, PEER_READ_TIMEOUT,
-    PUSH_READ_TIMEOUT, _lock, _requests, app, log)
+    PUSH_READ_TIMEOUT, VERSION, _lock, _requests, app, log)
 from .config import DEFAULT_CONFIG, _merge_defaults, load_config, save_config, shared_fingerprint, shared_view
 
 # Called with the cluster settings as they were and as they are, once a
@@ -39,7 +39,13 @@ def shared_payload(cfg):
         # Which revision of the shared configuration this is. The receiver
         # compares it with its own and refuses to move backwards.
         "rev": int(cfg["_meta"].get("shared_rev") or 0),
-        "fp": cfg["_meta"].get("shared_fp") or "",
+        # Of what is sent, worked out now: the stored one dates from the last
+        # save, and an upgrade since then may have added settings to the view.
+        "fp": shared_fingerprint(cfg),
+        # A receiver on another version fills in the settings one of them
+        # lacks, so only between equal versions does a different fingerprint
+        # mean something node-specific travelled.
+        "version": VERSION,
         "ts": time.time(),
     }
 
@@ -547,10 +553,17 @@ def _receive_locked(cfg, data, conf, source=None):
     # That is the one failure this whole mechanism cannot see past, so it is
     # recorded and reported rather than left in a log nobody reads: the nodes
     # would otherwise be shown as disagreeing forever with no reason given.
-    if data.get("fp") and cfg["_meta"]["shared_fp"] != data["fp"]:
+    #
+    # Only between nodes on the same version, though. A sender on another
+    # version holds fewer or more settings than this one, and filling those in
+    # makes the fingerprints differ on every rolling upgrade (issue #44). A
+    # sender from before 2.5.1 says nothing of its version and is not judged.
+    same_version = data.get("version") == VERSION
+    if same_version and data.get("fp") and cfg["_meta"]["shared_fp"] != data["fp"]:
         cfg["_meta"]["config_leak"] = {
             "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "source": source, "mine": cfg["_meta"]["shared_fp"], "theirs": data["fp"]}
+            "source": source, "mine": cfg["_meta"]["shared_fp"], "theirs": data["fp"],
+            "version": VERSION}
         log.warning("took the configuration from %s but computed a different "
                     "fingerprint (%s here, %s there): something node-specific is "
                     "inside the shared configuration", source,
