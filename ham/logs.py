@@ -187,10 +187,32 @@ def read_service_log(unit, match, source, lines):
     return read_syslog_files(match, source, lines)
 
 
+def _credential_values(cfg):
+    """The values of every DNS credential line, longest first, so that a
+    token that contains another is taken out whole. Short values are left:
+    a region name or a "1" would strike out ordinary words."""
+    values = set()
+    for ch in cfg.get("acme", {}).get("challenges", []) or []:
+        for raw in str(ch.get("dns_credentials") or "").splitlines():
+            _, sep, value = raw.partition("=")
+            value = value.strip().strip("'\"")
+            if sep and len(value) >= 8:
+                values.add(value)
+    return sorted(values, key=len, reverse=True)
+
+
 def read_acme_log(lines):
     """acme.sh's own log, plus the outcome of each issuance we ran."""
     entries = []
+    cfg = load_config()
+    secrets = _credential_values(cfg)
     for line in _tail(str(ACME_HOME / "acme.sh.log"), lines):
+        # acme.sh traces the requests its DNS hooks make, and a hook puts the
+        # token it was given in them. The token is configured here, so it is
+        # known, and known is enough to take it out before anyone reads this.
+        for secret in secrets:
+            if secret in line:
+                line = line.replace(secret, "[redacted]")
         stamp, text = None, line
         if line.startswith("["):
             head, _, rest = line[1:].partition("]")
@@ -204,7 +226,6 @@ def read_acme_log(lines):
         entries.append(_entry(stamp, "acme", _level_of(text), text))
     # issuance results are kept in _meta by record_issue(); surface them here so
     # a failed renewal is visible even when acme.sh wrote nothing useful
-    cfg = load_config()
     names = {c.get("id"): c.get("name", "?") for c in cfg["acme"].get("certificates", [])}
     for cid, rec in (cfg.get("_meta", {}).get("issue_log") or {}).items():
         stamp = None

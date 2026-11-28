@@ -12,7 +12,7 @@ from .config import VALID_COLLECTIONS, load_config, merged, save_config
 from .util import _by_id, _sec, rule_cond_ids
 from . import validate
 from .validate import check_pool, check_setting_types
-from . import access, acme, apply, errorpages, haproxy, mcp, oauth, updates
+from . import access, acme, apply, errorpages, haproxy, mcp, oauth, updates, vrrp
 
 # The collections whose objects the rendered file names by their name made a
 # token: two names that become the same token are one ACL declared twice --
@@ -286,6 +286,11 @@ def local_settings():
     if request.method == "GET":
         return jsonify(mcp.redact(load_config()["local"]))
     body = request.get_json(force=True) or {}
+    # The keepalived interface and addresses land in a file root runs; a
+    # value that is not one word is refused here, the same as setup does.
+    bad = vrrp.validate_local_update(body)
+    if bad:
+        return jsonify({"ok": False, "error": bad}), 400
     with _lock:
         cfg = load_config()
         body = _local_unredacted(body, cfg["local"])

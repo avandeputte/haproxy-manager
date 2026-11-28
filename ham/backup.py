@@ -12,7 +12,7 @@ import uuid
 from .base import _lock, app
 from .config import (DEFAULT_CONFIG, VALID_COLLECTIONS, _merge_defaults, load_config, 
     save_config)
-from . import haproxy, keepalived
+from . import haproxy, keepalived, vrrp
 
 # --------------------------------------------------------------------------
 
@@ -35,8 +35,8 @@ def api_export_haproxy():
 @app.get("/api/export/keepalived.conf")
 def api_export_keepalived():
     cfg = load_config()
-    if not cfg["local"]["keepalived"].get("enabled"):
-        return _download("# Keepalived is disabled on this node.\n", "keepalived.conf")
+    if not vrrp.keepalived_wanted(cfg):
+        return _download("# Keepalived is not used: the cluster has no virtual IP.\n", "keepalived.conf")
     return _download(keepalived.render_keepalived(cfg), "keepalived.conf")
 
 

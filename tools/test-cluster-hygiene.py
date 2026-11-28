@@ -307,10 +307,15 @@ ok(v({"keepalived": {"unicast_peer": "10.0.0.2, 10.0.0.3", "unicast_src": "10.0.
 ok(v({"keepalived": {"priority": "high"}}) and v({"keepalived": {"priority": 300}}), "a priority that is not one is refused")
 real_ifaces = apply.node_interfaces
 apply.node_interfaces = lambda: [{"name": "eth9", "addresses": ["10.0.0.1/24"], "up": True}]
-ok(v({"keepalived": {"interface": "eth0"}}) and v({"keepalived": {"interface": "eth9"}}) == "",
+ok(v({"keepalived": {"interface": "eth7"}}) and v({"keepalived": {"interface": "eth9"}}) == "",
    "the interface must be one this node has, as setup requires")
+ok(v({"keepalived": {"interface": load_config()["local"]["keepalived"].get("interface") or "eth0"}}) == "",
+   "but the one already stored passes, so a page can send back what it was shown")
 apply.node_interfaces = real_ifaces
 ok(v({"sync": {"auto_sync": False}}) == "" and v({"keepalived": "eth0"}), "other settings pass; a non-object does not")
+r = client.put("/api/local", json={"keepalived": {"unicast_peer": "10.0.0.2\nnotify_master /bin/sh"}})
+ok(r.status_code == 400 and "notify_master" not in json.dumps(load_config()["local"]["keepalived"]),
+   "and the route refuses such a value before it is stored")
 
 # -- a peer's URL is normalised however it arrives -------------------------------------
 print("a peer's URL")

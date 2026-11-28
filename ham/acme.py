@@ -14,7 +14,7 @@ import time
 import uuid
 
 from .base import ACME_HOME, ACME_SH, CERT_DIR, _lock, app, log
-from .config import is_webui_cert, load_config, merged, save_config
+from .config import is_webui_cert, load_config, merged, save_config, write_private
 from .util import _by_id, _sec, cert_path, parse_domains, run
 
 import re
@@ -313,32 +313,6 @@ EAB_REQUIRED = {"google": "Google", "google_test": "Google", "sslcom": "SSL.com"
 # from the e-mail address; a custom server may ask for it.)
 NO_EAB = {"letsencrypt", "letsencrypt_test", "adcs"}
 KEYLEN = {"ec-256": "ec-256", "ec-384": "ec-384", "rsa-2048": "2048", "rsa-4096": "4096"}
-
-
-def write_private(path, data):
-    """Write a file that holds a private key: never readable by anyone else,
-    not even for a moment, and never half there.
-
-    A file created in place and chmod'ed afterwards is world-readable under
-    the usual umask until the chmod runs, and a reader that comes in between
-    -- HAProxy reloading, a sync -- sees it half written. So the data goes
-    into a temporary file beside it, created with mode 0600 and no other
-    holder of the name (mkstemp), and takes the name in one rename.
-    """
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix="." + path.name + ".")
-    try:
-        with os.fdopen(fd, "w") as f:
-            f.write(data)
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
 
 
 # acme.sh reads account.conf at the start of every run, so it is rewritten

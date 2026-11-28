@@ -204,8 +204,12 @@ def validate_local_update(body):
     if iface is not None:
         if not re.fullmatch(r"[A-Za-z0-9_.:@-]{1,15}", iface):
             return "\"%s\" is not an interface name" % iface
+        # The name already stored is not judged again: a settings page sends
+        # back everything it was shown, and a node whose interface went away
+        # should still be able to save the rest of its settings.
+        stored = ((load_config()["local"].get("keepalived") or {}).get("interface") or "").strip()
         names = [i["name"] for i in apply.node_interfaces()]
-        if names and iface not in names:
+        if names and iface != stored and iface not in names:
             return ("interface \"%s\" does not exist here; available: %s"
                     % (iface, ", ".join(n for n in names if n != "lo")))
     if "priority" in k:

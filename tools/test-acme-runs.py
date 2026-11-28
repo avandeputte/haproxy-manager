@@ -40,7 +40,7 @@ pathlib.Path(os.environ["HAM_ACME_SH"]).write_text('#!/bin/sh\necho "$*" >> "%s"
 os.chmod(os.environ["HAM_ACME_SH"], 0o755)
 
 import ham; ham   # noqa: E402  (route registration)
-from ham import acme   # noqa: E402
+from ham import acme, logs   # noqa: E402
 from ham.base import CERT_DIR   # noqa: E402
 from ham.config import load_config, save_config   # noqa: E402
 from ham.util import cert_path   # noqa: E402
@@ -73,6 +73,21 @@ acme.acme_run(["--version"])
 last = runs()[-1].split()
 ok("--log" in last and last[last.index("--log-level") + 1] == "1" if "--log-level" in last else False,
    "every run carries --log --log-level 1: %s" % " ".join(last))
+
+# Whatever level acme.sh logs at, a token that is configured here is known,
+# and known is enough to take it out of what the Logs page shows.
+print("what the Logs page shows of acme.sh's log")
+cfg = load_config()
+cfg["acme"]["challenges"] = [{"id": "ch1", "name": "cf", "method": "dns01", "dns_provider": "dns_cf",
+                              "dns_credentials": "CF_Token=tok0123456789abcdef\nCF_Account_ID=acc1\n"}]
+save_config(cfg)
+pathlib.Path(os.environ["HAM_ACME_HOME"], "acme.sh.log").write_text(
+    "[Thu Nov 27 10:00:00 UTC 2026] POST https://api.cloudflare.com/ Authorization: Bearer tok0123456789abcdef\n"
+    "[Thu Nov 27 10:00:01 UTC 2026] account acc1 is short, and left as it is\n")
+shown = "\n".join(e["text"] for e in logs.read_acme_log(50) if e["source"] == "acme")
+ok("tok0123456789abcdef" not in shown and "Bearer [redacted]" in shown,
+   "a configured DNS token is taken out of the log before it is shown")
+ok("acc1" in shown, "a short value is left: striking it out would hit ordinary words")
 
 acc = {"id": "a1", "name": "le", "email": "me@example.com", "ca": "letsencrypt"}
 before = len(runs())
