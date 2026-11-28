@@ -27,8 +27,8 @@ export async function refreshLogs(view,note){
       "something to happen.")+'</div>';
   }else{
     view.innerHTML="<table><tbody>"+r.entries.map(e=>
-      "<tr class="+e.level+"><td class=t>"+logStamp(e.ts)+"</td>"+
-      "<td class='s src-"+e.source+"'>"+esc(e.source)+"</td>"+
+      '<tr class="'+esc(e.level)+'"><td class=t>'+logStamp(e.ts)+"</td>"+
+      '<td class="s src-'+esc(e.source)+'">'+esc(e.source)+"</td>"+
       "<td class=m>"+esc(e.text)+"</td></tr>").join("")+"</tbody></table>";
   }
   if(stick)view.scrollTop=view.scrollHeight;
