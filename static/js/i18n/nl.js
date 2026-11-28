@@ -1599,4 +1599,13 @@ export default {
 "not connected to a tunnel yet": "nog niet met een tunnel verbonden",
 "not connected to a tunnel": "niet met een tunnel verbonden",
 "Cloudflare Access needs to know who may sign in: an email address or @domain per line, or * for anyone your identity provider accepts": "Cloudflare Access moet weten wie zich mag aanmelden: een e-mailadres of @domain per regel, of * voor iedereen die uw identiteitsprovider aanvaardt",
+"a rule's values cannot contain a line break or control character": "de waarden van een regel mogen geen regeleinde of stuurteken bevatten",
+"a server needs an address": "een server heeft een adres nodig",
+"the address must be one host name or IP address, with no spaces, # or quotes": "het adres moet één hostnaam of IP-adres zijn, zonder spaties, # of aanhalingstekens",
+"the location cannot contain spaces": "het adres mag geen spaties bevatten",
+"the request URI cannot contain spaces": "de URI van het verzoek mag geen spaties bevatten",
+"the value cannot contain a line break or control character": "de waarde mag geen regeleinde of stuurteken bevatten",
+"this action needs a header name": "deze actie heeft een headernaam nodig",
+"this action needs a location to redirect to": "deze actie heeft een adres nodig om naar om te leiden",
+"two-factor authentication is already on; turn it off first to enrol another phone": "tweestapsverificatie staat al aan; zet die eerst uit om een andere telefoon te registreren",
 };

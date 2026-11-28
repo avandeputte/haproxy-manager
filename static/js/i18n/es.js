@@ -1599,4 +1599,13 @@ export default {
 "not connected to a tunnel yet": "aún no conectado a un túnel",
 "not connected to a tunnel": "no conectado a un túnel",
 "Cloudflare Access needs to know who may sign in: an email address or @domain per line, or * for anyone your identity provider accepts": "Cloudflare Access necesita saber quién puede iniciar sesión: una dirección de correo o @dominio por línea, o * para cualquiera que acepte su proveedor de identidad",
+"a rule's values cannot contain a line break or control character": "los valores de una regla no pueden contener saltos de línea ni caracteres de control",
+"a server needs an address": "un servidor necesita una dirección",
+"the address must be one host name or IP address, with no spaces, # or quotes": "la dirección debe ser un solo nombre de host o dirección IP, sin espacios, # ni comillas",
+"the location cannot contain spaces": "la ubicación no puede contener espacios",
+"the request URI cannot contain spaces": "la URI de la petición no puede contener espacios",
+"the value cannot contain a line break or control character": "el valor no puede contener saltos de línea ni caracteres de control",
+"this action needs a header name": "esta acción necesita un nombre de cabecera",
+"this action needs a location to redirect to": "esta acción necesita una ubicación a la que redirigir",
+"two-factor authentication is already on; turn it off first to enrol another phone": "la autenticación de dos factores ya está activada; desactívela primero para registrar otro teléfono",
 };

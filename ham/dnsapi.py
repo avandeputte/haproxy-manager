@@ -107,7 +107,7 @@ def _parse_dnsapi(path):
 # How a hook script reads and keeps its credentials: through acme.sh's conf
 # helpers, by the variable's name. Its description block may leave a name
 # out; this does not.
-_CONF_HELPER = re.compile(r"_(?:read|save|clear)(?:account|domain)conf(?:_mutable)?\s+\"?([A-Za-z_][A-Za-z0-9_]*)")
+_CONF_HELPER = re.compile(r'_(?:read|save|clear)(?:account|domain)conf(?:_mutable)?\s+["]?([A-Za-z_][A-Za-z0-9_]*)')
 
 
 def hook_variables(hook):

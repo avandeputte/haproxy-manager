@@ -1599,4 +1599,13 @@ export default {
 "not connected to a tunnel yet": "ei vielä yhdistetty tunneliin",
 "not connected to a tunnel": "ei yhdistetty tunneliin",
 "Cloudflare Access needs to know who may sign in: an email address or @domain per line, or * for anyone your identity provider accepts": "Cloudflare Accessin on tiedettävä, kuka saa kirjautua: sähköpostiosoite tai @verkkotunnus per rivi, tai * kenelle tahansa, jonka identiteetintarjoajasi hyväksyy",
+"a rule's values cannot contain a line break or control character": "säännön arvot eivät voi sisältää rivinvaihtoa tai ohjausmerkkiä",
+"a server needs an address": "palvelin tarvitsee osoitteen",
+"the address must be one host name or IP address, with no spaces, # or quotes": "osoitteen on oltava yksi isäntänimi tai IP-osoite, ilman välilyöntejä, #-merkkiä tai lainausmerkkejä",
+"the location cannot contain spaces": "sijainti ei voi sisältää välilyöntejä",
+"the request URI cannot contain spaces": "pyynnön URI ei voi sisältää välilyöntejä",
+"the value cannot contain a line break or control character": "arvo ei voi sisältää rivinvaihtoa tai ohjausmerkkiä",
+"this action needs a header name": "tämä toiminto tarvitsee otsakkeen nimen",
+"this action needs a location to redirect to": "tämä toiminto tarvitsee sijainnin, johon ohjataan",
+"two-factor authentication is already on; turn it off first to enrol another phone": "kaksivaiheinen tunnistus on jo päällä; poista se ensin käytöstä, jotta voit lisätä toisen puhelimen",
 };

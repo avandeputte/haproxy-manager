@@ -1599,4 +1599,13 @@ export default {
 "not connected to a tunnel yet": "inte ansluten till en tunnel ännu",
 "not connected to a tunnel": "inte ansluten till en tunnel",
 "Cloudflare Access needs to know who may sign in: an email address or @domain per line, or * for anyone your identity provider accepts": "Cloudflare Access behöver veta vem som får logga in: en e-postadress eller @domän per rad, eller * för alla som din identitetsleverantör godkänner",
+"a rule's values cannot contain a line break or control character": "en regels värden får inte innehålla radbrytning eller styrtecken",
+"a server needs an address": "en server behöver en adress",
+"the address must be one host name or IP address, with no spaces, # or quotes": "adressen måste vara ett värdnamn eller en IP-adress, utan mellanslag, # eller citattecken",
+"the location cannot contain spaces": "adressen får inte innehålla mellanslag",
+"the request URI cannot contain spaces": "begärans URI får inte innehålla mellanslag",
+"the value cannot contain a line break or control character": "värdet får inte innehålla radbrytning eller styrtecken",
+"this action needs a header name": "den här åtgärden behöver ett header-namn",
+"this action needs a location to redirect to": "den här åtgärden behöver en adress att omdirigera till",
+"two-factor authentication is already on; turn it off first to enrol another phone": "tvåfaktorsautentisering är redan på; stäng av den först för att registrera en annan telefon",
 };
