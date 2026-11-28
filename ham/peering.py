@@ -46,9 +46,10 @@ def api_peers():
                          "is_own_key": bool(own) and auth.key_fingerprint(p.get("api_key")) == own}
                         for p in peers])
     body = request.get_json(force=True) or {}
-    url, why = _peer_url(body.get("url") or "", cfg)
-    if url is None:
-        return jsonify({"error": why}), 400
+    try:
+        url = _peer_url(body.get("url") or "", cfg)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     peer = {"id": str(uuid.uuid4()),
             "name": (str(body.get("name") or "")).strip() or (urlsplit(url).hostname or "peer"),
             "url": url, "api_key": (body.get("api_key") or "").strip(),
@@ -61,23 +62,23 @@ def api_peers():
 
 
 def _peer_url(value, cfg):
-    """A peer's URL as it is stored, or (None, why) when it cannot be one.
+    """A peer's URL as it is stored; a ValueError says why it cannot be one.
 
     The same shape whether the entry is being made or changed: a bare
     "10.0.0.2:8080" gets its scheme, so it does not sit in the list as an
     entry every push to it calls unreachable for want of one.
     """
     if not isinstance(value, str):
-        return None, "the peer's URL must be text"
+        raise ValueError("the peer's URL must be text")
     url = value.strip().rstrip("/")
     if not url:
-        return None, "the peer's URL is required, e.g. http://10.0.0.2:8080"
+        raise ValueError("the peer's URL is required, e.g. http://10.0.0.2:8080")
     if "://" not in url:
         url = "http://" + url
     level, why = vrrp.check_node_url(url, vrrp.cluster_vips(cfg))   # resolves names: outside the lock
     if level == "error":
-        return None, why
-    return url, ""
+        raise ValueError(why)
+    return url
 
 
 @app.route("/api/peers/<pid>", methods=["PUT", "DELETE"])
@@ -88,9 +89,10 @@ def api_peer_item(pid):
         if not isinstance(body, dict):
             return jsonify({"error": "the request body must be an object"}), 400
         if "url" in body:
-            url, why = _peer_url(body["url"], load_config())
-            if url is None:
-                return jsonify({"error": why}), 400
+            try:
+                url = _peer_url(body["url"], load_config())
+            except ValueError as e:
+                return jsonify({"error": str(e)}), 400
         if "name" in body and not isinstance(body["name"], str):
             return jsonify({"error": "the peer's name must be text"}), 400
     with _lock:

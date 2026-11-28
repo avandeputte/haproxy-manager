@@ -1609,4 +1609,8 @@ export default {
 "this action needs a location to redirect to": "esta ação precisa de um destino para redirecionar",
 "two-factor authentication is already on; turn it off first to enrol another phone": "a autenticação de dois fatores já está ativa; desative-a primeiro para registar outro telemóvel",
 "Turning the second factor on changes how you sign in, so it asks for the password.": "Ativar o segundo fator muda a forma de iniciar sessão, por isso é pedida a palavra-passe.",
+"the request body must be an object": "o corpo do pedido tem de ser um objeto",
+"the peer's name must be text": "o nome do nó tem de ser texto",
+"the peer's URL must be text": "o URL do nó tem de ser texto",
+"This node has already been set up. To run setup again, sign in with a browser and send force: true; an API key cannot.": "Este nó já foi configurado. Para repetir a configuração, inicie sessão num navegador e envie force: true; uma chave de API não pode.",
 };

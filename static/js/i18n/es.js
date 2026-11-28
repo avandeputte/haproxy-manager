@@ -1609,4 +1609,8 @@ export default {
 "this action needs a location to redirect to": "esta acción necesita una ubicación a la que redirigir",
 "two-factor authentication is already on; turn it off first to enrol another phone": "la autenticación de dos factores ya está activada; desactívela primero para registrar otro teléfono",
 "Turning the second factor on changes how you sign in, so it asks for the password.": "Activar el segundo factor cambia cómo inicia sesión, así que se pide la contraseña.",
+"the request body must be an object": "el cuerpo de la petición debe ser un objeto",
+"the peer's name must be text": "el nombre del nodo debe ser texto",
+"the peer's URL must be text": "la URL del nodo debe ser texto",
+"This node has already been set up. To run setup again, sign in with a browser and send force: true; an API key cannot.": "Este nodo ya está configurado. Para repetir la configuración, inicie sesión en un navegador y envíe force: true; una clave de API no puede.",
 };

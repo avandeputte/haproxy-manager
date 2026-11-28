@@ -1609,4 +1609,8 @@ export default {
 "this action needs a location to redirect to": "diese Aktion braucht ein Ziel für die Umleitung",
 "two-factor authentication is already on; turn it off first to enrol another phone": "die Zwei-Faktor-Authentifizierung ist bereits eingeschaltet; zuerst ausschalten, um ein anderes Telefon einzurichten",
 "Turning the second factor on changes how you sign in, so it asks for the password.": "Das Einschalten des zweiten Faktors ändert, wie Sie sich anmelden, darum wird nach dem Passwort gefragt.",
+"the request body must be an object": "der Inhalt der Anfrage muss ein Objekt sein",
+"the peer's name must be text": "der Name des Knotens muss Text sein",
+"the peer's URL must be text": "die URL des Knotens muss Text sein",
+"This node has already been set up. To run setup again, sign in with a browser and send force: true; an API key cannot.": "Dieser Knoten ist bereits eingerichtet. Um die Einrichtung erneut auszuführen, melden Sie sich in einem Browser an und senden force: true; ein API-Schlüssel kann das nicht.",
 };

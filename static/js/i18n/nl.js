@@ -1609,4 +1609,8 @@ export default {
 "this action needs a location to redirect to": "deze actie heeft een adres nodig om naar om te leiden",
 "two-factor authentication is already on; turn it off first to enrol another phone": "tweestapsverificatie staat al aan; zet die eerst uit om een andere telefoon te registreren",
 "Turning the second factor on changes how you sign in, so it asks for the password.": "De tweede stap aanzetten verandert hoe u zich aanmeldt, daarom wordt het wachtwoord gevraagd.",
+"the request body must be an object": "de inhoud van het verzoek moet een object zijn",
+"the peer's name must be text": "de naam van de node moet tekst zijn",
+"the peer's URL must be text": "de URL van de node moet tekst zijn",
+"This node has already been set up. To run setup again, sign in with a browser and send force: true; an API key cannot.": "Deze node is al ingericht. Om de inrichting opnieuw te doen, meld u aan in een browser en stuur force: true; een API-sleutel kan dat niet.",
 };

@@ -1609,4 +1609,8 @@ export default {
 "this action needs a location to redirect to": "denne handlingen trenger en adresse å omdirigere til",
 "two-factor authentication is already on; turn it off first to enrol another phone": "tofaktorautentisering er allerede på; slå den av først for å registrere en annen telefon",
 "Turning the second factor on changes how you sign in, so it asks for the password.": "Å slå på den andre faktoren endrer hvordan du logger inn, så det spørres etter passordet.",
+"the request body must be an object": "innholdet i forespørselen må være et objekt",
+"the peer's name must be text": "nodens navn må være tekst",
+"the peer's URL must be text": "nodens URL må være tekst",
+"This node has already been set up. To run setup again, sign in with a browser and send force: true; an API key cannot.": "Denne noden er allerede satt opp. For å kjøre oppsettet igjen, logg inn i en nettleser og send force: true; en API-nøkkel kan ikke.",
 };

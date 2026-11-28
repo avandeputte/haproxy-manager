@@ -1609,4 +1609,8 @@ export default {
 "this action needs a location to redirect to": "tämä toiminto tarvitsee sijainnin, johon ohjataan",
 "two-factor authentication is already on; turn it off first to enrol another phone": "kaksivaiheinen tunnistus on jo päällä; poista se ensin käytöstä, jotta voit lisätä toisen puhelimen",
 "Turning the second factor on changes how you sign in, so it asks for the password.": "Toisen vaiheen käyttöönotto muuttaa kirjautumistapaa, siksi kysytään salasanaa.",
+"the request body must be an object": "pyynnön sisällön on oltava objekti",
+"the peer's name must be text": "solmun nimen on oltava tekstiä",
+"the peer's URL must be text": "solmun URL-osoitteen on oltava tekstiä",
+"This node has already been set up. To run setup again, sign in with a browser and send force: true; an API key cannot.": "Tämä solmu on jo otettu käyttöön. Aja käyttöönotto uudelleen kirjautumalla selaimella ja lähettämällä force: true; API-avain ei voi.",
 };
