@@ -2,8 +2,9 @@ name: Check upstream versions
 
 # The container image pins three things that move on their own schedule: the
 # HAProxy branch it installs from haproxy.debian.net (ARG HAPROXY_BRANCH), the
-# acme.sh release it and install.sh carry (ARG ACME_VERSION), and the
-# acme2certifier release it and ham/adcs.py carry (ARG A2C_VERSION). Debian's
+# acme.sh release it and install.sh carry (ARG ACME_VERSION, with the digest
+# of its tarball in ARG ACME_SHA256), and the acme2certifier release it and
+# ham/adcs.py carry (ARG A2C_VERSION, digest in ARG A2C_SHA256). Debian's
 # own packages need no watching -- the weekly image rebuild picks them up --
 # but a new HAProxy LTS or an acme.sh or acme2certifier release would
 # otherwise go unnoticed.
@@ -50,6 +51,14 @@ jobs:
           echo "acme.sh:         pinned $have_acme, newest $want_acme"
           echo "acme2certifier:  pinned $have_a2c, newest $want_a2c"
           test -n "$want_haproxy" && test -n "$want_acme" && test -n "$want_a2c"
+          # Each of these is read off the network and goes into a sed
+          # expression, a branch name and a URL below. All three projects tag
+          # with numbers and dots and nothing else; anything else stops here.
+          for v in "$want_haproxy" "$want_acme" "$want_a2c"; do
+            case "$v" in
+              *[!0-9.]*|.*|*.) echo "unexpected upstream version: $v"; exit 1;;
+            esac
+          done
           {
             echo "have_haproxy=$have_haproxy"; echo "want_haproxy=$want_haproxy"
             echo "have_acme=$have_acme";       echo "want_acme=$want_acme"
@@ -73,10 +82,18 @@ jobs:
           WANT_A2C: ${{ steps.upstream.outputs.want_a2c }}
         run: |
           set -eu
+          # The image holds both downloads to a digest, so a new release needs
+          # a new digest: fetched from the release itself, as the build will.
+          curl -fsSL "https://github.com/acmesh-official/acme.sh/archive/refs/tags/${WANT_ACME}.tar.gz" -o /tmp/acme.tgz
+          curl -fsSL "https://github.com/grindsa/acme2certifier/releases/download/${WANT_A2C}/acme2certifier_${WANT_A2C}-1_all.deb" -o /tmp/a2c.deb
+          acme_sha=$(sha256sum /tmp/acme.tgz | cut -d' ' -f1)
+          a2c_sha=$(sha256sum /tmp/a2c.deb | cut -d' ' -f1)
           sed -i "s/^ARG HAPROXY_BRANCH=.*/ARG HAPROXY_BRANCH=$WANT_HAPROXY/" Dockerfile
           sed -i "s/^ARG ACME_VERSION=.*/ARG ACME_VERSION=$WANT_ACME/" Dockerfile
+          sed -i "s/^ARG ACME_SHA256=.*/ARG ACME_SHA256=$acme_sha/" Dockerfile
           sed -i "s/^ACME_VERSION=\"\${HAM_ACME_VERSION:-[0-9.]*}\"/ACME_VERSION=\"\${HAM_ACME_VERSION:-$WANT_ACME}\"/" install.sh
           sed -i "s/^ARG A2C_VERSION=.*/ARG A2C_VERSION=$WANT_A2C/" Dockerfile
+          sed -i "s/^ARG A2C_SHA256=.*/ARG A2C_SHA256=$a2c_sha/" Dockerfile
           sed -i "s/^A2C_VERSION = \"[0-9.]*\"/A2C_VERSION = \"$WANT_A2C\"/" ham/adcs.py
           git diff --stat
 
