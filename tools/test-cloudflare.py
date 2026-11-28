@@ -7,7 +7,10 @@ Checked against a Cloudflare that lives in this file: the tunnel made at the
 first save, the loopback port and the visitor's address on the listener that
 carries a published service, the Access application before the route before
 the DNS record, nothing asked twice, nothing touched that was not made here,
-and all of it taken away again.
+and all of it taken away again. Also: a telling that failed is not counted
+as done, so the next Apply does ask again; a call Cloudflare rate-limits is
+asked once more; the token file sources as one assignment whatever the token
+holds; and the repository key is held to one fingerprint alone.
 """
 import os
 import pathlib
@@ -42,8 +45,9 @@ def ok(cond, msg):
 
 
 class Answer:
-    def __init__(self, result=None, status=200, errors=None, pages=1):
+    def __init__(self, result=None, status=200, errors=None, pages=1, headers=None):
         self.status_code = status
+        self.headers = headers or {}
         self._body = {"success": not errors, "errors": errors or [], "result": result,
                       "result_info": {"total_pages": pages}}
 
@@ -59,7 +63,7 @@ class Cloudflare:
         self.tunnels, self.config, self.records, self.apps, self.calls = {}, {}, {}, {}, []
         self.zones = [{"id": "z1", "name": "example.com"}, {"id": "z2", "name": "dev.example.com"}]
         self.accounts = [{"id": self.ACCOUNT, "name": "home"}]
-        self.n, self.broken = 0, ""
+        self.n, self.broken, self.ratelimit, self.timeouts = 0, "", 0, []
 
     def _id(self, prefix):
         self.n += 1
@@ -68,8 +72,12 @@ class Cloudflare:
     def request(self, method, url, json=None, params=None, timeout=None, headers=None):
         path = url.split("/client/v4", 1)[1]
         self.calls.append((method, path, json))
+        self.timeouts.append(timeout)
         if headers.get("Authorization") != "Bearer good-token":
             return Answer(status=403, errors=[{"code": 9109, "message": "Invalid access token"}])
+        if self.ratelimit:
+            self.ratelimit -= 1
+            return Answer(status=429, errors=[{"code": 10000, "message": "rate limited"}], headers={"Retry-After": "0"})
         if self.broken and self.broken in path:
             return Answer(status=500, errors=[{"code": 1000, "message": "it broke"}])
         params = params or {}
@@ -250,6 +258,18 @@ ok(r["ok"] is True and "2 zone(s)" in r["message"] and "tunnel \"haproxy-manager
    "the test says what the token sees and how the tunnel is doing")
 r = client.post("/api/cloudflare/test", headers=H, json={"api_token": "bad-token"}).get_json()
 ok(r["ok"] is False and "Invalid access token" in r["message"], "and what Cloudflare said to a token it refuses")
+ok(cf.timeouts and all(t == cloudflare.TIMEOUT for t in cf.timeouts) and isinstance(cloudflare.TIMEOUT, tuple),
+   "every call gives Cloudflare a connect budget and a read budget of their own")
+cf.ratelimit, n = 1, len(cf.calls)
+ok(cloudflare._call("good-token", "GET", "/zones")["result"] == cf.zones and len(cf.calls) == n + 2,
+   "a call Cloudflare rate-limits is asked once more, after the pause it names")
+cf.ratelimit, n = 2, len(cf.calls)
+try:
+    cloudflare._call("good-token", "GET", "/zones")
+    ok(False, "limited twice, it gives up")
+except cloudflare.CloudflareError as e:
+    ok("rate limited" in str(e) and len(cf.calls) == n + 2, "limited twice, it gives up with Cloudflare's words")
+cf.ratelimit = 0
 
 # ---- what HAProxy is told ------------------------------------------------------------------
 fe = block("frontend fe_")
@@ -296,6 +316,16 @@ unit = CLOUDFLARED_UNIT_FILE.read_text()
 ok("EnvironmentFile=%s" % CLOUDFLARED_ENV in unit and "tunnel run" in unit and "token-for" not in unit and "DynamicUser=yes" in unit,
    "the unit names the file and never the token, and runs as nobody in particular")
 ok(cloudflare.write_files(load_config()) == [], "written once; unchanged files are left alone")
+# The file is sourced by a root shell in the container. A token is base64,
+# but the file must not become a command should one ever not be.
+odd = load_config()
+odd["cloudflare"]["tunnel_token"] = "x'y;$(echo pwned >&2) `id` z"
+cloudflare.write_files(odd)
+p = subprocess.run(["sh", "-c", '. "$1"; printf %s "$TUNNEL_TOKEN"', "_", str(CLOUDFLARED_ENV)], capture_output=True, text=True)
+ok(p.stdout == odd["cloudflare"]["tunnel_token"] and "pwned" not in p.stderr and CLOUDFLARED_ENV.read_text().startswith("TUNNEL_TOKEN='"),
+   "a token with shell in it is quoted, so sourcing the file sets the token and runs nothing")
+cloudflare.write_files(load_config())
+ok(CLOUDFLARED_ENV.read_text() == "TUNNEL_TOKEN=token-for-%s\n" % tid, "a base64 token needs no quoting, and gets none")
 real_install = cloudflare.install
 cloudflare.install = lambda: (False, "no network here")
 step, warning = cloudflare.ensure_service(load_config())
@@ -303,8 +333,19 @@ ok(not step and "not installed on this node" in warning, "on, without cloudflare
 cloudflare.TRIED.unlink()
 CLOUDFLARED_BIN.write_text("#!/bin/sh\necho cloudflared version 2026.11.1\n")
 CLOUDFLARED_BIN.chmod(0o755)
+ok(cloudflare.ensure_installed(load_config()) == (True, "installed"), "with cloudflared there, ensure_installed runs nothing")
 step, warning = cloudflare.ensure_service(load_config())
 ok(step == "cloudflared started" and not warning, "with it, Apply starts it")
+# The install script holds Cloudflare's repository key to one fingerprint: the
+# only key in the file, not one among others.
+LIST = ("pub:-:4096:1:8A682D308D4E5E73:1:::-:::scESC::::::23::0:\nfpr:::::::::%s:\nuid:-::::::::Cloudflare:\n"
+        "sub:-:4096:1:AAAAAAAAAAAAAAAA:1::::::s::::::23:\nfpr:::::::::BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB:\n" % cloudflare.REPO_KEY_FPR)
+fprs = lambda listing: subprocess.run(["sh", "-c", "printf '%s' \"$1\" | " + cloudflare.KEY_FPRS, "_", listing],
+                                      capture_output=True, text=True).stdout.strip()
+ok(fprs(LIST) == cloudflare.REPO_KEY_FPR, "the key's own fingerprint is read, and not its subkey's")
+ok(fprs(LIST + LIST.replace(cloudflare.REPO_KEY_FPR, "C" * 40)) != cloudflare.REPO_KEY_FPR
+   and ('| %s)" = "%s" ]' % (cloudflare.KEY_FPRS, cloudflare.REPO_KEY_FPR)) in cloudflare.APT_INSTALL,
+   "a second key beside it fails the check, which asks for that one fingerprint alone")
 ok(client.get("/api/cloudflare/settings", headers=H).get_json()["status"]["version"] == "2026.11.1", "and the page shows its version")
 
 # ---- what Cloudflare is told, and in what order -------------------------------------------------
@@ -402,6 +443,19 @@ ok(config_hash(c) == before_hash, "and writing it down is not an unapplied chang
 cf.calls.clear()
 tell()
 ok(not cf.calls, "in step, an Apply asks nothing of Cloudflare")
+
+# a Sync now that fails is not forgotten: what was told before does not hold
+cf.broken = "/configurations"
+r = client.post("/api/cloudflare/sync", headers=H, json={}).get_json()
+ok(r["ok"] is False and r["status"]["in_step"] is False and load_config()["cloudflare"]["told"] == ""
+   and "it broke" in r["status"]["last_error"],
+   "a Sync now that Cloudflare fails leaves it marked behind, with what Cloudflare said")
+cf.broken = ""
+cf.calls.clear()
+tell()
+ok(cf.calls and client.get("/api/cloudflare/settings", headers=H).get_json()["status"]["in_step"] is True
+   and not client.get("/api/cloudflare/settings", headers=H).get_json()["status"]["last_error"],
+   "so the next Apply does ask again, as the warning says, and catches up")
 cf.records["mine"] = dict(kept, name="elsewhere.example.com")
 
 # a route somebody added to the tunnel in the dashboard, and its record, are theirs

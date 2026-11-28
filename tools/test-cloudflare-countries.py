@@ -7,6 +7,14 @@ Checked against a Cloudflare that lives in this file: the codes a service
 takes, the rule each zone is given and what it says, the zone's own rules left
 as they are, the rule written before the route, changed and removed with the
 services, a token without the right to it, and Disconnect.
+
+And what the rule must mirror: the listener takes the first of its rules that
+matches, so a wildcard placed before a name takes that name, and the rule says
+so. A service whose limit could not be set -- a zone the token does not see,
+a right it lacks, a clause too long -- is not published rather than published
+open; too many services for one rule become several; a path condition with
+two values is two routes; a control character never reaches Cloudflare; and
+taking a limit away, the route goes before the rule.
 """
 import os
 import pathlib
@@ -189,7 +197,19 @@ def tell(force=False):
 
 
 def ours(zone):
-    return [r for r in (cf.rulesets.get(zone) or {}).get("rules", []) if r.get("ref") == cloudflare.WAF_REF]
+    return [r for r in (cf.rulesets.get(zone) or {}).get("rules", [])
+            if re.match(r"^haproxy-manager-countries(-\d+)?$", r.get("ref") or "")]
+
+
+def hosts_routed():
+    return [i.get("hostname") for i in cf.config[tid]["ingress"] if i.get("hostname")]
+
+
+def changes():
+    """The calls that changed something, in order: (method, what)."""
+    return [(meth, "rule" if "/rulesets" in p else "route" if p.endswith("/configurations")
+             else "dns" if "/dns_records" in p else "access" if "/access/" in p else p)
+            for meth, p, _ in cf.calls if meth != "GET"]
 
 
 # ---- the codes ---------------------------------------------------------------------------------
@@ -251,12 +271,14 @@ publish("http://shop.example.com", name="shop", service_id=service("shop")["id"]
 cf.calls.clear()
 steps, _w = tell()
 ok("cloudflare: country rule for example.com updated" in steps
-   and [meth for meth, p, _ in cf.calls if "/rulesets" in p and meth != "GET"] == ["PATCH"],
-   "a changed list changes this app's rule, by itself")
+   and [meth for meth, p, _ in cf.calls if "/rulesets" in p and meth != "GET"] == ["PATCH", "PATCH"]
+   and len(ours("z1")) == 1 and ours("z1")[0]["ref"] == cloudflare.WAF_REF,
+   "a changed list changes this app's rule, by itself: widened to old and new, then narrowed to the new")
 ok(cf.rulesets["z1"]["rules"][0] == {"id": "theirs", "description": "block bad bots", "expression": "cf.client.bot",
                                      "action": "block", "enabled": True},
    "the zone's own rule is untouched, and still first")
-ok('in {"US" "CA"}' in ours("z1")[0]["expression"], "and the rule names both countries")
+ok('in {"US" "CA"}' in ours("z1")[0]["expression"] and 'in {"US"}' not in ours("z1")[0]["expression"],
+   "and the rule names both countries")
 
 # ---- paths, deeper zones -------------------------------------------------------------------------------
 publish("http://shop.example.com/admin", name="shopadmin", cloudflare={"enabled": True, "countries": "BE", "only": True})
@@ -272,15 +294,43 @@ ok(len(ours("z2")) == 1 and "api.dev.example.com" in ours("z2")[0]["expression"]
    and "api.dev" not in expr, "a host in a deeper zone gets its rule in that zone, and only there")
 ok(len(cf.rulesets["z1"]["rules"]) == 2, "still one rule of this app's in the zone, beside the zone's own")
 
-# a wildcard, and the names it takes in
-rs = [{"host": "*.example.com", "path": "", "valid": True, "countries": ["US"]},
-      {"host": "shop.example.com", "path": "", "valid": True, "countries": []},
-      {"host": "x.example.com", "path": "/p", "valid": True, "countries": []}]
-e = cloudflare.firewall_expressions(rs, cf.zones)["z1"][1]
-ok(e == '(http.host wildcard "*.example.com" and not http.host eq "shop.example.com" and not '
-        '(http.host eq "x.example.com" and starts_with(http.request.uri.path, "/p")) and not ip.src.country in {"US"})',
-   "a wildcard leaves out the names other services own: %s" % e)
+# a wildcard, and the names it takes in: what the listener does, in the order
+# of its rules, not what a reader of the names would expect
+def route(host, path="", countries=(), port=7800):
+    return {"host": host, "path": path, "valid": True, "countries": list(countries), "port": port}
+
+
+wild, shop, xp = route("*.example.com", countries=["US"]), route("shop.example.com"), route("x.example.com", "/p")
+e = cloudflare.firewall_expressions([shop, xp, wild], cf.zones)["z1"][1]
+ok(e == ['(http.host wildcard "*.example.com" and not http.host eq "shop.example.com" and not '
+         '(http.host eq "x.example.com" and starts_with(http.request.uri.path, "/p")) and not ip.src.country in {"US"})'],
+   "the names before a wildcard take theirs, and the wildcard's rule leaves them out: %s" % e)
+e = cloudflare.firewall_expressions([wild, shop, xp], cf.zones)["z1"][1]
+ok(e == ['(http.host wildcard "*.example.com" and not ip.src.country in {"US"})'],
+   "a wildcard before them takes them too -- as HAProxy does -- so its rule covers them: %s" % e)
+ok(cloudflare.firewall_expressions([wild, route("shop.example.com", countries=["BE"])], cf.zones)["z1"][1]
+   == ['(http.host wildcard "*.example.com" and not ip.src.country in {"US"})'],
+   "and a limited name it takes whole gets no clause of its own: nothing reaches its pool")
+ok(cloudflare.firewall_expressions([route("shop.example.com", countries=["BE"], port=7801), wild], cf.zones)["z1"][1]
+   == ['(http.host eq "shop.example.com" and not ip.src.country in {"BE"}) or '
+       '(http.host wildcard "*.example.com" and not ip.src.country in {"US"})'],
+   "a rule on another listener takes nothing from it")
+deep = route("a.b.example.com", countries=["BE"])
+ok(cloudflare.firewall_expressions([wild, deep], cf.zones)["z1"][1]
+   == ['(http.host wildcard "*.example.com" and not http.host eq "a.b.example.com" and not ip.src.country in {"US"}) or '
+       '(http.host eq "a.b.example.com" and not ip.src.country in {"BE"})'],
+   "a deeper name is not the wildcard's in HAProxy, so it is taken out of Cloudflare's wider wildcard whatever the order")
+ok(cloudflare.firewall_expressions([route("shop.example.com", "/api", countries=["CA"]), route("shop.example.com", countries=["US"])],
+                                   cf.zones)["z1"][1]
+   == ['(http.host eq "shop.example.com" and starts_with(http.request.uri.path, "/api") and not ip.src.country in {"CA"}) or '
+       '(http.host eq "shop.example.com" and not starts_with(http.request.uri.path, "/api") and not ip.src.country in {"US"})'],
+   "a path before the host-only rule is taken out of the latter")
+ok(cloudflare.firewall_expressions([route("shop.example.com", countries=["US"]), route("shop.example.com", "/api", countries=["CA"])],
+                                   cf.zones)["z1"][1]
+   == ['(http.host eq "shop.example.com" and not ip.src.country in {"US"})'],
+   "a path after it never fires, and gets no clause")
 ok(cloudflare._q('a"b\\c') == '"a\\"b\\\\c"', "a quote or backslash in a path cannot end the string")
+ok(cloudflare._q("/a\x01b\x7f\n") == '"/ab"', "a control character is dropped, as the renderer drops it: Cloudflare would refuse the whole rule")
 
 # ---- removed with the services -------------------------------------------------------------------------
 publish("http://api.dev.example.com", name="api", service_id=service("api")["id"],
@@ -303,12 +353,20 @@ publish("http://plain.example.com", name="plain", service_id=service("plain")["i
 cf.calls.clear()
 steps, warnings = tell(force=True)
 ok(not warnings, "nothing limited: a token without Zone WAF changes nothing for anyone")
+ok("plain.example.com" in hosts_routed() and any(r["name"] == "plain.example.com" for r in cf.records.values()),
+   "published, with its route and its record")
 publish("http://plain.example.com", name="plain", service_id=service("plain")["id"],
         cloudflare={"enabled": True, "countries": "US", "only": True})
+cf.calls.clear()
 steps, warnings = tell()
-ok(any("Zone WAF: Edit" in w for w in warnings)
+ok(any("Zone WAF: Edit" in w and "plain.example.com is not published" in w and "\"plain\" is limited" in w for w in warnings)
    and load_config()["cloudflare"]["told"] != cloudflare._fingerprint(load_config()),
-   "a limit it may not write is a warning naming the right it needs, asked again at the next Apply")
+   "a limit it may not write is a warning naming the service and the right it needs, asked again at the next Apply")
+ok("plain.example.com" not in hosts_routed() and not any(r["name"] == "plain.example.com" for r in cf.records.values()),
+   "and the service is not published: a limit on paper alone would leave it open to the world, so its route and record go")
+steps, warnings = tell(force=True)
+ok("plain.example.com" not in hosts_routed() and any("not published" in w for w in warnings),
+   "told again, it stays unpublished, and says so again")
 r = client.post("/api/cloudflare/test", headers=H, json={}).get_json()
 ok("may not manage Firewall rules in any zone" in r["message"] and "Zone WAF: Edit" in r["message"],
    "and the test says the same")
@@ -317,17 +375,112 @@ r = client.post("/api/cloudflare/test", headers=H, json={}).get_json()
 ok("in 1 of 2 zone(s)" in r["message"] and "not in dev.example.com" in r["message"],
    "a token with the right in some zones only is told which: %s" % r["message"][-90:])
 cf.waf_denied = False
+cf.calls.clear()
 steps, warnings = tell()
 ok("cloudflare: country rule for example.com" in steps and not warnings, "given the right, the next Apply writes it")
+ok("plain.example.com" in hosts_routed() and any(r["name"] == "plain.example.com" for r in cf.records.values()),
+   "and publishes the service again")
+w = changes()
+ok(w.index(("POST", "rule")) < w.index(("PUT", "route")) < w.index(("POST", "dns")),
+   "the rule first, then the route, then the name: %s" % w)
 r = client.post("/api/cloudflare/test", headers=H, json={}).get_json()
 ok("may manage Firewall rules" in r["message"], "and the test says it may")
 
+# ---- a zone the token does not see ------------------------------------------------------------------------
+publish("http://far.example.org", name="far", cloudflare={"enabled": True, "countries": "US", "only": True})
+steps, warnings = tell()
+ok(any("far.example.org is not published" in w and "not one this API token sees" in w for w in warnings)
+   and "far.example.org" not in hosts_routed(),
+   "a limited service in a zone the token cannot see is not published, and the warning says why")
+publish("http://far.example.org", name="far", service_id=service("far")["id"], cloudflare={"enabled": True, "only": True})
+steps, warnings = tell()
+ok("far.example.org" in hosts_routed() and any("no DNS record" in w for w in warnings),
+   "unlimited, the same service is routed, and only its record is missing")
+publish("http://far.example.org", name="far", service_id=service("far")["id"], cloudflare={"enabled": False})
+tell()
+
 # ---- too long for Cloudflare ----------------------------------------------------------------------------
-many = [{"host": "h%03d.example.com" % i, "path": "", "valid": True, "countries": ["US"]} for i in range(80)]
-big = cloudflare.firewall_expressions(many, cf.zones)["z1"][1]
-ok(len(big) > cloudflare.WAF_MAX_EXPRESSION, "eighty limited services make an expression too long")
-s2, w2, p2 = cloudflare._firewall("good-token", cf.zones, many, [])
-ok(p2 and any("more than Cloudflare's" in w for w in w2) and not s2, "which is not written, and is said")
+many = [route("h%03d.example.com" % i, countries=["US"]) for i in range(80)]
+_name, exprs, left = cloudflare.firewall_expressions(many, cf.zones)["z1"]
+ok(len(exprs) > 1 and all(len(e) <= cloudflare.WAF_MAX_EXPRESSION for e in exprs) and not left
+   and sum(len(cloudflare._clauses(e)) for e in exprs) == 80,
+   "eighty limited services are more than one rule holds, so they are packed into %d, every service in one" % len(exprs))
+cf.calls.clear()
+s2, unmet, later = cloudflare._firewall("good-token", cf.zones, many, [])
+later()
+refs = sorted(r["ref"] for r in ours("z1"))
+ok(not unmet and len(ours("z1")) == len(exprs)
+   and all(cloudflare._WAF_REF.match(r) for r in refs) and len(set(refs)) == len(refs),
+   "written as that many rules, each with its own ref: %s" % refs)
+ok([x["id"] for x in cf.rulesets["z1"]["rules"]][0] == "theirs", "the zone's own rule still first")
+s3, unmet3, later3 = cloudflare._firewall("good-token", cf.zones, [route("plain.example.com", countries=["US"])], [])
+later3()
+ok(len(ours("z1")) == 1 and not unmet3, "back to one service, the extra rules are removed and one remains")
+huge = route("long.example.com", "/" + "p" * cloudflare.WAF_MAX_EXPRESSION, countries=["US"])
+_name, exprs, left = cloudflare.firewall_expressions([huge, route("plain.example.com", countries=["US"])], cf.zones)["z1"]
+ok(left == [huge] and len(exprs) == 1, "a service whose clause alone is too long is left out, by itself")
+s4, unmet4, later4 = cloudflare._firewall("good-token", cf.zones, [huge, route("plain.example.com", countries=["US"])], [])
+ok([r["host"] for r, _why in unmet4] == ["long.example.com"] and "more than Cloudflare's" in unmet4[0][1],
+   "and named as one whose limit is not set, so it is not published")
+
+# ---- a path condition that lists alternatives ------------------------------------------------------------------
+publish("http://shop.example.com/admin", name="shopadmin", service_id=service("shopadmin")["id"],
+        cloudflare={"enabled": True, "countries": "BE", "only": True, "access": "allow", "allow": "a@example.com"})
+c = load_config()
+pc = next(x for x in c["haproxy"]["conditions"] if x.get("type") == "path_starts_with" and x.get("value") == "/admin")
+pc["value"] = "/admin /manage"
+save_config(c)
+paths = sorted(r["path"] for r in cloudflare.routes(load_config()) if r["host"] == "shop.example.com")
+ok(paths == ["/admin", "/manage"], "a path condition with two values is two routes, as HAProxy takes either: %s" % paths)
+tell()
+expr = ours("z1")[0]["expression"]
+ok('starts_with(http.request.uri.path, "/admin") and not ip.src.country in {"BE"}' in expr
+   and 'starts_with(http.request.uri.path, "/manage") and not ip.src.country in {"BE"}' in expr
+   and '"/admin /manage"' not in expr,
+   "each is limited on its own; neither is a path nobody asks for")
+ok(sorted(a["domain"] for a in cf.apps.values()) == ["shop.example.com/admin", "shop.example.com/manage"],
+   "and each has its sign-in")
+
+# ---- a control character in a path ----------------------------------------------------------------------------
+r = publish("http://shop.example.com/ad\x01min", 400, name="shopadmin", service_id=service("shopadmin")["id"],
+            cloudflare={"enabled": True, "countries": "BE", "only": True})
+ok("control character" in (r.get("error") or "") and "shopadmin" in (r.get("error") or ""),
+   "the publish wizard refuses it, naming the service")
+try:
+    cloudflare.check_values(["shop.example.com", "/a\x7fb"], "shop")
+    ok(False, "check_values refuses a DEL")
+except ValueError as e:
+    ok("\"shop\"" in str(e), "check_values refuses a DEL, naming the service")
+c = load_config()
+pc = next(x for x in c["haproxy"]["conditions"] if x.get("type") == "path_starts_with" and x.get("value") == "/admin /manage")
+pc["value"] = "/adm\x01in"
+save_config(c)
+ok([r["path"] for r in cloudflare.routes(load_config()) if r["host"] == "shop.example.com"] == ["/admin"],
+   "one stored anyway is routed by what HAProxy will see, the character dropped")
+steps, warnings = tell()
+ok(not warnings and 'starts_with(http.request.uri.path, "/admin")' in ours("z1")[0]["expression"]
+   and "\x01" not in ours("z1")[0]["expression"],
+   "so Cloudflare is told a rule it takes, and no other service waits on this one")
+
+# ---- taking a limit away: the route first, then the rule -------------------------------------------------------
+publish("http://shop.example.com/admin", name="shopadmin", service_id=service("shopadmin")["id"], cloudflare={"enabled": False})
+cf.calls.clear()
+steps, warnings = tell()
+w = changes()
+ok(not warnings and ("PUT", "route") in w and ("PATCH", "rule") in w and w.index(("PUT", "route")) < w.index(("PATCH", "rule")),
+   "unpublished, the route goes before the rule that limited it is narrowed: %s" % w)
+ok("shop.example.com" not in hosts_routed() and "shop.example.com" not in ours("z1")[0]["expression"]
+   and "plain.example.com" in ours("z1")[0]["expression"],
+   "and the rule then names the one service still limited")
+publish("http://plain.example.com", name="plain", service_id=service("plain")["id"], cloudflare={"enabled": False})
+cf.calls.clear()
+steps, warnings = tell()
+w = changes()
+ok(not ours("z1") and w.index(("PUT", "route")) < w.index(("DELETE", "rule")),
+   "the last one unpublished, the route goes before the rule is removed: %s" % w)
+publish("http://plain.example.com", name="plain", service_id=service("plain")["id"],
+        cloudflare={"enabled": True, "countries": "US", "only": True})
+tell()
 
 # ---- an older configuration asks nothing new --------------------------------------------------------------
 lens = {r[0]: len(r) for r in cloudflare.desired(load_config())["routes"]}

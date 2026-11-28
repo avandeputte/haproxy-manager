@@ -664,6 +664,8 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
         pool_opts["cf_only"] = bool(cloudflare_opts.get("only")) and want
         countries = cloudflare.check_countries(cloudflare_opts.get("countries")) if want else ""
         pool_opts["cf_countries"] = countries
+        if want:
+            cloudflare.check_values([p["host"] for p in pubs] + [p["path"] for p in pubs], name or pub["host"])
         if countries and not pool_opts["cf_only"]:
             warns.append("Visitors through Cloudflare are limited to %s, but this service is also reachable "
                          "on this node's own ports, where nobody's country is checked. Tick Through "
