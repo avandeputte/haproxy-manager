@@ -11,6 +11,7 @@ node holding the virtual IP is the one that pushes, not the one that receives.
     python3 tools/test-config-leak.py
 """
 import copy
+import json
 import os
 import pathlib
 import sys
@@ -25,8 +26,8 @@ os.environ.setdefault("HAM_KEEPALIVED_CFG", os.path.join(_tmp, "keepalived.conf"
 os.environ["HAM_DRY_RUN"] = "1"
 
 import ham   # noqa: E402
-from ham import sync   # noqa: E402
-from ham.base import VERSION   # noqa: E402
+from ham import cluster, peering, sync   # noqa: E402
+from ham.base import CONF_PATH, VERSION, _requests   # noqa: E402
 from ham.config import _fp, load_config, save_config, shared_fingerprint, shared_view   # noqa: E402
 
 fails = []
@@ -100,6 +101,47 @@ cfg["_meta"]["shared_fp"] = "stale-from-before"
 payload = sync.shared_payload(cfg)
 ok(payload["fp"] == shared_fingerprint(cfg) and payload.get("version") == VERSION,
    "the fingerprint is of what is sent, and the version is sent with it")
+
+print("what a node reports")
+# A release that adds a shared setting changes the fingerprint of what a node
+# holds without anything being saved, so the stored one is stale until the
+# next save -- and the status reported it while a push carried the live one.
+stored = json.loads(CONF_PATH.read_text())
+stored["_meta"]["shared_fp"] = "stale-from-before"
+CONF_PATH.write_text(json.dumps(stored))
+st = client.get("/api/status?brief=1").get_json()
+ok(st["config_fp"] == shared_fingerprint(load_config()) and st["config_fp"] != "stale-from-before",
+   "the status reports the fingerprint of what the node holds now, as a push does")
+
+print("what the cluster page concludes")
+if _requests is None:
+    print("  skip  python3-requests is not installed here")
+else:
+    cfg = load_config()
+    cfg["local"]["sync"]["peers"] = [{"id": "p1", "name": "node-b", "url": "http://b.example",
+                                      "api_key": "kb", "enabled": True}]
+    save_config(cfg)
+    mine = int(load_config()["_meta"]["shared_rev"])
+    peer_says = {}
+    real_query = peering._query_peer
+    peering._query_peer = lambda p, timeout=None, brief=False: dict(
+        {"id": p["id"], "name": p["name"], "url": p["url"], "self": False, "reachable": True,
+         "error": "", "ms": 1, "hostname": "node-b", "role": "passive", "haproxy": "active",
+         "keepalived": "disabled", "vips": [], "vip_held": [], "dirty": False, "config_rev": mine,
+         "config_fp": "0000000000000000", "config_parts": {}, "config_objects": {}, "brief": brief,
+         "config_objects_capped": False, "config_leak": None, "update_available": False,
+         "certs_total": 0, "certs_bad": 0}, **peer_says)
+    peer_says["version"] = "0.0.1"
+    s = cluster.cluster_snapshot(load_config())["summary"]
+    ok(s["config_agreed"] and not any("independently" in w for w in s["warnings"]),
+       "a peer on another version at the same revision with another fingerprint is not "
+       "'changed independently': it is mid-upgrade")
+    ok(any("different versions" in w for w in s["warnings"]), "the versions are what is reported")
+    peer_says["version"] = VERSION
+    s = cluster.cluster_snapshot(load_config())["summary"]
+    ok(not s["config_agreed"] and any("independently" in w for w in s["warnings"]),
+       "on the same version the same disagreement is reported")
+    peering._query_peer = real_query
 
 print("\n" + ("%d failed" % len(fails) if fails
               else "a leak is a leak, and an upgrade is not one"))
