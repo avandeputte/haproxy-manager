@@ -77,6 +77,8 @@ ok([...content.children].every((el, i) => el === before[i]),
    "a refresh that changes nothing keeps the very same elements");
 ok([...content.children].every((el, i) => el.innerHTML === beforeHtml[i]),
    "and their contents");
+ok([...content.children].every(el => !el.hasAttribute("data-html")),
+   "a card's markup is not kept a second time in an attribute");
 
 // one pool changed
 stats = snapshot(1, 42);

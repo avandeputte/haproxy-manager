@@ -26,7 +26,10 @@ export function since(sec){
    takes to build the replacement, and takes the table sorting and any text
    selection with it. So each card is built as a string, compared with what is
    already there, and only written when it has actually changed -- which on a
-   quiet proxy is almost never. */
+   quiet proxy is almost never. What each card holds is remembered here rather
+   than on the element: as an attribute it was serialised into the document a
+   second time, and re-read through the DOM every five seconds. */
+const painted=new WeakMap();
 function paint(cards){
   const c=$("#content");
   const have={};
@@ -40,9 +43,9 @@ function paint(cards){
       el=document.createElement("div");el.className="card";el.dataset.card=key;
       c.insertBefore(el,previous?previous.nextSibling:c.firstChild);
     }
-    if(el.dataset.html!==html){
+    if(painted.get(el)!==html){
       el.innerHTML=html;
-      el.dataset.html=html;
+      painted.set(el,html);
     }
     delete have[key];
     previous=el;
