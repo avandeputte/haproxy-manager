@@ -64,8 +64,8 @@ public = re.search(r"PUBLIC_PATHS = \{([^}]*)\}", APP)
 check(public is not None, "PUBLIC_PATHS could not be found in app.py")
 if public:
     names = re.findall(r'"([^"]+)"', public.group(1))
-    check(len(names) == 3, "the number of unauthenticated paths changed",
-          "now %s -- the security section says three" % (names,))
+    check(len(names) == 4, "the number of unauthenticated paths changed",
+          "now %s -- the security section says four" % (names,))
     for path in names:
         check(path in ALL_DOCS, "an unauthenticated path is undocumented", path)
 

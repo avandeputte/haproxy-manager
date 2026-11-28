@@ -610,7 +610,7 @@ def _do_apply(cfg, allow_push):
 def api_preview():
     cfg = load_config()
     ka = keepalived.render_keepalived(cfg) if vrrp.keepalived_wanted(cfg) else \
-        "# No virtual IP is set (Cluster > Cluster settings), so Keepalived is not used."
+        "# No virtual IP is set (Cluster, under Shared settings), so Keepalived is not used."
     return jsonify({"haproxy": haproxy.render_haproxy(cfg), "keepalived": ka})
 
 
