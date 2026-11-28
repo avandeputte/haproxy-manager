@@ -11,7 +11,7 @@ import shutil
 import uuid
 
 from .base import ACME_HOME, ACME_SH, _lock, app
-from .config import load_config, save_config
+from .config import load_config, merged, save_config
 from .util import _by_id, _sec, cert_details, cert_path, parse_domains, rule_cond_ids, run
 from . import access, acme, adcs, cloudflare, errorpages, validate, wizard, oauth
 from .validate import plain_url as _plain_url
@@ -102,6 +102,35 @@ def _parse_dnsapi(path):
                      "optional": optional_here or "optional" in desc.lower()}
             (info["options_alt"] if bucket == "optionsalt" else info["options"]).append(entry)
     return info
+
+
+# How a hook script reads and keeps its credentials: through acme.sh's conf
+# helpers, by the variable's name. Its description block may leave a name
+# out; this does not.
+_CONF_HELPER = re.compile(r"_(?:read|save|clear)(?:account|domain)conf(?:_mutable)?\s+\"?([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def hook_variables(hook):
+    """The variable names one DNS hook takes: what its description block
+    declares, and what it reads or saves through acme.sh's conf helpers.
+
+    None when there is nothing to read -- acme.sh not installed, or a hook
+    it does not ship -- so the caller judges the names on its own. The
+    scripts are not scanned for every $NAME they mention: a hook also
+    reads acme.sh's own variables, HTTP_HEADER among them, and those are
+    not credentials anyone may set.
+    """
+    if not isinstance(hook, str) or not acme._DNS_HOOK.match(hook):
+        return None
+    path = ACME_HOME / "dnsapi" / (hook + ".sh")
+    try:
+        text = path.read_text(errors="replace")
+    except OSError:
+        return None
+    info = _parse_dnsapi(path)
+    names = {o["name"] for o in info["options"] + info["options_alt"] if o.get("name")}
+    names |= set(_CONF_HELPER.findall(text))
+    return names or None
 
 
 def dnsapi_hooks():
@@ -287,7 +316,7 @@ def api_wizard_certificate():
             acts.append({"action": "updated", "type": "Certificate", "name": cert["name"]})
         else:
             cert = {"id": str(uuid.uuid4()),
-                    "name": wizard._uniq_name({c["name"] for c in ac["certificates"]}, name),
+                    "name": wizard._uniq_name(acme.taken_names(ac["certificates"]), name),
                     "domains": " ".join(domains),
                     "account": account["id"], "challenge": challenge["id"],
                     "key_type": body.get("key_type") or "ec-256",
@@ -314,8 +343,8 @@ def api_acme_cover():
     host = (request.args.get("host") or "").strip()
     if not host:
         return jsonify({"ok": False, "error": "host is required"}), 400
-    cfg = load_config()
-    cert, how = wizard.cert_for_host(cfg["acme"]["certificates"], host)
+    # merged: the node's own UI certificate covers its host name too.
+    cert, how = wizard.cert_for_host(merged(load_config())["acme"]["certificates"], host)
     if not cert:
         return jsonify({"ok": True, "host": host, "covered": False})
     info = cert_details(cert_path(cert))
@@ -902,7 +931,7 @@ def wizard_publish(cfg, pubs, tgts, name=None, want_cert=True, account=None,
                 act("updated", "Certificate", "%s -> %s" % (cert["name"], pub["host"]))
             else:
                 cert = {"id": str(uuid.uuid4()),
-                        "name": wizard._uniq_name({c["name"] for c in ac["certificates"]}, base),
+                        "name": wizard._uniq_name(acme.taken_names(ac["certificates"]), base),
                         "domains": " ".join(hosts), "account": acc_id, "challenge": ch_id,
                         "key_type": "ec-256", "auto_renew": True}
                 ac["certificates"].append(cert)

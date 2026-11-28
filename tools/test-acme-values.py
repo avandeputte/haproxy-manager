@@ -83,8 +83,8 @@ cfg = load_config()
 cid = next(c["id"] for c in cfg["acme"]["challenges"] if c["name"] == "cf")
 aid = cfg["acme"]["accounts"][0]["id"]
 cert = {"name": "c", "account": aid, "challenge": cid, "key_type": "ec-256"}
-for good in ("example.com *.example.com", "Host_1.lan", "2001:db8::1", "localhost"):
-    r = client.post("/api/acme/certificates", headers=H, json=dict(cert, name="g", domains=good))
+for n, good in enumerate(("example.com *.example.com", "Host_1.lan", "2001:db8::1", "localhost")):
+    r = client.post("/api/acme/certificates", headers=H, json=dict(cert, name="g%d" % n, domains=good))
     ok(r.status_code == 200, "the domains %r are stored" % good)
 for bad, why in (("a.example.com" + QUOTE, "a quote"), ("../../tmp/x", "a path"),
                  ("-x.example.com", "a leading dash"), ("--pre-hook", "an option"),
@@ -114,6 +114,80 @@ r = client.post("/api/wizard/certificate", headers=H,
 ok(r.status_code == 400 and "e-mail" in r.get_json().get("error", ""),
    "the wizard refuses a new account with a quote in its e-mail")
 
+# -- saving: the DNS credentials. Each line is NAME=value, and the whole line
+# goes into the environment of acme.sh, which takes its own settings from
+# there: ACCOUNT_CONF_PATH names a file it sources as root. A name is taken
+# only when the hook's script reads it; acme.sh's own are refused by name.
+hooks_known = dnsapi.hook_variables("dns_cf")
+if hooks_known:
+    ok({"CF_Token", "CF_Key", "CF_Email", "CF_Account_ID"} <= hooks_known,
+       "the variables dns_cf declares are read from its script: %s" % ", ".join(sorted(hooks_known)))
+    r = client.post("/api/acme/challenges", headers=H,
+                    json=dict(ch, name="cf-ok", dns_credentials="CF_Token=abc\nCF_Account_ID=def\n\n# a note\n"))
+    ok(r.status_code == 200, "CF_Token and CF_Account_ID are stored for dns_cf; blank and # lines are fine")
+    r = client.post("/api/acme/challenges", headers=H,
+                    json=dict(ch, name="cf-other", dns_credentials="CF_Token=abc\nAWS_ACCESS_KEY_ID=x"))
+    ok(r.status_code == 400 and "not a variable the dns_cf hook reads" in r.get_json().get("error", ""),
+       "a variable dns_cf does not read is refused, naming the hook: %s" % r.get_json().get("error", "")[:80])
+    # every hook acme.sh ships accepts every variable it declares
+    refused = []
+    for h in dnsapi.dnsapi_hooks():
+        for name in dnsapi.hook_variables(h["hook"]) or ():
+            if acme.dangerous_name(name) or not acme._SAFE_ENV.match(name):
+                refused.append("%s:%s" % (h["hook"], name))
+    ok(not refused, "no shipped hook declares a variable the refusals would take (%s)"
+       % (", ".join(refused[:5]) or "none"))
+else:
+    print("  skip  acme.sh is not installed here, so the hooks' variables are not read")
+for bad, why in (("ACCOUNT_CONF_PATH=/tmp/evil", "ACCOUNT_CONF_PATH, a file acme.sh sources"),
+                 ("LE_CONFIG_HOME=/tmp", "LE_CONFIG_HOME"), ("HTTPS_INSECURE=1", "HTTPS_INSECURE"),
+                 ("HTTP_HEADER=/etc/passwd", "HTTP_HEADER, a file acme.sh writes"),
+                 ("LD_PRELOAD=/tmp/x.so", "LD_PRELOAD"), ("PATH=/tmp", "PATH"), ("DEBUG=3", "DEBUG"),
+                 ("CF_Token=abc\nLOG_FILE=/etc/x", "LOG_FILE on a second line")):
+    r = client.post("/api/acme/challenges", headers=H, json=dict(ch, name="bad", dns_credentials=bad))
+    ok(r.status_code == 400 and "acme.sh or the shell acts on" in r.get_json().get("error", ""),
+       "a credential line setting %s is refused with 400" % why)
+for bad, why in (("CF Token=x", "a space in the name"), ("1CF=x", "a leading digit"),
+                 ("CF_Token", "no = at all"), ("CF_Token=ab'c", "a quote in the value"),
+                 ("CF_Token=ab\tc", "a control character in the value")):
+    r = client.post("/api/acme/challenges", headers=H, json=dict(ch, name="bad", dns_credentials=bad))
+    ok(r.status_code == 400, "a credential line with %s is refused with 400: %s"
+       % (why, r.get_json().get("error", "")[:70]))
+r = client.post("/api/acme/challenges", headers=H,
+                json={"name": "http2", "method": "http01", "dns_credentials": "ACCOUNT_CONF_PATH=/tmp/evil"})
+ok(r.status_code == 200, "an HTTP-01 challenge type does not use credentials, so they are not judged")
+# without a hook script to ask, the refusals by name stand on their own
+ok(acme.credential_names("dns_nosuchhook") is None, "an unknown hook has no variable list")
+try:
+    acme.credential_env({"method": "dns01", "dns_provider": "dns_nosuchhook",
+                         "dns_credentials": "LE_CONFIG_HOME=/tmp"})
+    ok(False, "LE_CONFIG_HOME is refused when the hook's variables are unknown")
+except ValueError as e:
+    ok("acts on" in str(e), "LE_CONFIG_HOME is refused when the hook's variables are unknown")
+ok(acme.credential_env({"method": "dns01", "dns_provider": "dns_nosuchhook",
+                        "dns_credentials": "MY_API_KEY=x"}) == {"MY_API_KEY": "x"},
+   "and a plain name is taken, since there is nothing to check it against")
+r = client.post("/api/wizard/certificate", headers=H,
+                json={"domains": "w.example.com", "account": {"id": aid}, "dry_run": True,
+                      "challenge": {"name": "new", "method": "dns01", "dns_provider": "dns_cf",
+                                    "dns_credentials": "ACCOUNT_CONF_PATH=/tmp/evil"}})
+ok(r.status_code == 400 and "ACCOUNT_CONF_PATH" in r.get_json().get("error", ""),
+   "the wizard refuses a new challenge type with such a line")
+
+# -- saving: an account's EAB key and custom CA address, kept by acme.sh as shell code too
+for field, val, label in (("eab_kid", "kid'x", "a quote in the EAB key ID"),
+                          ("eab_hmac", "hm\x01ac", "a control character in the EAB HMAC key"),
+                          ("server", "https://ca.example.lan/dir'x", "a quote in the directory address")):
+    body = {"name": "q", "ca": "custom", "server": "https://ca.example.lan/directory", "eab_kid": "k",
+            "eab_hmac": "h"}
+    body[field] = val
+    r = client.post("/api/acme/accounts", headers=H, json=body)
+    ok(r.status_code == 400 and "quote or a control character" in r.get_json().get("error", ""),
+       "%s is refused with 400" % label)
+r = client.post("/api/acme/accounts", headers=H, json={"name": "num", "ca": "custom", "server": 12})
+ok(r.status_code == 400 and "must be text" in r.get_json().get("error", ""),
+   "a number where text is expected is refused with 400, not a 500")
+
 # -- issuing a configuration that never went through saving
 seen = []
 acme.acme_run = lambda args, env_extra=None: (seen.append(args) or (0, "ok"))
@@ -122,12 +196,12 @@ real_ensure = acme.ensure_account
 acme.ensure_account = lambda acc: (seen.append(["--register-account"]) or (0, ""))
 
 
-def issue(email="", hook="dns_cf", domains="a.example.com"):
+def issue(email="", hook="dns_cf", domains="a.example.com", creds="CF_Token=x"):
     del seen[:]
     c = load_config()
     c["acme"]["accounts"] = [{"id": "a", "name": "a", "email": email, "ca": "letsencrypt"}]
     c["acme"]["challenges"] = [{"id": "c", "name": "c", "method": "dns01", "dns_provider": hook,
-                                "dns_credentials": "CF_Token=x"}]
+                                "dns_credentials": creds}]
     k = {"id": "k", "name": "k", "domains": domains, "account": "a", "challenge": "c",
          "key_type": "ec-256"}
     return acme._acme_issue(c, k)
@@ -143,6 +217,10 @@ for kw, word in ((dict(hook="dns_cf" + QUOTE), "DNS API hook"),
     res = issue(**kw)
     ok(not res.get("ok") and word in (res.get("error") or "") and not seen,
        "a stored %s is refused before acme.sh runs at all" % next(iter(kw)))
+res = issue(creds="CF_Token=x\nACCOUNT_CONF_PATH=/tmp/evil")
+ok(not res.get("ok") and "ACCOUNT_CONF_PATH" in (res.get("error") or "")
+   and not any("--issue" in a for a in seen),
+   "a stored credential line acme.sh acts on is refused before --issue runs")
 
 print("\n" + ("acme.sh gets names, never shell code" if not fails else "%d FAILED" % len(fails)))
 sys.exit(1 if fails else 0)
