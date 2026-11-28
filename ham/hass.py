@@ -44,7 +44,7 @@ def _slug(text):
     return re.sub(r"[^a-z0-9]+", "-", str(text).lower()).strip("-") or "x"
 
 
-def _device_node(base):
+def _device_node():
     return {"identifiers": ["haproxy-manager-" + _node()],
             "name": "haproxy-manager " + _node(),
             "manufacturer": "haproxy-manager", "sw_version": VERSION}
@@ -91,7 +91,7 @@ def _entities(cfg, s):
 
     # -- this node -----------------------------------------------------------
     role, _held = auth.node_role(cfg)
-    dev = _device_node(base)
+    dev = _device_node()
     add("ham-%s-active" % _slug(node), "binary_sensor", "Holds the virtual IP",
         "on" if role in ("active", "standalone") else "off", dev)
     st = stats.haproxy_stats()
