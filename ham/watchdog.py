@@ -28,7 +28,6 @@ from . import apply, cluster, hass, notify, probe, sync, traffic, vrrp, webui
 # work, and never more than a few times in a window.
 # --------------------------------------------------------------------------
 
-WATCHDOG_UNITS = ("haproxy", "keepalived")
 _watchdog = {
     "enabled": False,
     "running": False,
@@ -442,6 +441,24 @@ def _check_addresses(cfg):
         _watchdog["_addr_seen"] = sorted(seen)
 
 
+# What a round looks after besides the two services, each on its own: a
+# fault in one must not keep the others from running, nor end the loop.
+# Ending the loop would stop the WATCHDOG=1 ping, and systemd would then
+# restart a process that was serving perfectly well.
+SIDE_CHECKS = (("checking for duplicate addresses", lambda cfg: _check_addresses(cfg)),
+               ("sampling the traffic", lambda cfg: traffic.poll(cfg)),
+               ("probing the published URLs", lambda cfg: probe.poll(cfg)),
+               ("publishing to Home Assistant", lambda cfg: hass.poll(cfg)))
+
+
+def _side_checks(cfg):
+    for what, check in SIDE_CHECKS:
+        try:
+            check(cfg)
+        except Exception:
+            log.exception("watchdog: %s failed", what)
+
+
 def _watchdog_loop():
     """Supervise the services, and let systemd supervise us.
 
@@ -503,10 +520,7 @@ def _watchdog_loop():
                 _restore_webui_if_lost()
             except Exception:
                 log.exception("watchdog: checking the management UI service failed")
-            _check_addresses(cfg)
-            traffic.poll(cfg)
-            probe.poll(cfg)
-            hass.poll(cfg)
+            _side_checks(cfg)
         else:
             with _watchdog_lock:
                 _watchdog["running"] = False

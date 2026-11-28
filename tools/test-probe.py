@@ -115,6 +115,60 @@ ok(r["state"] == "down" and "resolve" in r["note"],
 r = probe.probe_one({"kind": "https", "url": "u", "host": "127.0.0.1", "port": port, "path": "/"})
 ok(r["state"] == "down", "https against something that does not speak TLS is down")
 
+# -- an answer that is not HTTP is a down, not the end of all probing --------
+# BadStatusLine is not an OSError. Escaping probe_one it would end the round's
+# thread with the probes marked busy, and nothing would ever probe again.
+class Garbage(socket.socket):
+    pass
+
+
+garbage = socket.socket()
+garbage.bind(("127.0.0.1", 0))
+garbage.listen(4)
+gport = garbage.getsockname()[1]
+
+
+def talk_rubbish():
+    while True:
+        try:
+            conn, _ = garbage.accept()
+        except OSError:
+            return
+        conn.recv(4096)
+        conn.sendall(b"this is not http\r\n\r\n")
+        conn.close()
+
+
+threading.Thread(target=talk_rubbish, daemon=True).start()
+r = probe.probe_one({"kind": "http", "url": "u", "host": "127.0.0.1", "port": gport, "path": "/"})
+ok(r["state"] == "down" and "no usable answer" in r["note"],
+   "a server that answers something other than HTTP is down, with the reason: " + r["note"][:60])
+r = probe.probe_one({"kind": "http", "url": "u", "host": "a\u0000b.example", "port": 80, "path": "/"})
+ok(r["state"] == "down", "a name the resolver cannot even take is down, not an exception")
+probe._state.update({"busy": True, "at": 0.0})
+probe._run(cfg, [{"kind": "http", "url": "http://rubbish", "host": "127.0.0.1", "port": gport, "path": "/",
+                  "pool": "be_shop"}])
+ok(probe._state["busy"] is False and probe._state["results"][0]["state"] == "down",
+   "a round over such a URL ends with the result recorded and the probes free for the next")
+real_tell = probe._tell
+probe._tell = lambda cfg, r: 1 / 0
+probe._state["busy"] = True
+probe._run(cfg, [{"kind": "http", "url": "u", "host": "127.0.0.1", "port": port, "path": "/", "pool": "be_shop"}])
+probe._tell = real_tell
+ok(probe._state["busy"] is False, "and a fault in the round itself still leaves the probes free")
+garbage.close()
+
+# -- the watchdog's side checks each fail alone --------------------------------
+from ham import watchdog   # noqa: E402
+real_poll = probe.poll
+probe.poll = lambda cfg: 1 / 0
+ran = []
+watchdog.SIDE_CHECKS = (("probing the published URLs", lambda cfg: probe.poll(cfg)),
+                        ("the next check", lambda cfg: ran.append(1)))
+watchdog._side_checks(cfg)
+probe.poll = real_poll
+ok(ran == [1], "a side check that raises is logged, and the checks after it still run")
+
 # -- counting what we put through ourselves ----------------------------------
 probe.drain_generated()
 urls2 = probe.published_urls(cfg)

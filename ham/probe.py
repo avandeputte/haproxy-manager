@@ -153,6 +153,20 @@ def probe_one(entry):
         return result
 
     try:
+        return _ask(entry, result, done)
+    except Exception as e:
+        # Whatever the far end did -- a status line that is not HTTP, a name
+        # the resolver cannot even encode -- is an answer of sorts: the URL
+        # does not work. It must never be an exception out of the worker
+        # pool, which would end the round with the probes marked busy for
+        # good and no round ever running again.
+        return done("down", "no usable answer: %s" % (str(e) or e.__class__.__name__))
+
+
+def _ask(entry, result, done):
+    """The request itself; see probe_one for the three answers."""
+    host, port = entry["host"], entry["port"]
+    try:
         infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
         result["resolved"] = infos[0][4][0]
     except OSError as e:
@@ -235,25 +249,34 @@ def _tell(cfg, result):
 
 def _run(cfg, entries):
     results = []
-    # The requests in parallel; what follows from each answer -- the counts,
-    # the notifications -- stays here, one at a time, in the order of the list.
-    with concurrent.futures.ThreadPoolExecutor(max_workers=WORKERS) as ex:
-        answers = list(ex.map(probe_one, entries))
-    for entry, r in zip(entries, answers):
-        results.append(r)
-        # A response means the request went through HAProxy and was counted
-        # against the pool; a TCP connect that was accepted is a session. A
-        # name that never resolved or connected reached nothing to count.
-        if r.get("status") is not None or (entry["kind"] == "tcp" and r["state"] == "ok"):
-            _count_self(entry.get("pool"), r.get("status"))
-        try:
-            _tell(cfg, r)
-        except Exception:
-            log.exception("probe: reporting %s failed", r["url"])
-    with _state_lock:
-        _state["results"] = results
-        _state["at"] = time.time()
-        _state["busy"] = False
+    try:
+        # The requests in parallel; what follows from each answer -- the
+        # counts, the notifications -- stays here, one at a time, in the
+        # order of the list.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=WORKERS) as ex:
+            answers = list(ex.map(probe_one, entries))
+        for entry, r in zip(entries, answers):
+            results.append(r)
+            # A response means the request went through HAProxy and was
+            # counted against the pool; a TCP connect that was accepted is a
+            # session. A name that never resolved or connected reached
+            # nothing to count.
+            if r.get("status") is not None or (entry["kind"] == "tcp" and r["state"] == "ok"):
+                _count_self(entry.get("pool"), r.get("status"))
+            try:
+                _tell(cfg, r)
+            except Exception:
+                log.exception("probe: reporting %s failed", r["url"])
+    except Exception:
+        log.exception("probe: the round failed")
+    finally:
+        # Busy is the round's own mark, and the round is over however it
+        # ended; left standing, it would keep every later round from starting.
+        with _state_lock:
+            if results:
+                _state["results"] = results
+            _state["at"] = time.time()
+            _state["busy"] = False
     bad = [r for r in results if r["state"] != "ok"]
     if bad:
         log.info("probe: %d of %d published URLs are not answering cleanly: %s",
