@@ -1,5 +1,5 @@
 import { $, ADCS_FIELDS, CA_CHOICES, CA_NO_EAB, api, btn, closeDlg, esc, fieldRow, list, lists, localTime, openDlg, readForm, showText, download } from "../core.js";
-import { E, renderEntity } from "../entities.js";
+import { E } from "../entities.js";
 import { t, tn } from "../i18n.js";
 import { refreshStatus, route } from "../shell.js";
 import { state } from "../state.js";

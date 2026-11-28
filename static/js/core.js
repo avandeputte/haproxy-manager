@@ -1,5 +1,5 @@
 "use strict";
-import { t, tn } from "./i18n.js";
+import { t } from "./i18n.js";
 import { state } from "./state.js";
 /* What to do when the server says the session is gone. auth.js registers
    showLogin here; importing it directly would make core and auth depend on

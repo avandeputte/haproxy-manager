@@ -40,7 +40,7 @@ export async function renderLogs(){
   const c=$("#content");c.innerHTML="";
   const card=document.createElement("div");card.className="card";
   card.innerHTML='<div class=hd><h2>'+t("Logs")+'</h2><div class=sp></div>'+
-    '<button class="btn ghost" id=logdl>'+t("Download")+'</button></div>';
+    '<button class="btn sm" id=logdl>'+t("Download")+'</button></div>';
 
   const bar=document.createElement("div");bar.className="logbar";
   bar.innerHTML=[["manager","Web UI"],["haproxy","HAProxy"],["acme","acme.sh"],

@@ -78,12 +78,9 @@ export function buildNav(){
   const n=$("#navlinks");
   const remembered=openGroups();
   let bucket=null;                       // where following items go
-  NAV.forEach(([key,label,opt])=>{
+  NAV.forEach(([key,label])=>{
     if(key==="grp"){
-      if(opt!=="collapse"){
-        const g=document.createElement("div");g.className="grp";g.textContent=t(label);
-        n.appendChild(g);bucket=null;return;
-      }
+      /* every group collapses; the third element of its entry only says so */
       const head=document.createElement("button");
       head.className="grp";head.type="button";head.dataset.group=label;
       head.innerHTML='<span class=caret>&#9656;</span><span>'+esc(t(label))+"</span><span class=count></span>";

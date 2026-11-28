@@ -290,7 +290,7 @@ export async function clusterCard(fresh){
   hd.insertAdjacentHTML("beforeend",
     '<span class=hint style="margin-right:10px">'+
       (cl.live?t("just now"):t("as of {n}s ago",{n:esc(cl.age_seconds)}))+"</span>");
-  const rb=btn(t("Refresh"),"sm ghost",async()=>{
+  const rb=btn(t("Refresh"),"sm",async()=>{
     rb.disabled=true;rb.textContent=t("asking each node...");
     const fresh=await clusterCard(true);
     card.replaceWith(fresh);

@@ -14,7 +14,7 @@ from .base import STATIC_DIR, VERSION, app
 # escape STATIC_DIR, which makes the extension the whole policy. These answer
 # without a session, because the sign-in page has to render before anyone can
 # sign in.
-STATIC_SUFFIXES = (".css", ".js", ".svg", ".png", ".ico", ".map", ".woff2")
+STATIC_SUFFIXES = (".css", ".js", ".svg", ".png", ".ico")
 
 
 @app.get("/")

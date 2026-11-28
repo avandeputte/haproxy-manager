@@ -12,7 +12,6 @@ import shlex
 import shutil
 import threading
 import time
-import urllib.parse
 import urllib.request
 
 from .base import (BETA_REF, DATA_DIR, INSTALL_URL, PEER_CONNECT_TIMEOUT, PEER_READ_TIMEOUT,

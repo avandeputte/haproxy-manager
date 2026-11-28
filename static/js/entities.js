@@ -397,8 +397,6 @@ export async function renderEntity(key,into){
       hd.appendChild(btn(t(def.add),"pri sm",()=>openEditor(key)));
     }
   }
-  if(false){
-  }
   card.appendChild(hd);
   const bd=document.createElement("div");
   if(!items.length){
