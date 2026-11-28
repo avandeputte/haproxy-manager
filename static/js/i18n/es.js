@@ -1608,4 +1608,5 @@ export default {
 "this action needs a header name": "esta acción necesita un nombre de cabecera",
 "this action needs a location to redirect to": "esta acción necesita una ubicación a la que redirigir",
 "two-factor authentication is already on; turn it off first to enrol another phone": "la autenticación de dos factores ya está activada; desactívela primero para registrar otro teléfono",
+"Turning the second factor on changes how you sign in, so it asks for the password.": "Activar el segundo factor cambia cómo inicia sesión, así que se pide la contraseña.",
 };

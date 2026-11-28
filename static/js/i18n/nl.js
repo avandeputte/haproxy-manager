@@ -1608,4 +1608,5 @@ export default {
 "this action needs a header name": "deze actie heeft een headernaam nodig",
 "this action needs a location to redirect to": "deze actie heeft een adres nodig om naar om te leiden",
 "two-factor authentication is already on; turn it off first to enrol another phone": "tweestapsverificatie staat al aan; zet die eerst uit om een andere telefoon te registreren",
+"Turning the second factor on changes how you sign in, so it asks for the password.": "De tweede stap aanzetten verandert hoe u zich aanmeldt, daarom wordt het wachtwoord gevraagd.",
 };

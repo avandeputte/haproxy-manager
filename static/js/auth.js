@@ -64,12 +64,20 @@ async function openTwoFactor(){
     'style="width:120px;padding:7px 9px;border:1px solid var(--hair);border-radius:4px;'+
     'background:var(--field);color:var(--ink);font:15px var(--mono);margin-top:6px">'+
     "</div></div>";
+  /* The password too: a session alone must not be able to swap the second
+     factor for one it holds, so the server asks for it and so does this. */
+  const pw=document.createElement("div");pw.className="frm";pw.style.marginTop="14px";
+  fieldRow({k:"pw_on",l:"Current password",t:"password",
+            h:"Turning the second factor on changes how you sign in, so it asks for the password."},"")
+    .forEach(el=>pw.appendChild(el));
+  wrap.appendChild(pw);
   const err=document.createElement("div");err.className="err";
   openDlg(t("Two-factor authentication"),wrap,[err,btn(t("Cancel"),"",()=>{closeDlg();openAccount();}),
     btn(t("Verify and turn on"),"pri",async()=>{
       err.textContent="";
       try{
-        const r=await api("2fa/enable","POST",{secret:setup.secret,code:fieldEl("totp_code").value});
+        const r=await api("2fa/enable","POST",{secret:setup.secret,code:fieldEl("totp_code").value,
+                                               password:fieldEl("pw_on").value});
         const done=document.createElement("div");
         done.innerHTML='<p class=hint style="margin-bottom:10px">'+
           t("Two-factor authentication is on. These recovery codes each work once, in place of a "+

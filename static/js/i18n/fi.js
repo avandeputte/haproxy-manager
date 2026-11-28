@@ -1608,4 +1608,5 @@ export default {
 "this action needs a header name": "tämä toiminto tarvitsee otsakkeen nimen",
 "this action needs a location to redirect to": "tämä toiminto tarvitsee sijainnin, johon ohjataan",
 "two-factor authentication is already on; turn it off first to enrol another phone": "kaksivaiheinen tunnistus on jo päällä; poista se ensin käytöstä, jotta voit lisätä toisen puhelimen",
+"Turning the second factor on changes how you sign in, so it asks for the password.": "Toisen vaiheen käyttöönotto muuttaa kirjautumistapaa, siksi kysytään salasanaa.",
 };

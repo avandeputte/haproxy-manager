@@ -1608,4 +1608,5 @@ export default {
 "this action needs a header name": "denne handlingen trenger et header-navn",
 "this action needs a location to redirect to": "denne handlingen trenger en adresse å omdirigere til",
 "two-factor authentication is already on; turn it off first to enrol another phone": "tofaktorautentisering er allerede på; slå den av først for å registrere en annen telefon",
+"Turning the second factor on changes how you sign in, so it asks for the password.": "Å slå på den andre faktoren endrer hvordan du logger inn, så det spørres etter passordet.",
 };
