@@ -47,6 +47,7 @@ UNIT=/etc/systemd/system/haproxy-manager.service
 
 SRC=""        # populated by fetch_source
 TMPDIR_=""    # cleaned up on exit
+ACME_TMP_=""  # where acme.sh is unpacked; cleaned up on exit as well
 ACME_OK=1
 MODE=""            # install | update | uninstall (empty => decide at runtime)
 MODE_FROM_FLAG=0   # the mode was chosen on the command line, not by prompting
@@ -70,7 +71,11 @@ log()  { printf '%s>>%s %s\n' "$C_G" "$C_0" "$*"; }
 warn() { printf '%s!!%s %s\n' "$C_Y" "$C_0" "$*" >&2; }
 die()  { printf '%s!!%s %s\n' "$C_R" "$C_0" "$*" >&2; exit 1; }
 
-cleanup() { [ -n "$TMPDIR_" ] && rm -rf "$TMPDIR_"; }
+cleanup() {
+    if [ -n "$TMPDIR_" ]; then rm -rf "$TMPDIR_"; fi
+    if [ -n "$ACME_TMP_" ]; then rm -rf "$ACME_TMP_"; fi
+    return 0
+}
 
 usage() {
     cat <<'EOF'
@@ -493,18 +498,33 @@ install_acme() {
         ACME_OK=0
         return
     fi
+    # An installed acme.sh is kept only when it is at least the pinned
+    # release: an older one does not escape a quote it saves into its conf
+    # files, and the one installed years ago would otherwise stay forever,
+    # since nothing else here ever touches it. --install over the existing
+    # home keeps account.conf and the issued certificates.
+    local have=""
     if [ -x "$ACME_HOME/acme.sh" ]; then
-        log "acme.sh already installed at $ACME_HOME"
-        return
+        have="$(sed -n 's/^VER=//p' "$ACME_HOME/acme.sh" 2>/dev/null | head -1)"
+        if [ -n "$have" ] && [ "$(printf '%s\n%s\n' "$have" "$ACME_VERSION" | sort -V | tail -1)" = "$have" ]; then
+            log "acme.sh $have already installed at $ACME_HOME"
+            return
+        fi
+        log "Updating acme.sh ${have:-of unknown version} at $ACME_HOME to $ACME_VERSION"
+    else
+        log "Installing acme.sh $ACME_VERSION into $ACME_HOME (no cron -- the manager drives renewals)"
     fi
 
     # Installed from a pinned release tarball rather than get.acme.sh: that
     # bootstrap treats its first argument as "email=..." and mangles anything
     # else into an unknown parameter, and it exits 0 even when it fails.
-    log "Installing acme.sh $ACME_VERSION into $ACME_HOME (no cron -- the manager drives renewals)"
-    local dir="${TMPDIR_:-/tmp}/acme"
-    if mkdir -p "$dir" \
-        && curl -fsSL "https://github.com/acmesh-official/acme.sh/archive/refs/tags/$ACME_VERSION.tar.gz" \
+    # Unpacked in a directory of its own making: a fixed name under /tmp is
+    # one anybody on the node can have created first, with content of their
+    # choosing, for root to run.
+    ACME_TMP_="$(mktemp -d)" || { warn "could not make a temporary directory for acme.sh"; ACME_OK=0; return 0; }
+    trap cleanup EXIT INT TERM
+    local dir="$ACME_TMP_"
+    if curl -fsSL "https://github.com/acmesh-official/acme.sh/archive/refs/tags/$ACME_VERSION.tar.gz" \
              -o "$dir/acme.tar.gz" \
         && tar -xzf "$dir/acme.tar.gz" -C "$dir" --strip-components=1 \
         && ( cd "$dir" && ./acme.sh --install --nocron \
@@ -513,7 +533,11 @@ install_acme() {
         :
     fi
     rm -rf "$dir"
+    ACME_TMP_=""
 
+    if [ -n "$have" ] && [ "$(sed -n 's/^VER=//p' "$ACME_HOME/acme.sh" 2>/dev/null | head -1)" = "$have" ]; then
+        warn "acme.sh could not be updated and stays at $have"
+    fi
     if [ ! -x "$ACME_HOME/acme.sh" ]; then
         ACME_OK=0
         warn "acme.sh install failed -- certificates will not issue until it is installed"
@@ -526,6 +550,11 @@ install_app() {
     install -d -m 0755 "$DEST" "$DEST/static"
     install -d -m 0700 "$DATA"
     install -d -m 0700 "$CERTS"
+    # Both hold private keys and passwords, so they are closed whether they
+    # were just made or have been there since an older installer made them
+    # 0755 -- said outright, not left to what install -d does with a
+    # directory that already exists.
+    chmod 0700 "$DATA" "$CERTS"
     install -m 0644 "$SRC/app.py" "$DEST/app.py"
     # The package, replaced wholesale: a module dropped upstream must not be
     # left behind, and a stale .pyc next to a removed source is worse still.
