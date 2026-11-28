@@ -6,7 +6,9 @@ import copy
 import hashlib
 import json
 import os
+import pathlib
 import shutil
+import tempfile
 
 from .base import CONF_PATH, DATA_DIR, _lock, log
 from .util import rule_cond_ids
@@ -205,20 +207,15 @@ DEFAULT_CONFIG = {
         # record without "shared" is such a tick, not yet handed to the
         # cluster (updates.adopt_own_tick).
         "updates": {"beta": False},
+        # What VRRP needs from this node alone. Everything the nodes share --
+        # the virtual IPs, the router id, the password -- lives under cluster;
+        # the copies that once sat here were left behind when it moved, and a
+        # stored file that still carries them is read without complaint.
         "keepalived": {
-            "enabled": False,
             "interface": "eth0",
-            "vrid": 51,
-            "state": "BACKUP",
             "priority": 100,
-            "nopreempt": True,
-            "advert_int": 1,
-            "auth_pass": "",
             "unicast_src": "",
             "unicast_peer": "",
-            "vips": "",            # one address/prefix per line
-            "track_haproxy": True,
-            "custom": "",
         },
         # Objects this node owns. Not a copy of the shared ones and not a
         # filtered view of them: the shared sections hold what every node has,
@@ -262,6 +259,12 @@ DEFAULT_CONFIG = {
     "_meta": {"applied_hash": ""},
 }
 
+# The sections every node holds identically: what a push carries, what a
+# snapshot keeps, what a receive or a join may take. One list, because the
+# six places that each spelled it out drifted apart -- CrowdSec and Cloudflare
+# were missing from the join until 2.5.1 (issue #44).
+SHARED_SECTIONS = ("haproxy", "acme", "access", "cluster", "notify", "crowdsec", "cloudflare")
+
 VALID_COLLECTIONS = {
     "haproxy": {"servers", "backends", "frontends", "healthchecks", "conditions", "rules",
                 "addresslists", "errorpages"},
@@ -276,6 +279,49 @@ def _merge_defaults(dst, src):
         elif isinstance(v, dict) and isinstance(dst.get(k), dict):
             _merge_defaults(dst[k], v)
     return dst
+
+
+def check_section(name, body):
+    """Why a shared section offered by another node cannot be taken, or "".
+
+    _merge_defaults fills what is missing and leaves what is there alone,
+    whatever its type -- so a section that arrived as null, or a `settings`
+    that did, was adopted and saved, and every request on the node then
+    failed on it until someone edited the file by hand. The shape is checked
+    against the defaults before anything is written: a dict where the
+    default has a dict, a list where it has a list, and in the collections
+    objects rather than bare values.
+    """
+    if name not in SHARED_SECTIONS:
+        return "%s is not a shared section" % name
+    if not isinstance(body, dict):
+        return "section %s is not an object" % name
+
+    def shape(dst, src, where):
+        for k, v in src.items():
+            if k not in dst:
+                continue
+            here = "%s.%s" % (where, k)
+            if isinstance(v, dict):
+                if not isinstance(dst[k], dict):
+                    return "%s is not an object" % here
+                bad = shape(dst[k], v, here)
+                if bad:
+                    return bad
+            elif isinstance(v, list) and not isinstance(dst[k], list):
+                return "%s is not a list" % here
+        return ""
+
+    bad = shape(body, DEFAULT_CONFIG[name], name)
+    if bad:
+        return bad
+    collections = set(VALID_COLLECTIONS.get(name) or ())
+    if name == "access":
+        collections = {"users", "groups"}
+    for coll in collections:
+        if any(not isinstance(i, dict) for i in body.get(coll) or []):
+            return "%s.%s holds something that is not an object" % (name, coll)
+    return ""
 
 
 CLUSTER_KEYS = ("vrid", "vips", "auth_pass", "advert_int", "state",
@@ -306,6 +352,30 @@ def _move_node_objects_into_local(cfg):
         log.info("moved %d object(s) belonging to this node out of the shared "
                  "configuration; they are no longer sent to the other nodes", moved)
     return moved
+
+
+def write_private(path, data):
+    """Write a file nobody but its owner may read, with no moment in between.
+
+    Writing in place and then tightening the mode leaves a window -- and a
+    file that already existed keeps whatever mode it had until the chmod. So
+    the bytes go to a fresh file beside it, created with mode 0600 and
+    refused if the name is somehow taken, and then take the path's place.
+    What held a private key or a password hash never had another mode.
+    """
+    path = pathlib.Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix="." + path.name + ".")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data.encode() if isinstance(data, str) else data)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def load_config():
@@ -341,15 +411,27 @@ def load_config():
     # carried over to cover the defaults being added now. Only the hashed
     # sections matter, and only while the file lacks something: once saved,
     # the carried-over marker is in the file and this costs nothing.
+    # Computed the way the version that stored the marker computed it: a file
+    # from before the formula changed says nothing of the formula, and that
+    # silence names the old one.
+    formula = int((cfg.get("_meta") or {}).get("applied_hash_formula") or 1) if cfg else HASH_FORMULA
     before = None
     if cfg and _lacks_defaults(cfg):
         try:
-            before = config_hash(cfg)
+            before = config_hash(cfg, formula)
         except (KeyError, TypeError):
             before = None
     cfg = _merge_defaults(cfg, DEFAULT_CONFIG)
     if before is not None and cfg["_meta"].get("applied_hash") == before:
-        cfg["_meta"]["applied_hash"] = config_hash(cfg)
+        cfg["_meta"]["applied_hash"] = config_hash(cfg, formula)
+    if formula != HASH_FORMULA:
+        # The formula changed with an upgrade, not the configuration. A marker
+        # that matched under the old formula still means "applied", so it is
+        # restated under the new one; one that did not match keeps saying
+        # "unapplied", as it should. The next save writes the formula down.
+        if cfg["_meta"].get("applied_hash") == config_hash(cfg, formula):
+            cfg["_meta"]["applied_hash"] = config_hash(cfg)
+    cfg["_meta"]["applied_hash_formula"] = HASH_FORMULA
     if unreadable:
         cfg["_meta"]["unreadable"] = True
     _move_node_objects_into_local(cfg)
@@ -366,7 +448,7 @@ def _lacks_defaults(cfg):
             if isinstance(v, dict) and isinstance(dst.get(k), dict) and lacks(dst[k], v):
                 return True
         return False
-    parts = [(cfg.get(sec), DEFAULT_CONFIG[sec]) for sec in ("haproxy", "acme", "cluster", "crowdsec", "cloudflare")]
+    parts = [(cfg.get(sec), DEFAULT_CONFIG[sec]) for sec in SHARED_SECTIONS if sec != "notify"]
     parts.append(((cfg.get("local") or {}).get("keepalived"), DEFAULT_CONFIG["local"]["keepalived"]))
     return any(not isinstance(dst, dict) or lacks(dst, src) for dst, src in parts)
 
@@ -510,14 +592,17 @@ def shared_view(cfg):
     Node-local settings are excluded, and so are the objects a node owns
     alone, because two nodes that differ only in those two respects are in
     agreement.
+
+    So is the note of what Cloudflare was last told. Writing it down changes
+    nothing any node serves, yet as part of the view it moved the revision
+    and left a snapshot at every Apply that spoke to Cloudflare. It still
+    travels with a push (sync.shared_payload puts it back), so a passive node
+    can say whether Cloudflare is in step; it just does not count.
     """
-    return {"haproxy": cfg["haproxy"],
-            "acme": cfg["acme"],
-            "access": cfg.get("access", {}),
-            "cluster": cfg["cluster"],
-            "notify": cfg.get("notify", {}),
-            "crowdsec": cfg.get("crowdsec", {}),
-            "cloudflare": cfg.get("cloudflare", {})}
+    out = {sec: cfg.get(sec, {}) for sec in SHARED_SECTIONS}
+    if isinstance(out.get("cloudflare"), dict) and "told" in out["cloudflare"]:
+        out["cloudflare"] = {k: v for k, v in out["cloudflare"].items() if k != "told"}
+    return out
 
 
 def _fp(value):
@@ -622,15 +707,12 @@ def _snapshot(cfg, fp):
         now = datetime.now(timezone.utc)
         name = "%s-r%d.json" % (now.strftime("%Y%m%d-%H%M%S-%f"),
                                 int(cfg["_meta"].get("shared_rev") or 0))
-        tmp = HISTORY_DIR / ("." + name)
-        tmp.write_text(json.dumps({
+        write_private(HISTORY_DIR / name, json.dumps({
             "at": now.isoformat(timespec="seconds"),
             "rev": int(cfg["_meta"].get("shared_rev") or 0),
             "fp": fp,
             "view": shared_view(cfg),
         }, separators=(",", ":")))
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, HISTORY_DIR / name)
         for old in _history_files()[:-HISTORY_KEEP]:
             old.unlink(missing_ok=True)
     except OSError as e:
@@ -680,13 +762,10 @@ def save_config(cfg):
                 shutil.copy2(CONF_PATH, str(CONF_PATH) + ".bak")
             except OSError as e:
                 log.warning("could not keep a backup of %s: %s", CONF_PATH, e)
-        tmp = CONF_PATH.with_suffix(".tmp")
-        tmp.write_text(json.dumps(cfg, indent=2))
         # It holds the API key, the session secret, the peers' keys and the
         # password hash. The directory is 0700, but the file should not rely
         # on that alone -- a backup or a loosened directory would expose it.
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, CONF_PATH)
+        write_private(CONF_PATH, json.dumps(cfg, indent=2))
 
 
 WEBUI_NAME = "haproxy-manager-ui"   # the service each node publishes its own UI as
@@ -741,18 +820,33 @@ def is_webui_cert(cert):
 # What refers to what, so a reference can be followed without hard-coding the
 # same list in four places.
 
-def config_hash(cfg):
+
+# Which formula the applied marker was computed with. Bumped when what is
+# hashed changes, so load_config can tell a marker stored by an older version
+# apart from a real unapplied change and restate it instead of making every
+# node of an upgraded cluster read dirty once:
+#   1  up to 2.5.1: the sign-in users were left out, so adding or disabling
+#      one never asked for an Apply although the userlist is rendered; and
+#      the whole of local.keepalived was hashed, dead copies included.
+#   2  the access section counts; of local.keepalived only what is rendered.
+HASH_FORMULA = 2
+_KEEPALIVED_RENDERED = ("interface", "priority", "unicast_src", "unicast_peer")
+
+
+def config_hash(cfg, formula=HASH_FORMULA):
+    """What an Apply must have covered for nothing to be waiting."""
     # A section a file from before its time lacks is left out, so the hash
     # of that file is what the version that wrote it computed; load_config
-    # then carries the applied marker over the defaults it adds.
-    parts = {"haproxy": cfg["haproxy"], "acme": cfg["acme"], "cluster": cfg["cluster"],
-             "keepalived": cfg["local"]["keepalived"]}
-    if "crowdsec" in cfg:
-        parts["crowdsec"] = cfg["crowdsec"]
-    if "cloudflare" in cfg:
+    # then carries the applied marker over the defaults it adds. notify is
+    # not in it: nothing HAProxy serves depends on where alerts go.
+    skip = {"notify"} | ({"access"} if formula < 2 else set())
+    parts = {sec: cfg[sec] for sec in SHARED_SECTIONS if sec not in skip and sec in cfg}
+    k = cfg["local"]["keepalived"]
+    parts["keepalived"] = k if formula < 2 else {key: k.get(key) for key in _KEEPALIVED_RENDERED}
+    if "cloudflare" in parts:
         # Without the note of what Cloudflare was last told: writing it down
         # changes nothing HAProxy serves, and must not read as unapplied.
-        parts["cloudflare"] = {k: v for k, v in cfg["cloudflare"].items() if k != "told"}
+        parts["cloudflare"] = {k: v for k, v in parts["cloudflare"].items() if k != "told"}
     payload = json.dumps(parts, sort_keys=True)
     return hashlib.sha256(payload.encode()).hexdigest()
 

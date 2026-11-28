@@ -9,11 +9,11 @@ from flask import jsonify
 import json
 
 from .base import _lock, app, log
-from .config import (DEFAULT_CONFIG, _history_files, _merge_defaults, load_config,
+from .config import (DEFAULT_CONFIG, SHARED_SECTIONS, _history_files, _merge_defaults, load_config,
     save_config, shared_fingerprint, shared_objects, shared_view)
 
 # The sections a snapshot holds, and the order they are shown in.
-SECTIONS = ("haproxy", "acme", "access", "cluster", "notify", "crowdsec", "cloudflare")
+SECTIONS = SHARED_SECTIONS
 
 
 def _read(name):
