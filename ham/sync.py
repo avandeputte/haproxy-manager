@@ -5,16 +5,19 @@ from flask import jsonify
 from flask import request
 from urllib.parse import urlsplit
 import base64
+import binascii
 import concurrent.futures
 import hashlib
-import os
+import re
 import socket
 import time
 import uuid
 
 from .base import (CERT_DIR, PEER_CONNECT_TIMEOUT, PEER_READ_TIMEOUT,
     PUSH_READ_TIMEOUT, VERSION, _lock, _requests, app, log)
-from .config import DEFAULT_CONFIG, _merge_defaults, load_config, save_config, shared_fingerprint, shared_view
+from .config import (DEFAULT_CONFIG, SHARED_SECTIONS, _merge_defaults, check_section, is_webui_name,
+    load_config, save_config, shared_fingerprint, shared_view, write_private)
+from .util import cert_path
 
 # Called with the cluster settings as they were and as they are, once a
 # configuration from another node has been taken and applied: for what has to
@@ -27,14 +30,60 @@ from . import apply, auth, cluster, peering, webui
 
 # --------------------------------------------------------------------------
 
-def shared_payload(cfg):
+def shared_certs(cfg):
+    """The certificate files that go with the shared configuration.
+
+    Named by the records in it, not read off the directory. Every node keeps
+    its own UI certificate in that directory under the same name, so sending
+    the directory put the active node's over the passive node's: a
+    certificate for the wrong host on https://passive/, which the passive
+    node could not heal because renewal runs on the active one.
+    """
     certs = {}
-    if CERT_DIR.exists():
-        for p in sorted(CERT_DIR.glob("*.pem")):
+    for c in cfg["acme"]["certificates"]:
+        p = cert_path(c)
+        if p.name not in certs and p.exists():
             certs[p.name] = base64.b64encode(p.read_bytes()).decode()
+    return certs
+
+
+_CERT_FILE = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9_.-]*\.pem")
+
+
+def accepted_certs(cfg, certs, source):
+    """The certificate files another node sent, decoded: {name: bytes}.
+
+    Checked and decoded in full before anything is written, so a payload
+    that is wrong halfway through leaves the directory as it was; a name
+    that is not a plain file name, or data that is not base64, raises
+    ValueError. Only files the shared configuration has a record for are
+    taken -- which keeps this node's own UI certificate where it is, whatever
+    an older sender still ships under that name.
+    """
+    wanted = {cert_path(c).name for c in cfg["acme"]["certificates"]}
+    out = {}
+    for name, b64 in (certs or {}).items():
+        if not isinstance(name, str) or not _CERT_FILE.fullmatch(name):
+            raise ValueError("%r is not a certificate file name" % (name,))
+        if is_webui_name(name[:-4]) or name not in wanted:
+            log.info("left the certificate file %s from %s alone: it is not in the "
+                     "shared configuration", name, source)
+            continue
+        try:
+            out[name] = base64.b64decode(b64, validate=True)
+        except (binascii.Error, TypeError, ValueError):
+            raise ValueError("the certificate file %s did not decode" % name)
+    return out
+
+
+def shared_payload(cfg):
     return {
         "config": shared_view(cfg),
-        "certs": certs,
+        "certs": shared_certs(cfg),
+        # What Cloudflare was last told travels beside the configuration, not
+        # in it: the receiver's page can then say whether Cloudflare is in
+        # step, while writing the note down moves no revision (shared_view).
+        "cloudflare_told": (cfg.get("cloudflare") or {}).get("told", ""),
         "source": socket.gethostname(),
         # Which revision of the shared configuration this is. The receiver
         # compares it with its own and refuses to move backwards.
@@ -358,12 +407,10 @@ def catch_up(cfg):
         log.warning("catching up from %s failed: %s", best.get("name"),
                     peering.peer_error(e, url, PUSH_READ_TIMEOUT))
         return None
-    # _receive_locked answers with a Flask response, because its usual caller
-    # is a request. Here there is none, so one is supplied.
+    # _receive answers with a Flask response, because its usual caller is a
+    # request. Here there is none, so one is supplied.
     with app.test_request_context("/api/sync/receive"):
-        with _lock:
-            res = _receive_locked(load_config(), data, data.get("config") or {},
-                                  source=best.get("name") or url)
+        res = _receive(data, data.get("config") or {}, source=best.get("name") or url)
         body = res[0] if isinstance(res, tuple) else res
         out = body.get_json()
     if out.get("ok"):
@@ -425,16 +472,36 @@ def api_sync_receive():
                         "presented_fp": auth.key_fingerprint(presented),
                         "expected_fp": auth.key_fingerprint(key)}), 401
     data = request.get_json(force=True) or {}
-    conf = data.get("config") or {}
-    with _lock:
-        return _receive_locked(cfg, data, conf)
+    return _receive(data, data.get("config") or {})
 
 
-def _receive_locked(cfg, data, conf, source=None):
-    cfg = load_config()          # re-read inside the lock: it may have moved
+def _receive(data, conf, source=None):
+    """Take what another node offers, then apply it here.
+
+    Stored under the lock and applied with it released: the apply may have
+    to install a package first, which takes minutes, and the lock is what
+    every save on this node waits for. Nothing is lost by the gap -- the
+    apply reads the configuration afresh, so it serves whatever is newest.
+    """
     # Named for the log: a push says who connected, a catch-up says who was asked.
     source = source or request.remote_addr
+    with _lock:
+        refused, cluster_before = _adopt(load_config(), data, conf, source)
+    if refused is not None:
+        return refused
+    res = apply.do_apply(allow_push=False)  # never re-push: avoids sync loops
+    cfg = load_config()
+    for hook in after_receive:
+        try:
+            hook(cluster_before, dict(cfg.get("cluster") or {}))
+        except Exception:
+            log.exception("a step that follows a received configuration failed")
+    return jsonify({"ok": res.get("ok", False), "node": socket.gethostname(), "applied": res})
 
+
+def _adopt(cfg, data, conf, source):
+    """Store the offered configuration: (a refusal to answer with, or None,
+    and the cluster settings as they were). Called with the lock held."""
     # A node that was isolated, edited and then reconnected would otherwise
     # push its old configuration over the current one and nobody would know.
     # It is refused unless the caller says to overwrite deliberately.
@@ -443,7 +510,7 @@ def _receive_locked(cfg, data, conf, source=None):
     if theirs and theirs < mine and not data.get("force"):
         log.warning("refused a configuration from %s: revision %d is older than %d",
                     source, theirs, mine)
-        return jsonify({
+        return (jsonify({
             "ok": False, "node": socket.gethostname(), "stale": True,
             "their_rev": theirs, "my_rev": mine,
             "error": "%s holds revision %d and was offered revision %d, which is "
@@ -451,37 +518,41 @@ def _receive_locked(cfg, data, conf, source=None):
                      "Apply from whichever node is right; to discard what is on "
                      "%s, use Overwrite on the Cluster page."
                      % (socket.gethostname(), mine, theirs, socket.gethostname(),
-                        socket.gethostname())}), 409
+                        socket.gethostname())}), 409), None
+
+    # Every section is looked at before any is taken: one that is not the
+    # shape this version stores would be saved as it came and break every
+    # request on this node (see check_section).
+    for sec in SHARED_SECTIONS:
+        bad = check_section(sec, conf[sec]) if sec in conf else ""
+        if bad:
+            log.warning("refused a configuration from %s: %s", source, bad)
+            return (jsonify({"ok": False, "node": socket.gethostname(),
+                             "error": "%s refused the configuration: %s."
+                                      % (socket.gethostname(), bad)}), 400), None
 
     cluster_before = dict(cfg.get("cluster") or {})
-    # A straight replacement. This node's own objects are not in these sections
-    # -- they live under local -- so there is nothing to rescue afterwards.
-    if "haproxy" in conf:
-        cfg["haproxy"] = _merge_defaults(conf["haproxy"], DEFAULT_CONFIG["haproxy"])
-    if "acme" in conf:
-        cfg["acme"] = _merge_defaults(conf["acme"], DEFAULT_CONFIG["acme"])
-    if isinstance(conf.get("access"), dict):
-        # The users and groups a published service asks visitors for. They
-        # travel with the services that check them, or a failover would meet
-        # people with a password no node here has heard of.
-        cfg["access"] = _merge_defaults(conf["access"], DEFAULT_CONFIG["access"])
-    if isinstance(conf.get("cluster"), dict):
-        # Cluster-wide VRRP settings. Anything per node -- interface, priority,
-        # unicast addresses -- lives in local and is deliberately untouched.
-        cfg["cluster"] = _merge_defaults(conf["cluster"], DEFAULT_CONFIG["cluster"])
-    if isinstance(conf.get("notify"), dict):
-        # Configured once and shared: each node then alerts about its own
-        # troubles through the same destinations.
-        cfg["notify"] = _merge_defaults(conf["notify"], DEFAULT_CONFIG["notify"])
-    if isinstance(conf.get("crowdsec"), dict):
-        # Where every node's bouncer asks, and what HAProxy does with the
-        # answer. A sender from before 2.0.0-beta.3 carries none, and this
-        # node's own stays.
-        cfg["crowdsec"] = _merge_defaults(conf["crowdsec"], DEFAULT_CONFIG["crowdsec"])
-    if isinstance(conf.get("cloudflare"), dict):
-        # The tunnel every node connects, and its token. A sender from before
-        # 2.4 carries none, and this node's own stays.
-        cfg["cloudflare"] = _merge_defaults(conf["cloudflare"], DEFAULT_CONFIG["cloudflare"])
+    # A straight replacement, section by section. This node's own objects are
+    # not in these sections -- they live under local -- so there is nothing
+    # to rescue afterwards; and a section the sender does not carry (an older
+    # release) leaves this node's own in place. Anything per node -- the
+    # interface, the priority, the unicast addresses -- lives in local and
+    # is deliberately untouched.
+    for sec in SHARED_SECTIONS:
+        if sec in conf:
+            cfg[sec] = _merge_defaults(conf[sec], DEFAULT_CONFIG[sec])
+    if isinstance(data.get("cloudflare_told"), str) and isinstance(cfg.get("cloudflare"), dict):
+        cfg["cloudflare"]["told"] = data["cloudflare_told"]
+
+    # The certificate files, decoded now and written below: a bad one refuses
+    # the whole offer before anything has changed on disk.
+    try:
+        certs = accepted_certs(cfg, data.get("certs"), source)
+    except ValueError as e:
+        log.warning("refused a configuration from %s: %s", source, e)
+        return (jsonify({"ok": False, "node": socket.gethostname(),
+                         "error": "%s refused the configuration: %s."
+                                  % (socket.gethostname(), e)}), 400), None
 
     # An optional membership list: every other node as seen by the sender.
     mesh = data.get("peers")
@@ -526,27 +597,33 @@ def _receive_locked(cfg, data, conf, source=None):
                          "url": p["url"].rstrip("/"), "api_key": key,
                          "verify_tls": verify_tls, "enabled": enabled})
         if kept:
+            # A node only this node knows -- added here by hand, or one whose
+            # introduction to the sender failed -- is not the sender's to
+            # drop: the list is joined, not replaced. Removing a node from
+            # the cluster is done on each node, as adding one is.
+            seen = {q["url"].rstrip("/").lower() for q in kept}
+            kept += [q for q in existing
+                     if (q.get("url") or "").rstrip("/").lower() not in seen]
             cfg["local"]["sync"]["peers"] = kept
 
     CERT_DIR.mkdir(parents=True, exist_ok=True)
-    for name, b64 in (data.get("certs") or {}).items():
-        if "/" in name or ".." in name or not name.endswith(".pem"):
-            continue
-        p = CERT_DIR / name
-        p.write_bytes(base64.b64decode(b64))
-        os.chmod(p, 0o600)
+    for name, pem in certs.items():
+        write_private(CERT_DIR / name, pem)
     # The listener this node's UI hangs off may have been replaced wholesale by
     # the incoming configuration. Rebuilding is idempotent and re-attaches it.
     if (cfg["local"].get("web_ui") or {}).get("enabled"):
         try:
             webui.rebuild_webui(cfg)
         except Exception:
-            pass
+            log.exception("could not rebuild this node's UI service after the "
+                          "configuration from %s; it may not answer on its own "
+                          "address until Settings > Web UI access is saved again", source)
     # Take the sender's place in the sequence rather than counting this as a
     # change of our own, so the sender and this node end up on the same
-    # revision.
+    # revision. A sender that names no revision -- a release from before there
+    # was one -- cannot put this node back at zero: it keeps its own.
     cfg["_meta"]["shared_fp"] = shared_fingerprint(cfg)
-    cfg["_meta"]["shared_rev"] = theirs
+    cfg["_meta"]["shared_rev"] = theirs or mine
     # Every node hashes the same thing -- the view that was sent -- so taking a
     # configuration and then not matching it means something node-specific is
     # sitting inside the shared sections without being marked as node-local.
@@ -574,10 +651,4 @@ def _receive_locked(cfg, data, conf, source=None):
     cluster.invalidate()
     log.info("received configuration from %s at revision %d",
              source, cfg["_meta"]["shared_rev"])
-    res = apply.do_apply(cfg, allow_push=False)  # never re-push: avoids sync loops
-    for hook in after_receive:
-        try:
-            hook(cluster_before, dict(cfg.get("cluster") or {}))
-        except Exception:
-            log.exception("a step that follows a received configuration failed")
-    return jsonify({"ok": res.get("ok", False), "node": socket.gethostname(), "applied": res})
+    return None, cluster_before

@@ -9,7 +9,7 @@ import copy
 from .base import LISTEN, PORT, _lock, app, log
 from .config import WEBUI_NAME, is_webui_cert, load_config, merged, move_to_local, promote_local, save_config, webui_object_ids
 from .util import _by_id, cert_details, cert_path, rule_cond_ids
-from . import access, apply, dnsapi, errorpages, haproxy, vrrp, wizard, oauth
+from . import access, apply, auth, dnsapi, errorpages, haproxy, vrrp, wizard, oauth
 
 # --------------------------------------------------------------------------
 
@@ -332,7 +332,19 @@ def api_webui_set():
                                 "Both addresses are served by one listener, so they must use the "
                                 "same scheme and port. This node's is %s://%s:%s."
                                 % (pub["scheme"], pub["host"], pub["port"])}), 400
-        cfg["cluster"]["ui_url"] = ("%s://%s" % (shared["scheme"], shared["host"])) if shared else ""
+        shared_url = ("%s://%s" % (shared["scheme"], shared["host"])) if shared else ""
+        if shared_url != (cfg["cluster"].get("ui_url") or ""):
+            # The shared address is the cluster's, and this route is open to a
+            # passive node for the sake of its own address. Writing the
+            # cluster's part from here moved this node's revision past the
+            # active node's, whose next push was then refused as stale.
+            read_only, why = auth.readonly_state(cfg)
+            if read_only:
+                return jsonify({"ok": False, "read_only": True, "error":
+                                "The shared address is part of the cluster's configuration, so it "
+                                "is changed on the node holding the virtual IP. This node's own "
+                                "address can still be saved here. " + why}), 409
+            cfg["cluster"]["ui_url"] = shared_url
 
         # Refuse to take a host name that already points somewhere else.
         hp = cfg["haproxy"]

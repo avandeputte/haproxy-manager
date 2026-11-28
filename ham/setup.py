@@ -3,14 +3,14 @@
 from flask import jsonify
 from flask import request
 from urllib.parse import urlsplit
-import base64
 import os
 import socket
 import uuid
 
 from .base import CERT_DIR, PORT, _lock, _requests, app
-from .config import DEFAULT_CONFIG, _merge_defaults, load_config, save_config, shared_fingerprint
-from . import apply, auth, vrrp
+from .config import (DEFAULT_CONFIG, SHARED_SECTIONS, _merge_defaults, check_section, load_config,
+    save_config, shared_fingerprint, write_private)
+from . import apply, auth, sync, vrrp
 
 def _guess_node_url():
     """How this node was just reached -- a good default for how peers reach it."""
@@ -51,6 +51,24 @@ def _apply_node_identity(cfg, body):
     return loc["api_key"]
 
 
+def _already_set_up(cfg, body):
+    """The refusal a second run of setup gets, or None.
+
+    Setup rewrites this node's API key and address and, for a cluster, the
+    shared virtual IP -- and the route stays open to a passive node and to
+    the API key, which every peer holds. So once it has run it runs again
+    only for a person at a browser who says so: the body carries force, and
+    the request a session cookie, not a key.
+    """
+    if not cfg["_meta"].get("setup_complete"):
+        return None
+    if body.get("force") is True and auth.current_user(cfg) and not request.environ.get("ham.mcp"):
+        return None
+    return jsonify({"ok": False, "error":
+                    "This node has already been set up. To run setup again, sign in with a "
+                    "browser and send force: true; an API key cannot."}), 409
+
+
 @app.post("/api/setup/create")
 def api_setup_create():
     """Start a new cluster, or run this node on its own."""
@@ -59,6 +77,9 @@ def api_setup_create():
     steps = []
     with _lock:
         cfg = load_config()
+        refused = _already_set_up(cfg, body)
+        if refused:
+            return refused
         key = _apply_node_identity(cfg, body)
         steps.append("API key set on this node")
         if mode == "cluster":
@@ -102,6 +123,9 @@ def api_setup_join():
     if _requests is None:
         return jsonify({"ok": False, "error": "python3-requests is not installed on this node"}), 400
     body = request.get_json(force=True, silent=True) or {}
+    refused = _already_set_up(load_config(), body)
+    if refused:
+        return refused
     target = (body.get("peer_url") or "").strip().rstrip("/")
     peer_key = body.get("peer_api_key") or ""
     if not target:
@@ -185,6 +209,13 @@ def api_setup_join():
         else:
             data = pr.json()
             conf = data.get("config") or {}
+            # Every section is looked at before any is taken: one that is not
+            # the shape this version stores would be saved as it came and
+            # break every request here (see check_section).
+            bad = [check_section(s, conf[s]) for s in SHARED_SECTIONS if s in conf]
+            bad = [b for b in bad if b]
+            if bad:
+                raise ValueError("the configuration from %s cannot be taken: %s" % (target, bad[0]))
             with _lock:
                 cfg = load_config()
                 # Every shared section, not a favoured few. Leaving one out is
@@ -195,10 +226,15 @@ def api_setup_join():
                 # (CrowdSec and Cloudflare were missing until 2.5.1, so a node
                 # joined a cluster without them and then sat at the same
                 # revision with a different configuration -- issue #44.)
-                for section in ("haproxy", "acme", "access", "cluster", "notify",
-                                "crowdsec", "cloudflare"):
-                    if isinstance(conf.get(section), dict):
+                for section in SHARED_SECTIONS:
+                    if section in conf:
                         cfg[section] = _merge_defaults(conf[section], DEFAULT_CONFIG[section])
+                if isinstance(data.get("cloudflare_told"), str):
+                    cfg["cloudflare"]["told"] = data["cloudflare_told"]
+                # Decoded before anything is written, and only the files the
+                # shared configuration names -- never this node's own UI
+                # certificate, whatever the other node ships under that name.
+                certs = sync.accepted_certs(cfg, data.get("certs"), data.get("source", target))
                 mine = (cfg["local"].get("node_url") or "").rstrip("/").lower()
                 kept = []
                 for p in data.get("peers") or []:
@@ -213,12 +249,8 @@ def api_setup_join():
                 if kept:
                     cfg["local"]["sync"]["peers"] = kept
                 CERT_DIR.mkdir(parents=True, exist_ok=True)
-                for name, b64 in (data.get("certs") or {}).items():
-                    if "/" in name or ".." in name or not name.endswith(".pem"):
-                        continue
-                    path = CERT_DIR / name
-                    path.write_bytes(base64.b64decode(b64))
-                    os.chmod(path, 0o600)
+                for name, pem in certs.items():
+                    write_private(CERT_DIR / name, pem)
                 # Take the sender's place in the revision sequence, exactly as
                 # a sync receive does. Counted as a change of this node's own,
                 # the adopted configuration would sit at revision one and read

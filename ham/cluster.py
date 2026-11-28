@@ -96,30 +96,34 @@ def cluster_snapshot(cfg=None):
     cfg = cfg or load_config()
     peers = cfg["local"]["sync"].get("peers") or []
 
-    with app.test_request_context("/api/status"):
-        me = peering._node_summary(json.loads(apply.api_status().get_data()))
-    me.update({"id": "self", "name": me["hostname"] or "this node", "url": "",
-               "self": True, "reachable": True, "error": "", "ms": 0})
+    def own_status(brief):
+        with app.test_request_context("/api/status", query_string={"brief": "1"} if brief else None):
+            me = peering._node_summary(json.loads(apply.api_status().get_data()))
+        me.update({"id": "self", "name": me["hostname"] or "this node", "url": "",
+                   "self": True, "reachable": True, "error": "", "ms": 0})
+        return me
 
-    nodes = [me]
+    # Brief, this node's own included: the per-object tags are a tag per
+    # object every fifteen seconds, and only worth it when the nodes disagree
+    # -- so they are fetched below in that case alone.
+    nodes = [own_status(brief=True)]
     if peers:
         if _requests is None:
             nodes += [dict(peering._query_peer(p), error="python3-requests is not installed on this node")
                       for p in peers]
         else:
-            # Brief: the per-object tags are only worth their size when the
-            # nodes disagree, so they are fetched below in that case alone.
             with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(peers))) as ex:
                 nodes += list(ex.map(lambda p: peering._query_peer(p, brief=True), peers))
             if len({n.get("config_fp") for n in nodes
                     if n.get("reachable") and n.get("config_fp")}) > 1:
                 by_id = {p.get("id"): p for p in peers}
-                short = [i for i, n in enumerate(nodes) if n.get("brief") and n.get("reachable")]
+                short = [i for i, n in enumerate(nodes) if n.get("brief") and n.get("reachable") and not n.get("self")]
                 with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(short) or 1)) as ex:
                     full = list(ex.map(lambda i: peering._query_peer(by_id[nodes[i]["id"]]), short))
                 for i, n in zip(short, full):
                     if n.get("reachable"):
                         nodes[i] = n
+                nodes[0] = own_status(brief=False)
 
     reachable = [n for n in nodes if n.get("reachable")]
     holders = [n for n in reachable if n.get("vip_held")]
@@ -160,7 +164,12 @@ def cluster_snapshot(cfg=None):
     newest = max((n.get("config_rev") or 0) for n in reachable) if reachable else 0
     fps = {n.get("config_fp") for n in reachable if n.get("config_fp")}
     behind = [n for n in reachable if n.get("config_fp") and (n.get("config_rev") or 0) < newest]
-    agree = len(fps) <= 1
+    # Nodes on different versions hold different settings -- the newer one
+    # has what the release added -- so their fingerprints differ for the
+    # length of a rolling upgrade without either having been edited. The
+    # revisions still say who is behind; only the "changed independently"
+    # verdict is withheld until they run the same version (issue #44).
+    agree = len(fps) <= 1 or len(versions) > 1
     # "The nodes disagree" is not something anyone can act on. Which part they
     # disagree about very nearly always is, so it is worked out once and said
     # in every case, not only in the tidy one.

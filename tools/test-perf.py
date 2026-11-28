@@ -26,6 +26,7 @@ os.environ["HAM_DRY_RUN"] = "1"
 
 import ham; ham   # noqa: E402  (route registration)
 from ham import apply, cluster, history, peering, probe, traffic   # noqa: E402
+from ham.base import VERSION   # noqa: E402
 from ham.config import HISTORY_KEEP, load_config, save_config, shared_objects   # noqa: E402
 
 fails = []
@@ -154,13 +155,14 @@ save_config(cfg)
 me = client.get("/api/status?brief=1", headers=H).get_json()
 my_fp, my_rev = me["config_fp"], me["config_rev"]
 calls, fps = [], {}
+peer_version = ["1.100.2"]
 
 
 def fake_query(peer, timeout=None, brief=False):
     calls.append((peer["id"], brief))
     return {"id": peer["id"], "name": peer["name"], "url": peer["url"], "self": False,
             "reachable": True, "error": "", "ms": 1, "hostname": peer["name"],
-            "version": "1.100.2", "role": "passive", "haproxy": "active",
+            "version": peer_version[0], "role": "passive", "haproxy": "active",
             "keepalived": "disabled", "vips": [], "vip_held": [], "dirty": False,
             "config_rev": my_rev, "config_fp": fps[peer["id"]], "config_parts": {},
             "config_objects": {} if brief else {"haproxy.backends": [["b", "b", "ffff"]]},
@@ -177,6 +179,9 @@ ok(calls == [("p2", True), ("p3", True)] and snap["summary"]["config_agreed"],
 ok(any("still run 1.x" in w for w in snap["summary"]["warnings"]),
    "peers on 1.x are named, with what a 2.0 rule would do there")
 calls.clear()
+# On the same version: a fingerprint that differs between versions is the
+# release's doing, and is deliberately not called a disagreement.
+peer_version[0] = VERSION
 fps.update(p3="0000000000000000")
 snap = cluster.cluster_snapshot()
 ok(sorted(calls) == [("p2", False), ("p2", True), ("p3", False), ("p3", True)]
