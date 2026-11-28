@@ -308,27 +308,64 @@ def package_asset(version, kind):
     return ("haproxy-manager_%s_all.deb" % v) if kind == "deb" else ("haproxy-manager-%s-1.noarch.rpm" % v)
 
 
+def release_asset_url(version, name):
+    """Where a release keeps one of its files."""
+    return "https://github.com/%s/releases/download/v%s/%s" % (UPDATE_REPO, version, name)
+
+
 def package_url(version, kind):
-    return "https://github.com/%s/releases/download/v%s/%s" % (UPDATE_REPO, version, package_asset(version, kind))
+    return release_asset_url(version, package_asset(version, kind))
+
+
+# The release that first carried SHA256SUMS beside its packages. A package of
+# that release or a later one is installed only once it matches that file; an
+# older release has no such file to match, and is installed with a warning
+# in the log rather than refused -- there is no other way to install it.
+CHECKSUMS_SINCE = "2.6.0-beta.1"
+CHECKSUMS_FILE = "SHA256SUMS"
 
 
 def _package_shell(version, kind):
     """Fetch the release's package and install it the way the node was
     installed, so the package database stays in step with the files.
-    A version with no release yet -- a branch ahead of its release -- is
-    said so, rather than half-installed."""
+
+    The package lands in a directory of its own that only root can read,
+    never at a fixed name under /tmp where anything running on the node could
+    have put a file first. It is checked against the release's SHA256SUMS
+    before it is handed to the package manager. A version with no release yet
+    -- a branch ahead of its release -- is said so, rather than half-installed.
+    """
+    asset = package_asset(version, kind)
     url = package_url(version, kind)
-    tmp = shlex.quote("/tmp/" + package_asset(version, kind))
+    sums_url = release_asset_url(version, CHECKSUMS_FILE)
+    pkg = '"$d"/' + shlex.quote(asset)
+    sums = '"$d"/' + CHECKSUMS_FILE
     if kind == "deb":
         install = ("DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 "
-                   "install -y %s" % tmp)
+                   "install -y %s" % pkg)
     else:
         install = ("if command -v dnf >/dev/null; then dnf install -y %s; else yum install -y %s; fi"
-                   % (tmp, tmp))
-    return ("{ echo fetching %s; curl -fsSL --retry 3 -o %s %s || { echo 'no package for %s is "
+                   % (pkg, pkg))
+    if is_newer(CHECKSUMS_SINCE, version):
+        absent = ("echo 'warning: release %s predates the checksum file, so the package is "
+                  "installed unverified'" % shlex.quote(version))
+    else:
+        absent = ("echo 'the release publishes no %s, so the package cannot be verified -- "
+                  "not installed'; rm -rf \"$d\"; exit 1" % CHECKSUMS_FILE)
+    return ("{ d=$(mktemp -d) || exit 1; chmod 700 \"$d\"; "
+            "echo fetching %(url)s; "
+            "curl -fsSL --retry 3 -o %(pkg)s %(url)s || { echo 'no package for %(version)s is "
             "published at that address -- a package install takes releases, and the release may "
-            "not be cut yet'; exit 1; }; %s; rm -f %s; } >>%s 2>&1"
-            % (shlex.quote(url), tmp, shlex.quote(url), shlex.quote(version), install, tmp, UPDATE_LOG))
+            "not be cut yet'; rm -rf \"$d\"; exit 1; }; "
+            "if curl -fsSL --retry 3 -o %(sums)s %(sums_url)s; then "
+            "(cd \"$d\" && grep -F -- '  %(asset)s' %(file)s | sha256sum -c -) "
+            "|| { echo 'the package does not match the checksum the release publishes -- "
+            "not installed'; rm -rf \"$d\"; exit 1; }; echo 'checksum verified'; "
+            "else %(absent)s; fi; "
+            "%(install)s; rc=$?; rm -rf \"$d\"; exit $rc; } >>%(log)s 2>&1"
+            % {"url": shlex.quote(url), "pkg": pkg, "version": shlex.quote(version),
+               "sums": sums, "sums_url": shlex.quote(sums_url), "asset": asset,
+               "file": CHECKSUMS_FILE, "absent": absent, "install": install, "log": UPDATE_LOG})
 
 
 def _package_version(asked, cfg):
@@ -462,8 +499,14 @@ def _update_ref(asked, cfg):
 
 
 def _update_shell(url, ref):
-    return ("curl -fsSL %s | bash -s -- --update --yes --ref %s >>%s 2>&1"
-            % (url, shlex.quote(ref), UPDATE_LOG))
+    """Run the installer from a file of its own rather than off a pipe: a
+    download cut short then fails to run at all, instead of running as far
+    as it got. There is no checksum to hold install.sh to -- it is the
+    branch's own copy -- so TLS to GitHub is what vouches for it."""
+    return ("{ d=$(mktemp -d) || exit 1; chmod 700 \"$d\"; "
+            "curl -fsSL --retry 3 -o \"$d\"/install.sh %s && bash \"$d\"/install.sh --update --yes --ref %s; "
+            "rc=$?; rm -rf \"$d\"; exit $rc; } >>%s 2>&1"
+            % (shlex.quote(url), shlex.quote(ref), UPDATE_LOG))
 
 
 @app.post("/api/update")
