@@ -238,5 +238,27 @@ ok([r["url"] for r in results] == [e["url"] for e in entries],
    "and listed in the order they were given")
 hung.close()
 
+# ---- rendering, the one place a time is asserted ---------------------------------
+# Every save previews, every Apply renders, and a check runs haproxy -c over
+# the result: a renderer that went quadratic in the rule count would be felt
+# on every page. Four thousand rules on one listener took 0.13 s when this
+# was written; the bound is loose enough for a slow runner and tight enough
+# to catch a second pass over the rules per rule.
+from ham import haproxy   # noqa: E402
+big = load_config()
+hp = big["haproxy"]
+hp["backends"] = [{"id": "pb", "name": "many", "mode": "http", "servers": [], "enabled": True}]
+hp["conditions"] = [{"id": "pc%d" % i, "name": "host-%d" % i, "type": "host_matches",
+                     "value": "h%d.example.com" % i} for i in range(4000)]
+hp["rules"] = [{"id": "pr%d" % i, "name": "to-%d" % i, "type": "use_backend", "backend": "pb",
+                "conditions": ["pc%d" % i]} for i in range(4000)]
+hp["frontends"] = [{"id": "pf", "name": "wide", "mode": "http", "binds": "0.0.0.0:80", "enabled": True,
+                    "rules": [r["id"] for r in hp["rules"]]}]
+began = time.time()
+text = haproxy.render_haproxy(big)
+took = time.time() - began
+ok(text.count("use_backend be_many") == 4000 and took < 2,
+   "4000 rules render in well under two seconds: %.2fs for %d lines" % (took, text.count("\n")))
+
 print("\n" + ("%d failed" % len(fails) if fails else "a large installation pays once, not per object"))
 sys.exit(1 if fails else 0)
