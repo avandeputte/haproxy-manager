@@ -47,7 +47,16 @@ export function download(path){                       // let the browser save th
   document.body.appendChild(a);a.click();a.remove();
 }
 export const lists={};                     // cache: "haproxy/servers" -> [...]
-export async function list(path,fresh){ if(fresh||!lists[path])lists[path]=await api(path); return lists[path]; }
+/* A page asks for its reference lists all at once, and two cards on one page
+   may ask for the same list: while a read of a list is in flight, another ask
+   for it joins that read rather than starting a second one. */
+const reading={};
+export async function list(path,fresh){
+  if(!fresh&&lists[path])return lists[path];
+  if(!reading[path])
+    reading[path]=api(path).then(v=>{lists[path]=v;return v;}).finally(()=>{delete reading[path];});
+  return reading[path];
+}
 export function nameOf(path,id){const it=(lists[path]||[]).find(x=>x.id===id);return it?it.name:"?";}
 
 /* ---- modal ---- */
