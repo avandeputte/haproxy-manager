@@ -15,6 +15,12 @@ FROM debian:trixie-slim
 # stock package is always an old LTS. That repository tracks one branch per
 # suite, for amd64 and arm64, and publishes each point release as it comes.
 ARG HAPROXY_BRANCH=3.4
+# Normally empty: the newest point release of the branch. Set to one point
+# release when the newest cannot be installed -- 3.4.9-1~bpo13+1 was built
+# against a libpcre2 (10.47) that Debian 13 does not have, so apt refuses it
+# and does not fall back on its own. Empty this again once a later 3.4
+# package installs on trixie.
+ARG HAPROXY_PIN=3.4.8
 ARG ACME_VERSION=3.1.7
 # acme2certifier, for certificates from Active Directory Certificate Services
 # (ham/adcs.py pins the same release for nodes that install it on demand).
@@ -69,7 +75,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3-flask \
         python3-requests \
         python3-waitress \
-        "haproxy=${HAPROXY_BRANCH}.*" \
+        "haproxy=${HAPROXY_PIN:-${HAPROXY_BRANCH}.}*" \
         crowdsec-haproxy-spoa-bouncer \
         cloudflared \
         keepalived \
