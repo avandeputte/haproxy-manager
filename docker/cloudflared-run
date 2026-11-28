@@ -2,9 +2,11 @@
 # Runs cloudflared under supervisord, for services published through a
 # Cloudflare Tunnel.
 #
-# The app writes the tunnel's token to a file only root reads. It is read
-# here, as root, and cloudflared is then started as nobody with the token in
-# its environment -- never on its command line, where ps would show it.
+# The app writes the tunnel's token to a file only root reads, quoted as a
+# shell wants it (shlex.quote), so sourcing it here runs nothing but the one
+# assignment. It is read as root, and cloudflared is then started as nobody
+# with the token in its environment -- never on its command line, where ps
+# would show it.
 ENV_FILE="${HAM_CLOUDFLARED_ENV:-${HAM_DATA_DIR:-/var/lib/haproxy-manager}/cloudflared.env}"
 if [ ! -r "$ENV_FILE" ]; then
     echo "cloudflared: $ENV_FILE is not there; Cloudflare is not switched on" >&2
