@@ -92,6 +92,15 @@ def auth_of(acc):
 
 def check_account(acc):
     """What an AD CS account refuses before it is stored. Raises ValueError with why."""
+    # Every field is text. A client may send a number or a list where the
+    # editor sends a string; that is said no to here rather than tripped
+    # over further down.
+    for key in FIELDS:
+        if acc.get(key) is None:
+            acc[key] = ""
+        elif not isinstance(acc[key], str):
+            raise ValueError("%s must be text, not a %s"
+                             % (key.replace("adcs_", "", 1).replace("_", " "), type(acc[key]).__name__))
     method = acc.get("adcs_method") or "msicpr"
     if method not in METHODS:
         raise ValueError("unknown enrollment method %r: msicpr or certsrv" % method)

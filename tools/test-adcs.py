@@ -128,6 +128,12 @@ ok("one line" in err, "a password over two lines is refused: " + err[:60])
 _, err = add_account(dict(GOOD, name="bad-pem", adcs_method="certsrv", adcs_auth="ntlm", ca_bundle="nope"), 400)
 ok("PEM" in err, "web enrollment with a CA certificate that is not PEM is refused")
 add_account(dict(GOOD, name="odd-method", adcs_method="ldap"), 400)
+# A client is not the editor: a number or a list where text belongs is said
+# no to, not tripped over as a 500.
+_, err = add_account(dict(GOOD, name="num-host", adcs_host=5), 400)
+ok("must be text" in err, "a number for the CA server is refused with 400: " + err[:60])
+_, err = add_account(dict(GOOD, name="list-pw", adcs_password=["a"]), 400)
+ok("must be text" in err, "a list for the password is refused with 400: " + err[:60])
 add_account(GOOD, 200)
 add_account(dict(GOOD, name="ntlm-no-domain", adcs_auth="ntlm", adcs_domain=""), 200)
 add_account(dict(GOOD, name="web", adcs_method="certsrv", adcs_auth="ntlm", adcs_ca_name="", adcs_domain=""), 200)
