@@ -4,16 +4,19 @@ from flask import jsonify
 from flask import request
 from pathlib import Path
 import copy
+import grp
 import os
 import re
 import shutil
 import socket
 import tempfile
+import threading
 import time
 
 from .base import (ACME_SH, CERT_DIR, CLOUDFLARED_ENV, CROWDSEC_SPOE, ERROR_DIR, HAPROXY_CFG, KEEPALIVED_CFG,
     VERSION, _lock, _requests, app, log)
-from .config import CLUSTER_KEYS, config_hash, load_config, merged, save_config, shared_objects, shared_parts
+from .config import (CLUSTER_KEYS, config_hash, load_config, merged, save_config, shared_fingerprint,
+    shared_objects, shared_parts, write_private)
 from .util import _by_id, cert_details, cert_path, parse_domains, run
 from .validate import check_setting_types
 from . import acme, auth, cloudflare, cluster, crowdsec, errorpages, haproxy, keepalived, notify, sync, updates, vrrp, watchdog, wizard
@@ -38,8 +41,7 @@ def _selfsigned_placeholder(path, names):
             "-keyout", str(key), "-out", str(crt),
         ])
         if rc == 0:
-            path.write_text(crt.read_text() + key.read_text())
-            os.chmod(path, 0o600)
+            write_private(path, crt.read_text() + key.read_text())
             return True
     return False
 
@@ -357,10 +359,64 @@ def api_validate():
     return jsonify({"ok": ok, "message": message})
 
 
+# One Apply at a time. Separate from _lock, the store's lock: an Apply spends
+# most of its time outside the store -- installing a package, resolving names,
+# waiting for HAProxy to come up -- and holding the store's lock through that
+# froze every save on the node and every push into it. Taken first, always;
+# nothing that holds _lock may wait for this one.
+_apply_lock = threading.RLock()
+
+
+def _install_wanted(cfg):
+    """Fetch the packages this configuration wants and this node lacks: steps.
+
+    Before the store's lock, because an install can take minutes -- the
+    scripts allow fifteen -- and a node installing cloudflared under the lock
+    answered nothing for that long; the push that brought it the setting
+    failed on it. Idempotent: a node that has the package, or tried recently,
+    returns at once, and ensure_service then finds it in place.
+    """
+    steps = []
+    for mod, what in ((crowdsec, "crowdsec bouncer"), (cloudflare, "cloudflared")):
+        if mod.configured(cfg) and not mod.installed():
+            ok, _out = mod.ensure_installed(cfg)
+            if ok:
+                steps.append(what + " installed")
+    return steps
+
+
+def _protect(path):
+    """0640 root:haproxy where that group exists, otherwise 0600.
+
+    haproxy.cfg carries the password hashes of everyone a service asks to
+    sign in and the secret that signs the single sign-on cookie, and it was
+    world-readable. HAProxy's master runs as root and is what reads the file,
+    at start and at every reload; the workers never do. The group is for a
+    haproxy -c run by hand as that user.
+    """
+    try:
+        gid = grp.getgrnam("haproxy").gr_gid
+        os.chown(path, 0, gid)
+        os.chmod(path, 0o640)
+    except (KeyError, OSError):
+        os.chmod(path, 0o600)
+
+
 def do_apply(cfg=None, allow_push=True):
+    with _apply_lock:
+        return _do_apply(cfg, allow_push)
+
+
+def _do_apply(cfg, allow_push):
+    result = {"ok": False, "steps": []}
+    # What needs the network -- package repositories, name resolution -- is
+    # done before the store is locked, on the configuration as it stands.
+    pre = cfg or load_config()
+    result["steps"] += _install_wanted(pre)
+    unicast = vrrp.derive_unicast_values(pre) if vrrp.keepalived_wanted(pre) else None
+
     with _lock:
         cfg = cfg or load_config()
-        result = {"ok": False, "steps": []}
 
         placeholders = ensure_cert_files(cfg)
         if placeholders:
@@ -409,53 +465,19 @@ def do_apply(cfg=None, allow_push=True):
 
         HAPROXY_CFG.parent.mkdir(parents=True, exist_ok=True)
         if HAPROXY_CFG.exists():
-            shutil.copy2(HAPROXY_CFG, str(HAPROXY_CFG) + ".bak")
+            bak = str(HAPROXY_CFG) + ".bak"
+            shutil.copy2(HAPROXY_CFG, bak)
+            _protect(bak)                  # the copy keeps the old file's mode
         shutil.move(staging, HAPROXY_CFG)
-        os.chmod(HAPROXY_CFG, 0o644)
-        rc, out = run(["systemctl", "reload-or-restart", "haproxy"])
-        result["steps"].append("haproxy reload: " + ("ok" if rc == 0 else out))
-        # Did the configuration this apply rendered actually take effect? If it
-        # was rolled back, HAProxy is running the previous one, and marking the
-        # new config "applied" below would make the dirty indicator lie -- it
-        # would read clean while the proxy serves something else, and never
-        # prompt the re-apply the fix needs.
-        haproxy_took_effect = True
-        if rc == 0:
-            # systemctl returning zero means the command was accepted, not that
-            # HAProxy is serving. A configuration that passes haproxy -c can
-            # still fail to start -- a port already taken is the classic one,
-            # because -c never binds anything -- and the node is then simply
-            # not listening, with nothing having reported a failure.
-            bad = _haproxy_not_serving()
-            if bad:
-                log.error("haproxy is not serving after the reload: %s", bad)
-                restored = _restore_previous_haproxy_cfg()
-                haproxy_took_effect = False
-                result["steps"].append("haproxy is not serving: " + bad)
-                result.setdefault("warnings", []).append(
-                    "HAProxy accepted the reload but is not serving: %s. %s This node is "
-                    "not answering on its own address; if it holds the virtual IP, "
-                    "Keepalived will hand that over. The log says why: "
-                    "journalctl -u haproxy -n 50" % (bad, restored))
-                notify.notify("apply", "HAProxy is not serving on this node",
-                       "The configuration was written and validated, and the reload was "
-                       "accepted, but HAProxy is not answering afterwards: %s\n\n%s"
-                       % (bad, restored), "error", cfg)
-            else:
-                log.info("applied: haproxy.cfg written and reloaded")
-        else:
-            haproxy_took_effect = False
-            log.error("applied haproxy.cfg but the reload failed: %s", out.strip()[:300])
-            notify.notify("apply", "HAProxy did not reload on this node",
-                   "The new configuration was written and validated, but HAProxy did not "
-                   "reload, so it is still running the previous one.\n\n%s"
-                   % out.strip()[:400], "error", cfg)
+        _protect(HAPROXY_CFG)
+        rc_haproxy, out_haproxy = run(["systemctl", "reload-or-restart", "haproxy"])
+        result["steps"].append("haproxy reload: " + ("ok" if rc_haproxy == 0 else out_haproxy))
 
         k = cfg["local"]["keepalived"]
         if vrrp.keepalived_wanted(cfg):
-            if vrrp.derive_unicast(cfg):
+            if vrrp.derive_unicast(cfg, unicast):
                 result["steps"].append(
-                    "unicast peers refreshed from the node list: %s"
+                    "unicast peers filled in from the node list: %s"
                     % ((k.get("unicast_peer") or "").replace("\n", ", ") or "none -- using multicast"))
             # Before the configuration that names it is validated, so
             # keepalived -t is checking something that exists and a reload can
@@ -488,15 +510,61 @@ def do_apply(cfg=None, allow_push=True):
                     result.setdefault("warnings", []).append(
                         "Keepalived did not reload: %s. Without it this node cannot take the "
                         "virtual IP." % out.strip()[:300])
-
-        # Advance the applied marker only if HAProxy is really running this
-        # config. On a rollback or a failed reload it is not, so the marker
-        # stays where it was -- the node reads dirty and asks to re-apply once
-        # the cause (a taken port, say) is cleared.
-        if haproxy_took_effect:
-            cfg["_meta"]["applied_hash"] = config_hash(cfg)
+        # What this Apply changed in the configuration itself -- the unicast
+        # addresses it filled in -- is saved now; the applied marker waits
+        # below until HAProxy has been seen running what was written.
         save_config(cfg)
-        result["ok"] = True
+
+    # Did the configuration this apply rendered actually take effect? If it
+    # was rolled back, HAProxy is running the previous one, and marking the
+    # new config "applied" would make the dirty indicator lie -- it would
+    # read clean while the proxy serves something else, and never prompt the
+    # re-apply the fix needs. Waited for with the store's lock released: the
+    # wait can run to ten seconds, and nothing here reads or writes the store.
+    haproxy_took_effect = True
+    if rc_haproxy == 0:
+        # systemctl returning zero means the command was accepted, not that
+        # HAProxy is serving. A configuration that passes haproxy -c can
+        # still fail to start -- a port already taken is the classic one,
+        # because -c never binds anything -- and the node is then simply
+        # not listening, with nothing having reported a failure.
+        bad = _haproxy_not_serving()
+        if bad:
+            log.error("haproxy is not serving after the reload: %s", bad)
+            restored = _restore_previous_haproxy_cfg()
+            haproxy_took_effect = False
+            result["steps"].append("haproxy is not serving: " + bad)
+            result.setdefault("warnings", []).append(
+                "HAProxy accepted the reload but is not serving: %s. %s This node is "
+                "not answering on its own address; if it holds the virtual IP, "
+                "Keepalived will hand that over. The log says why: "
+                "journalctl -u haproxy -n 50" % (bad, restored))
+            notify.notify("apply", "HAProxy is not serving on this node",
+                   "The configuration was written and validated, and the reload was "
+                   "accepted, but HAProxy is not answering afterwards: %s\n\n%s"
+                   % (bad, restored), "error", cfg)
+        else:
+            log.info("applied: haproxy.cfg written and reloaded")
+    else:
+        haproxy_took_effect = False
+        log.error("applied haproxy.cfg but the reload failed: %s", out_haproxy.strip()[:300])
+        notify.notify("apply", "HAProxy did not reload on this node",
+               "The new configuration was written and validated, but HAProxy did not "
+               "reload, so it is still running the previous one.\n\n%s"
+               % out_haproxy.strip()[:400], "error", cfg)
+
+    # Advance the applied marker only if HAProxy is really running this
+    # config. On a rollback or a failed reload it is not, so the marker
+    # stays where it was -- the node reads dirty and asks to re-apply once
+    # the cause (a taken port, say) is cleared. The marker is of what was
+    # rendered, set on the configuration as it is now: an edit saved during
+    # the wait then reads as waiting, which it is.
+    if haproxy_took_effect:
+        with _lock:
+            cur = load_config()
+            cur["_meta"]["applied_hash"] = config_hash(cfg)
+            save_config(cur)
+    result["ok"] = True
 
     # The push talks to every other node over the network, and an unresponsive
     # one can hold it for the full timeout. That must happen with the lock
@@ -509,7 +577,8 @@ def do_apply(cfg=None, allow_push=True):
     # HAProxy here is ready for what Cloudflare will send. Outside the lock,
     # like the push: it is a conversation over the network. A passive node
     # re-applying what it holds says nothing -- it may be behind.
-    if allow_push and result.get("ok") and auth.node_role(cfg)[0] != "passive":
+    passive = auth.node_role(cfg)[0] == "passive"
+    if allow_push and result.get("ok") and not passive:
         steps, warnings = cloudflare.reconcile(cfg)
         result["steps"] += steps
         if warnings:
@@ -517,7 +586,14 @@ def do_apply(cfg=None, allow_push=True):
         # What was told is noted in the shared configuration, so the push
         # below carries it: the other nodes then know Cloudflare is in step.
         cfg = load_config()
-    if allow_push and cfg["local"]["sync"].get("auto_sync") and sync.enabled_peers(cfg):
+    if allow_push and passive and cfg["local"]["sync"].get("auto_sync") and sync.enabled_peers(cfg):
+        # The shared configuration is pushed from the node that holds the
+        # virtual IP. A passive node that pushed what it holds would hand the
+        # cluster whatever was changed on the wrong node -- and after an
+        # edit made here under the lifted lock, its revision would win.
+        result["steps"].append("auto-sync skipped: this node is passive, so the "
+                               "active node is the one that pushes")
+    elif allow_push and cfg["local"]["sync"].get("auto_sync") and sync.enabled_peers(cfg):
         r = sync.sync_push(cfg)
         result["steps"].append("auto-sync to %d peer(s): " % len(sync.enabled_peers(cfg)) +
                                ("ok" if r.get("ok") else str(r.get("error"))))
@@ -533,8 +609,8 @@ def do_apply(cfg=None, allow_push=True):
 @app.get("/api/preview")
 def api_preview():
     cfg = load_config()
-    ka = keepalived.render_keepalived(cfg) if cfg["local"]["keepalived"].get("enabled") else \
-        "# Keepalived is disabled on this node (Cluster > This node)."
+    ka = keepalived.render_keepalived(cfg) if vrrp.keepalived_wanted(cfg) else \
+        "# No virtual IP is set (Cluster > Cluster settings), so Keepalived is not used."
     return jsonify({"haproxy": haproxy.render_haproxy(cfg), "keepalived": ka})
 
 
@@ -620,7 +696,12 @@ def api_status():
         # fingerprint agree; different fingerprints mean one of them is behind,
         # and the revision says which.
         "config_rev": int(cfg["_meta"].get("shared_rev") or 0),
-        "config_fp": cfg["_meta"].get("shared_fp") or "",
+        # Worked out now, as a push works it out, not read from the last
+        # save: an upgrade that adds a shared setting changes the fingerprint
+        # of what is held without a save, and the stored one then disagreed
+        # with what this same node sent -- "changed independently", said the
+        # Cluster page, until something happened to be saved.
+        "config_fp": shared_fingerprint(cfg),
         # One tag per collection, so a disagreement can name the part it is in.
         "config_parts": shared_parts(cfg),
         # And one per object, so a disagreement can name the object rather

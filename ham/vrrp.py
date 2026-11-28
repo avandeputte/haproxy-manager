@@ -2,6 +2,8 @@
 
 from flask import jsonify
 from urllib.parse import urlsplit
+import ipaddress
+import re
 import socket
 
 from .base import PEER_TIMEOUT, _lock, _requests, app
@@ -134,16 +136,17 @@ def api_cluster_unicast():
                     "addresses": [n["address"] for n in nodes if n["address"] and not n["self"]]})
 
 
-def derive_unicast(cfg):
-    """This node's own unicast addresses, worked out from the membership.
+def derive_unicast_values(cfg):
+    """This node's unicast addresses as the membership suggests them:
+    (peers, source).
 
     Cheap enough for every Apply: local interfaces and name resolution only,
-    no calls to the other nodes. Each node derives its own, so the cluster
-    stays correct as members come and go.
+    no calls to the other nodes. Resolution still waits on the resolver, so
+    this is worked out before the store is locked and handed to
+    derive_unicast inside it.
     """
-    k = cfg["local"]["keepalived"]
     if not keepalived_wanted(cfg):
-        return False
+        return "", ""
     vips = cluster_vips(cfg)
     addrs = []
     for p in cfg["local"]["sync"].get("peers") or []:
@@ -155,10 +158,71 @@ def derive_unicast(cfg):
                 break                        # one address per node
     new_peer = "\n".join(addrs) if addrs else ""
     new_src = local_vrrp_address(cfg) if addrs else ""
-    if (k.get("unicast_peer") or "") == new_peer and (k.get("unicast_src") or "") == new_src:
+    return new_peer, new_src
+
+
+def derive_unicast(cfg, values=None):
+    """Fill in the unicast addresses this node has none for. True if it did.
+
+    Only the empty ones. The addresses the peers' URLs resolve to are a
+    guess at the VRRP network -- the management addresses, which need not be
+    it -- and what "Apply unicast plan" or a person set is the answer, not
+    something to be put back at every Apply. Clearing a field is how to ask
+    for the guess again.
+    """
+    if not keepalived_wanted(cfg):
         return False
-    k["unicast_peer"], k["unicast_src"] = new_peer, new_src
-    return True
+    new_peer, new_src = values if values is not None else derive_unicast_values(cfg)
+    k = cfg["local"]["keepalived"]
+    changed = False
+    if not (k.get("unicast_peer") or "").strip() and new_peer:
+        k["unicast_peer"] = new_peer
+        changed = True
+    if not (k.get("unicast_src") or "").strip() and new_src and (k.get("unicast_peer") or "").strip():
+        k["unicast_src"] = new_src
+        changed = True
+    return changed
+
+
+def validate_local_update(body):
+    """Why a PUT to this node's own settings cannot be taken, or "".
+
+    The Keepalived fields are written into keepalived.conf and read by a
+    daemon running as root, so they are checked the way setup checks them:
+    the interface is one this node has, the unicast addresses are addresses,
+    and nothing carries a line break that would become a directive.
+    """
+    k = body.get("keepalived")
+    if k is None:
+        return ""
+    if not isinstance(k, dict):
+        return "keepalived must be an object"
+    for key in ("interface", "unicast_src", "unicast_peer"):
+        if key in k and not isinstance(k[key], str):
+            return "keepalived.%s must be text" % key
+    iface = (k.get("interface") or "").strip() if "interface" in k else None
+    if iface is not None:
+        if not re.fullmatch(r"[A-Za-z0-9_.:@-]{1,15}", iface):
+            return "\"%s\" is not an interface name" % iface
+        names = [i["name"] for i in apply.node_interfaces()]
+        if names and iface not in names:
+            return ("interface \"%s\" does not exist here; available: %s"
+                    % (iface, ", ".join(n for n in names if n != "lo")))
+    if "priority" in k:
+        try:
+            if not 1 <= int(k["priority"]) <= 254:
+                raise ValueError
+        except (TypeError, ValueError):
+            return "the priority must be a number from 1 to 254"
+    for key in ("unicast_src", "unicast_peer"):
+        for token in re.split(r"[\s,]+", k.get(key) or ""):
+            if not token:
+                continue
+            try:
+                ipaddress.ip_address(token)
+            except ValueError:
+                return "\"%s\" in keepalived.%s is not an IP address" % (token, key)
+    return ""
 
 
 def apply_unicast_plan():
