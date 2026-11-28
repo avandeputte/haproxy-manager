@@ -28,7 +28,7 @@ os.environ["HAM_CLOUDFLARED_UNIT_FILE"] = os.path.join(D, "units", "ham-cloudfla
 os.environ["HAM_DRY_RUN"] = "1"
 
 import ham; ham   # noqa: E402  (route registration)
-from ham import apply, cloudflare, haproxy   # noqa: E402
+from ham import apply, cloudflare, haproxy, sync   # noqa: E402
 from ham.base import CLOUDFLARED_BIN, CLOUDFLARED_ENV, CLOUDFLARED_UNIT_FILE   # noqa: E402
 from ham.config import config_hash, load_config, save_config, shared_view   # noqa: E402
 
@@ -394,7 +394,9 @@ ok("cloudflare: DNS record for wiki.example.com" in res["steps"]
 told = load_config()["cloudflare"]["told"]
 ok(told and client.get("/api/cloudflare/settings", headers=H).get_json()["status"]["in_step"] is True,
    "and now it is in step -- noted in the shared configuration, for every node to read")
-ok("told" in shared_view(load_config())["cloudflare"], "the note travels with the configuration to the other nodes")
+ok("told" not in shared_view(load_config())["cloudflare"]
+   and sync.shared_payload(load_config()).get("cloudflare_told") == told,
+   "the note travels with a push to the other nodes, beside what they compare: noting it is not a change")
 c = load_config()
 before_hash = config_hash(c)
 c["cloudflare"]["told"] = "something else"
