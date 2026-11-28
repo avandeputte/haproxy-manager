@@ -161,7 +161,8 @@ pool = next(b for b in load_config()["haproxy"]["backends"] if b["name"] == "old
 ok(pool["servers"] == [] and pool["redirect_to"] == "https://new.example.com/" and pool["redirect_code"] == 308
    and pool["notify_mode"] == "off" and not pool["healthcheck_enabled"],
    "a redirect service has no servers, no check, and no server to lose")
-ok(lines("http-request redirect prefix https://new.example.com code 308"),
+# The address is written quoted: a # in it would otherwise be read as a comment.
+ok(lines('http-request redirect prefix "https://new.example.com" code 308'),
    "it answers with the redirect, the path kept, without a doubled slash")
 post("wizard/publish", {"url": "http://tcp.example.com", "redirect": {"to": "ftp://x", "code": 301},
                         "certificate": False, "dry_run": False}, want=400)
@@ -173,7 +174,7 @@ ok(svc["redirect"] == {"to": "https://new.example.com/", "code": 308, "keep_path
 ok(not any(u["pool"] == "be_old" for u in probe.published_urls(load_config())), "and the probes leave it alone")
 post("wizard/publish", {"url": "http://old.example.com", "redirect": {"to": "https://new.example.com", "keep_path": False},
                         "certificate": False, "http_redirect": False, "dry_run": False, "service_id": svc["id"]})
-ok(lines("http-request redirect location https://new.example.com code 301"), "without the path: to the address as given")
+ok(lines('http-request redirect location "https://new.example.com" code 301'), "without the path: to the address as given")
 post("wizard/publish", {"url": "http://old.example.com", "target": "10.0.0.9:80", "certificate": False,
                         "http_redirect": False, "dry_run": False, "service_id": svc["id"]})
 pool = next(b for b in load_config()["haproxy"]["backends"] if b["name"] == "old")
@@ -203,7 +204,7 @@ ok(lines("http-request silent-drop"), "drop: the connection is dropped without a
 r = client.put("/api/haproxy/settings", headers=H, json={"default_site": "redirect", "default_site_url": "nowhere"})
 ok(r.status_code == 400, "a redirect without an address is refused")
 client.put("/api/haproxy/settings", headers=H, json={"default_site": "redirect", "default_site_url": "https://example.com/"})
-ok(lines("http-request redirect location https://example.com/ code 302"), "redirect: to the address given")
+ok(lines('http-request redirect location "https://example.com/" code 302'), "redirect: to the address given")
 
 # ---- 3 and 13. certificates brought here ------------------------------------------------------
 tmp = tempfile.mkdtemp()
@@ -241,7 +242,7 @@ ok("api.shop.example.com" in cert["domains"] and crt3.strip() in pem.read_text()
 # A redirect target is a log-format string to HAProxy: a literal % is written %%.
 post("wizard/publish", {"url": "http://pct.example.com", "redirect": {"to": "https://new.example.com/docs%20v2", "code": 301},
                         "certificate": False, "http_redirect": False, "dry_run": False})
-ok(lines("http-request redirect prefix https://new.example.com/docs%%20v2 code 301"),
+ok(lines('http-request redirect prefix "https://new.example.com/docs%%20v2" code 301'),
    "a % in a redirect address is escaped, so HAProxy takes it as a % and not as a variable")
 # Outside the wizard a pool's redirect is checked too, and one stored anyway does not take the node down.
 pct = next(b for b in load_config()["haproxy"]["backends"] if b["name"] == "pct")
@@ -252,7 +253,7 @@ ok(r.status_code == 400 and "http://" in r.get_json()["error"], "and so is a red
 c = load_config()
 next(b for b in c["haproxy"]["backends"] if b["name"] == "pct")["redirect_code"] = "permanent"
 save_config(c)
-ok(lines("docs%%20v2 code 301") and client.get("/api/services", headers=H).status_code == 200,
+ok(lines('docs%%20v2" code 301') and client.get("/api/services", headers=H).status_code == 200,
    "a bad code already stored renders as 301 instead of failing every page and every Apply")
 c = load_config()
 next(b for b in c["haproxy"]["backends"] if b["name"] == "pct")["redirect_code"] = 301

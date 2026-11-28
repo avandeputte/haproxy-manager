@@ -10,8 +10,59 @@ import copy
 from .base import _lock, app, log
 from .config import VALID_COLLECTIONS, load_config, merged, save_config
 from .util import _by_id, _sec, rule_cond_ids
+from . import validate
 from .validate import check_pool, check_setting_types
 from . import access, acme, apply, errorpages, haproxy, oauth, updates
+
+# The collections whose objects the rendered file names by their name made a
+# token: two names that become the same token are one ACL declared twice --
+# which HAProxy reads as one ACL with both sets of patterns, so every rule
+# testing either matches both -- or two backends, listeners or certificate
+# files of one name, which fail the check or overwrite each other.
+NAMED_ONCE = {("haproxy", "conditions"): "condition", ("haproxy", "backends"): "Backend Pool",
+              ("haproxy", "frontends"): "Public Service", ("acme", "certificates"): "certificate"}
+# The collections a condition's fit with its listener's mode depends on.
+MODE_BOUND = ("conditions", "rules", "frontends", "backends")
+
+
+def _check_name(sec, col, cfg, item):
+    """Refuse a name another object of the kind already renders under."""
+    what = NAMED_ONCE.get((sec, col))
+    if not what:
+        return
+    mine = _sec(item.get("name"))
+    for other in merged(cfg)[sec][col]:
+        if other.get("id") != item.get("id") and _sec(other.get("name")) == mine:
+            raise ValueError("the %s \"%s\" is already there%s: two of one name would be written "
+                             "as one, so pick another"
+                             % (what, other.get("name", ""),
+                                "" if other.get("name") == item.get("name")
+                                else " and \"%s\" becomes the same name in haproxy.cfg" % item.get("name", "")))
+
+
+def _with(cfg, col, item):
+    """The shared configuration with this object in it, as a save would leave it."""
+    draft = copy.deepcopy(cfg)
+    where = draft["haproxy"][col]
+    for i, existing in enumerate(where):
+        if item.get("id") and existing.get("id") == item["id"]:
+            where[i] = item
+            return draft
+    where.append(dict(item, id=item.get("id") or "proposed"))
+    return draft
+
+
+def _check_mode_fit(col, cfg, item):
+    """Refuse a save that puts a condition where it can never match: an
+    HTTP test on a TCP listener, the TLS name on an HTTP one. Only what this
+    save adds is held against it; a clash already stored is reported where
+    it was made, not on every object saved afterwards."""
+    if col not in MODE_BOUND:
+        return
+    before = set(validate.mode_clashes(merged(cfg)["haproxy"]))
+    new = [c for c in validate.mode_clashes(merged(_with(cfg, col, item))["haproxy"]) if c not in before]
+    if new:
+        raise ValueError("\n".join(new))
 
 
 def _check_item(sec, col, cfg, item):
@@ -22,15 +73,27 @@ def _check_item(sec, col, cfg, item):
         acme.check_challenge(item, cfg)
     if sec == "acme" and col == "certificates":
         acme.check_certificate(cfg, item)
+    _check_name(sec, col, cfg, item)
     if sec != "haproxy":
         return
     if col == "backends":
         check_pool(item)
         oauth.validate_pool_oauth(cfg, item)
+    elif col == "servers":
+        validate.check_server(item)
+    elif col == "healthchecks":
+        validate.check_healthcheck(item)
+    elif col == "frontends":
+        validate.check_frontend(item)
+    elif col == "conditions":
+        validate.check_condition(item)
+    elif col == "rules":
+        validate.check_rule(item)
     elif col == "addresslists":
         access.check_list(item)
     elif col == "errorpages":
         errorpages.check(item)
+    _check_mode_fit(col, cfg, item)
 
 
 def _after_save(sec, col, cfg):
@@ -289,7 +352,3 @@ def api_preview_object():
         ok, message = apply.check_rendered(draft)
         out["validation"] = {"ok": ok, "message": message}
     return jsonify(out)
-
-
-# --------------------------------------------------------------------------
-# haproxy.cfg renderer

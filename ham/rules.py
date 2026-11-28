@@ -17,7 +17,7 @@ import uuid
 from .base import _lock, app
 from .config import load_config, save_config
 from .util import _by_id, _sec, rule_cond_ids
-from . import access, apply, dnsapi, haproxy, wizard
+from . import access, apply, dnsapi, haproxy, validate, wizard
 import ipaddress
 
 MARK = "created by the rule wizard"
@@ -54,10 +54,9 @@ def _spec(raw):
     if t in ("http_header", "url_parameter") and not spec["param"]:
         raise ValueError("a %s condition needs the name of the %s"
                          % (t, "header" if t == "http_header" else "parameter"))
-    if t == "source_ip":
-        _good, bad = access.networks(spec["value"])
-        if bad:
-            raise ValueError("not a network: %s" % ", ".join(bad[:3]))
+    # What every condition is held to, however it is made: a network that
+    # parses, a value that stays one pattern list on the acl line.
+    validate.check_condition(spec)
     return spec
 
 
@@ -160,6 +159,11 @@ def build_rule(cfg, body):
                     "http_response_set_header": "a header name and a value",
                     "custom": "the line to add"}[atype]
             raise ValueError("this action needs %s" % what)
+    validate.check_rule({"type": atype, "test": test, "param1": p1, "param2": p2})
+    # A condition put where it can never match is refused below, once the
+    # rule sits on its listeners; what was already so before this rule is
+    # not this rule's fault.
+    clashes_before = set(validate.mode_clashes(hp))
 
     rule = None
     if body.get("id"):
@@ -226,6 +230,9 @@ def build_rule(cfg, body):
     if not listeners:
         warns.append("This rule is attached to no Public Service, so it does nothing yet. "
                      "Pick one under \"On\", or tick the rule on the service later.")
+    new_clashes = [c for c in validate.mode_clashes(hp) if c not in clashes_before]
+    if new_clashes:
+        raise ValueError("\n".join(new_clashes))
 
     # Conditions this wizard made for the rule and the rule no longer tests,
     # when nothing else does either. A condition made by hand is left alone:
@@ -344,9 +351,8 @@ def acl_line(cfg, cond):
     """The acl line(s) this condition renders to, as a listener would declare them."""
     if cond.get("type") == "source_list":
         nets, _bad = access.list_networks(cfg, [cond.get("list")])
-        return "\n".join(haproxy._src_acl("acl_" + _sec(cond["name"]), nets))
-    expr = haproxy._line_safe(haproxy.COND_MAP.get(cond.get("type", "custom"), haproxy.COND_MAP["custom"])(cond))
-    return "acl acl_%s %s" % (_sec(cond["name"]), expr)
+        return "\n".join(haproxy._src_acl(haproxy.acl_name(cond), nets))
+    return "acl %s %s" % (haproxy.acl_name(cond), haproxy._cond_expr(cond))
 
 
 @app.post("/api/wizard/condition")
@@ -389,6 +395,13 @@ def api_wizard_condition():
             cond["list"] = spec["list"]
         else:
             cond.pop("list", None)
+        # A condition changed into one its listeners can never match -- a
+        # host test on a TCP listener -- is refused; what already clashed
+        # before this edit is not held against it.
+        before = set(validate.mode_clashes(cfg["haproxy"]))
+        clashes = [c for c in validate.mode_clashes(hp) if c not in before]
+        if clashes:
+            return jsonify({"ok": False, "error": "\n".join(clashes)}), 400
         summary = {"ok": True, "actions": acts, "dry_run": dry_run,
                    "condition": {"id": cond["id"], "name": cond["name"]},
                    "preview": acl_line(draft, cond),
