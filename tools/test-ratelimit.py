@@ -85,8 +85,11 @@ ok(b.index("track-sc0") < b.index("http-request auth") if "http-request auth" in
 b = render(rate_limit=100, rate_window=10, persistence="source", stick_type="ip",
            stick_size="50k", stick_expire="30m")
 ok(b.count("stick-table") == 1, "with source persistence there is still one table")
-ok("    stick-table type ip size 50k expire 30m store http_req_rate(10s)\n" in b,
-   "it keeps the persistence shape and gains the rate counter")
+# Keyed by ipv6 even though "ip" was picked: an ip table has no room for an
+# IPv6 client, who would then be neither pinned nor limited, and an ipv6
+# table holds the IPv4 clients as well.
+ok("    stick-table type ipv6 size 50k expire 30m store http_req_rate(10s)\n" in b,
+   "it keeps the persistence size and expiry, gains the rate counter, and is keyed so every client fits")
 ok("    stick on src\n" in b, "and persistence still sticks on source")
 
 # ---- cookie persistence needs no table; the limit gets its own ------------

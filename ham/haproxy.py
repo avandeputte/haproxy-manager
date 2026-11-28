@@ -11,6 +11,7 @@ import time
 from .base import CERT_DIR, PORT
 from .config import merged
 from .util import _by_id, _sec, cert_path, rule_cond_ids, run
+from .validate import HTTP_ONLY_CONDS, TCP_ONLY_CONDS
 from . import access, cloudflare, crowdsec, errorpages, oauth
 
 # --------------------------------------------------------------------------
@@ -42,7 +43,34 @@ def _line_safe(value):
     smuggle a second directive that `haproxy -c` then accepts; without this
     the field is trusted to be one line, and nothing enforces it.
     """
-    return re.sub(r"[\x00-\x1f\x7f]", "", str(value or "")).strip()
+    return re.sub(r"[\x00-\x1f\x7f]", "", "" if value is None else str(value)).strip()
+
+
+def _one_line(value):
+    """A value that is one line of its own directive and nothing more: a
+    control character goes, and so does a `#` with everything after it,
+    which HAProxy would read as a comment -- taking the rest of the line,
+    an `if` condition included, with it."""
+    return _line_safe(value).split("#", 1)[0].strip()
+
+
+def _word(value):
+    """A value that is one bare word on its line. HAProxy reads the word
+    after a space as the next keyword -- "10.0.0.1:80 disabled" is a server
+    that is disabled -- so only the first word is written. The forms refuse
+    such values; this is for one that was stored before they did."""
+    words = _one_line(value).split()
+    return words[0] if words else ""
+
+
+def _quoted(value):
+    """A value as a double-quoted HAProxy string, for text that may hold a
+    `#`, a space or a quote and must still be read as one argument: a
+    redirect location, a header's value. Inside double quotes HAProxy keeps
+    `#` literal and recognises three escapes -- the quote, the backslash and
+    the dollar sign, which would otherwise start a variable -- so those are
+    the three escaped. A control character cannot be quoted and goes."""
+    return '"%s"' % re.sub(r'(["\\$])', r"\\\1", _line_safe(value))
 
 
 # A browser puts the port in the Host header whenever it is not the scheme's
@@ -88,6 +116,34 @@ COND_MAP = {
     # configuration to look up, and may need more than one line.
 }
 
+
+def _cond_expr(c):
+    """What a condition's acl line tests. A typed value holding a `#` is not
+    written cut at the comment mark, which would quietly test less than was
+    typed: the ACL is declared as never matching and the line says why. The
+    forms refuse such a value; this is for one stored before they did. A
+    custom condition is the raw-ACL field and is written as it is."""
+    ctype = c.get("type", "custom")
+    expr = _line_safe(COND_MAP.get(ctype, COND_MAP["custom"])(c))
+    if ctype != "custom" and "#" in expr:
+        return "always_false  # the value holds a #, which would be read as a comment; refused"
+    return expr
+
+
+def _never_matches(c, mode):
+    """A comment ahead of a condition declared on a listener that can never
+    have what it tests, or [] where it can. HAProxy accepts such an ACL
+    and it silently never holds; the line in the preview says so."""
+    ctype = c.get("type", "custom")
+    if mode == "tcp" and ctype in HTTP_ONLY_CONDS:
+        return ["# \"%s\" tests the HTTP request, which this TCP listener never reads: it never matches here"
+                % _sec(c.get("name"))]
+    if mode == "http" and ctype in TCP_ONLY_CONDS:
+        return ["# \"%s\" tests the TLS server name in the raw hello, which an HTTP listener never sees: "
+                "it never matches here" % _sec(c.get("name"))]
+    return []
+
+
 # HAProxy reads at most 64 words from a line. A list of addresses longer than
 # this is declared as a named ACL over several lines -- the same name declared
 # again adds to the set -- rather than inline, where it cannot be split.
@@ -120,6 +176,34 @@ def _src_test(declared, name, nets):
     return name
 
 
+def acl_name(cond):
+    """The ACL a condition is declared as: acl_ and its name as a token."""
+    return cond.get("acl") or "acl_" + _sec(cond["name"])
+
+
+def with_acl_names(conditions):
+    """The conditions by id, each carrying the ACL name it renders under.
+
+    Two conditions whose names become the same token -- "host a" and
+    "host_a", or the same name twice -- would otherwise declare one ACL
+    twice, and HAProxy reads a second declaration as more patterns for the
+    first: every rule testing either would then match both. The forms
+    refuse such a pair; one stored before they did keeps its name for the
+    first condition and is told apart by its id for the rest.
+    """
+    out, taken = {}, set()
+    for c in conditions:
+        if "id" not in c:
+            continue
+        base = "acl_" + _sec(c.get("name"))
+        token = base
+        if token in taken:
+            token = "%s_%s" % (base, _sec(str(c["id"]))[:8])
+        taken.add(token)
+        out[c["id"]] = dict(c, acl=token)
+    return out
+
+
 def _rule_test(rule, conds):
     """The " if ..." a rule's line ends with, or "" for one that always applies.
 
@@ -131,7 +215,7 @@ def _rule_test(rule, conds):
     """
     def name(cid):
         c = conds.get(cid)
-        return (("!" if c.get("negate") else "") + "acl_" + _sec(c["name"])) if c else None
+        return (("!" if c.get("negate") else "") + acl_name(c)) if c else None
 
     any_of = [n for n in map(name, rule.get("any_of") or []) if n]
     all_of = [n for n in map(name, rule.get("conditions") or []) if n]
@@ -249,26 +333,28 @@ def _speaks_grpc(pool, servers):
 def _rule_line(rule, conds, backends):
     suffix = _rule_test(rule, conds)
     t = rule.get("type")
-    # param1/param2 hold values (a URL, a header name and value), so control
-    # characters are stripped but the text is kept -- except a "custom" rule,
-    # which is the deliberate raw-directive field and stays verbatim.
+    # param1/param2 hold values (a URL, a header name and value). A header
+    # name is one word; a location and a header's value are written quoted,
+    # so a `#` or a space in them stays part of the value rather than ending
+    # the line ahead of its condition -- except a "custom" rule, which is the
+    # deliberate raw-directive field and stays verbatim.
     p1 = rule.get("param1", "") if t == "custom" else _line_safe(rule.get("param1", ""))
-    p2 = _line_safe(rule.get("param2", ""))
+    p2 = _quoted(rule.get("param2", ""))
     if t == "use_backend":
         be = backends.get(rule.get("backend"))
         return ("use_backend be_%s%s" % (_sec(be["name"]), suffix)) if be else None
     if t == "redirect_scheme_https":
         return "http-request redirect scheme https code 301" + suffix
     if t == "redirect_location":
-        return "http-request redirect location %s code 302%s" % (p1, suffix)
+        return "http-request redirect location %s code 302%s" % (_quoted(_redirect_target(p1)), suffix)
     if t == "http_request_deny":
         return "http-request deny" + suffix
     if t == "http_request_set_header":
-        return "http-request set-header %s %s%s" % (p1, p2, suffix)
+        return "http-request set-header %s %s%s" % (_word(p1), p2, suffix)
     if t == "http_request_del_header":
-        return "http-request del-header %s%s" % (p1, suffix)
+        return "http-request del-header %s%s" % (_word(p1), suffix)
     if t == "http_response_set_header":
-        return "http-response set-header %s %s%s" % (p1, p2, suffix)
+        return "http-response set-header %s %s%s" % (_word(p1), p2, suffix)
     if t == "tcp_request_content_accept":
         return "tcp-request content accept" + suffix
     if t == "tcp_request_content_reject":
@@ -329,7 +415,7 @@ def _default_site_lines(st):
     elif kind == "drop":
         action = "http-request silent-drop"
     elif kind == "redirect" and (st.get("default_site_url") or "").strip():
-        action = "http-request redirect location %s code 302" % _redirect_target(st["default_site_url"])
+        action = "http-request redirect location %s code 302" % _quoted(_redirect_target(st["default_site_url"]))
     else:
         return []
     return ["backend " + DEFAULT_SITE_BACKEND, "    mode http", "    " + action, ""]
@@ -374,7 +460,7 @@ def render_haproxy(cfg):
     servers = _by_id(hp["servers"])
     backends = _by_id(hp["backends"])
     checks = _by_id(hp["healthchecks"])
-    conds = _by_id(hp["conditions"])
+    conds = with_acl_names(hp["conditions"])
     rules = _by_id(hp["rules"])
     certs = _by_id(cfg["acme"]["certificates"])
     acme_on = bool(ac.get("enabled") and ac.get("haproxy_integration"))
@@ -401,15 +487,17 @@ def render_haproxy(cfg):
     A("    user haproxy")
     A("    group haproxy")
     A("    chroot /")
-    A("    maxconn %s" % (st.get("maxconn") or 4000))
-    if st.get("nbthread"):
-        A("    nbthread %s" % st["nbthread"])
-    if st.get("hard_stop_after"):
-        A("    hard-stop-after %s" % st["hard_stop_after"])
-    if st.get("ssl_min_ver"):
-        A("    ssl-default-bind-options ssl-min-ver %s" % st["ssl_min_ver"])
-    if st.get("ssl_ciphers"):
-        A("    ssl-default-bind-ciphers %s" % st["ssl_ciphers"])
+    # One word each: the settings form refuses more, and a value from before
+    # it did is cut to its first word rather than read as a second keyword.
+    A("    maxconn %s" % (_word(st.get("maxconn")) or 4000))
+    if _word(st.get("nbthread")):
+        A("    nbthread %s" % _word(st["nbthread"]))
+    if _word(st.get("hard_stop_after")):
+        A("    hard-stop-after %s" % _word(st["hard_stop_after"]))
+    if _word(st.get("ssl_min_ver")):
+        A("    ssl-default-bind-options ssl-min-ver %s" % _word(st["ssl_min_ver"]))
+    if _word(st.get("ssl_ciphers")):
+        A("    ssl-default-bind-ciphers %s" % _word(st["ssl_ciphers"]))
     for ln in crowdsec.global_lines(cfg):
         A("    " + ln)
     for ln in (st.get("custom_global") or "").splitlines():
@@ -421,10 +509,10 @@ def render_haproxy(cfg):
     A("    option dontlognull")
     if st.get("redispatch", True):
         A("    option redispatch")
-    A("    retries %s" % st.get("retries", 3))
-    A("    timeout connect %s" % (st.get("timeout_connect") or "5s"))
-    A("    timeout client %s" % (st.get("timeout_client") or "50s"))
-    A("    timeout server %s" % (st.get("timeout_server") or "50s"))
+    A("    retries %s" % (_word(st.get("retries", 3)) or 3))
+    A("    timeout connect %s" % (_word(st.get("timeout_connect")) or "5s"))
+    A("    timeout client %s" % (_word(st.get("timeout_client")) or "50s"))
+    A("    timeout server %s" % (_word(st.get("timeout_server")) or "50s"))
     # The error pages every service answers with; a pool may still pick its
     # own. The files are written by the node that applies this, from the
     # same configuration, so naming them here is safe on every node.
@@ -436,10 +524,10 @@ def render_haproxy(cfg):
     A("")
     if st.get("stats_enabled"):
         A("listen stats")
-        A("    bind %s" % (st.get("stats_bind") or "127.0.0.1:8404"))
+        A("    bind %s" % (_word(st.get("stats_bind")) or "127.0.0.1:8404"))
         A("    mode http")
         A("    stats enable")
-        A("    stats uri %s" % (st.get("stats_uri") or "/stats"))
+        A("    stats uri %s" % (_word(st.get("stats_uri")) or "/stats"))
         A("    stats refresh 10s")
         A("")
 
@@ -557,17 +645,21 @@ def render_haproxy(cfg):
         need_inspect = False
         for cid in used:
             c = conds[cid]
+            acls.extend(_never_matches(c, mode))
             if c.get("type") == "source_list":
                 nets, _bad = access.list_networks(cfg, [c.get("list")])
-                acls.extend(_src_acl("acl_" + _sec(c["name"]), nets))
+                acls.extend(_src_acl(acl_name(c), nets))
                 continue
-            expr = _line_safe(COND_MAP.get(c.get("type", "custom"), COND_MAP["custom"])(c))
-            acls.append("acl acl_%s %s" % (_sec(c["name"]), expr))
+            acls.append("acl %s %s" % (acl_name(c), _cond_expr(c)))
             if mode == "tcp" and c.get("type") == "ssl_sni":
                 need_inspect = True
         if need_inspect:
+            # Hold the connection until the TLS hello is in, so the server
+            # name can be read. The accept goes after this listener's own
+            # content rules below: HAProxy stops at the first content rule
+            # that decides, so an accept ahead of a reject would make the
+            # reject dead text.
             requests.append("tcp-request inspect-delay 5s")
-            requests.append("tcp-request content accept if { req_ssl_hello_type 1 }")
 
         routed = []
         for rid in fe.get("rules") or []:
@@ -583,6 +675,8 @@ def render_haproxy(cfg):
             if mode == "http" and r.get("type") == "use_backend":
                 routed.append((_rule_test(r, conds), _hosts_of(r, conds),
                                _long_client_timeout(backends.get(r.get("backend")), st)))
+        if need_inspect:
+            requests.append("tcp-request content accept if { req_ssl_hello_type 1 }")
         # The client timeout of a service that waits longer than the listener
         # does, for the requests that service takes: the default pool's for
         # what no rule routes, and the listener's own given back where a
@@ -619,35 +713,49 @@ def render_haproxy(cfg):
         A("")
 
     for be in hp["backends"]:
-        if not be.get("enabled", True):
-            continue
         mode = be.get("mode", "http")
         A("backend be_%s" % _sec(be["name"]))
         A("    mode %s" % mode)
-        A("    balance %s" % be.get("balance", "roundrobin"))
+        if not be.get("enabled", True):
+            # Disabled: the pool is still there to be named by the rules and
+            # listeners that route to it -- a reference to a backend that is
+            # not declared would fail the whole configuration, and with it
+            # every Apply until the pool was turned on again. It just has no
+            # servers, and answers as a pool with every server down does: a
+            # 503, the error page for it when there is one, or a refused
+            # connection in TCP.
+            A("    # this pool is disabled: no servers, every request is answered 503"
+              if mode == "http" else
+              "    # this pool is disabled: no servers, every connection is refused")
+            A("    http-request return status 503" if mode == "http" else "    tcp-request content reject")
+            A("")
+            continue
+        A("    balance %s" % (_one_line(be.get("balance")) or "roundrobin"))
         hc = checks.get(be.get("healthcheck")) if be.get("healthcheck_enabled") else None
-        inter = (hc.get("interval") if hc else None) or "2s"
+        inter = _word(hc.get("interval") if hc else None) or "2s"
         if hc:
             htype = hc.get("type")
             if htype == "http":
                 # An HTTP check can front a TCP service -- Patroni's /master on
                 # 8008 deciding which PostgreSQL takes connections on 5432.
-                method = hc.get("http_method", "GET")
-                uri = hc.get("http_uri", "/")
-                ver, host_hdr = hc.get("http_version"), hc.get("http_host")
+                method = _sec(hc.get("http_method") or "GET")
+                uri = _word(hc.get("http_uri")) or "/"
+                ver, host_hdr = hc.get("http_version"), _word(hc.get("http_host"))
                 if ver or host_hdr:
                     # the form that can carry a version and headers
                     A("    option httpchk")
-                    send = "    http-check send meth %s uri %s" % (_sec(method), _line_safe(uri))
+                    send = "    http-check send meth %s uri %s" % (method, uri)
                     if ver in ("HTTP/1.0", "HTTP/1.1", "HTTP/2"):
                         send += " ver %s" % ver      # the slash must survive sanitising
                     if host_hdr:
-                        send += " hdr Host %s" % _sec(host_hdr)
+                        # As typed: a Host header carries its port after a
+                        # colon, which a token would not keep.
+                        send += " hdr Host %s" % host_hdr
                     A(send)
                 else:
-                    A("    option httpchk %s %s" % (_sec(method), _line_safe(uri)))
-                if hc.get("expect_status"):
-                    A("    http-check expect status %s" % hc["expect_status"])
+                    A("    option httpchk %s %s" % (method, uri))
+                if _word(hc.get("expect_status")):
+                    A("    http-check expect status %s" % _word(hc["expect_status"]))
             elif htype == "ssl":
                 A("    option ssl-hello-chk")
             elif htype == "pgsql":
@@ -855,7 +963,7 @@ def render_haproxy(cfg):
             A("    timeout tunnel %s" % _sec(str(be["timeout_server"])))
         use_cookie = be.get("persistence") == "cookie" and mode == "http"
         if use_cookie:
-            A("    cookie %s insert indirect nocache" % (be.get("cookie_name") or "SRVID"))
+            A("    cookie %s insert indirect nocache" % (_word(be.get("cookie_name")) or "SRVID"))
         # One stick table serves both source persistence and the rate limit:
         # HAProxy allows a single table per proxy, and a key that is a client
         # address is what both want. Persistence sets its shape; a rate limit
@@ -867,7 +975,13 @@ def render_haproxy(cfg):
             # Pin a client to one server by source address -- the usual choice
             # for TCP services, where there is no cookie to work with.
             # HAProxy spells the IPv4 type "ip"; "ipv4" is rejected outright.
+            # With a rate limit on the same table the type is ipv6 whatever
+            # was picked: an "ip" table has no room for an IPv6 client, who
+            # would then be neither pinned nor counted, and ipv6 holds the
+            # IPv4 clients as well.
             stype = be.get("stick_type") if be.get("stick_type") in ("ip", "ipv6") else "ip"
+            if rate:
+                stype = "ipv6"
             table = (stype, _sec(be.get("stick_size") or "50k"), _sec(be.get("stick_expire") or "30m"))
         elif rate:
             table = ("ipv6", "30k", "%ds" % (window * 3))
@@ -892,21 +1006,23 @@ def render_haproxy(cfg):
             if be.get("redirect_keep_path", True):
                 to = to.rstrip("/")
             A("    http-request redirect %s %s code %d"
-              % ("prefix" if be.get("redirect_keep_path", True) else "location", to,
+              % ("prefix" if be.get("redirect_keep_path", True) else "location", _quoted(to),
                  redirect_code(be.get("redirect_code"))))
         for sid in be.get("servers") or []:
             sv = servers.get(sid)
             if not sv or not sv.get("enabled", True):
                 continue
+            # The address and the port are one word: a space in either would
+            # be followed by what HAProxy reads as a server keyword.
             parts = ["server %s %s:%s" % (_sec(sv["name"]),
-                                          _line_safe(sv.get("address", "")),
-                                          _line_safe(sv.get("port", "")))]
+                                          _word(sv.get("address", "")),
+                                          _word(sv.get("port", "")))]
             if be.get("healthcheck_enabled"):
                 parts.append("check inter %s" % inter)
-                if sv.get("check_port"):
-                    parts.append("port %s" % _sec(str(sv["check_port"])))
-            if sv.get("weight"):
-                parts.append("weight %s" % sv["weight"])
+                if _word(sv.get("check_port")):
+                    parts.append("port %s" % _sec(_word(sv["check_port"])))
+            if _word(sv.get("weight")):
+                parts.append("weight %s" % _word(sv["weight"]))
             if sv.get("ssl"):
                 parts.append("ssl")
                 parts.append("verify required" if sv.get("ssl_verify") else "verify none")
@@ -960,13 +1076,14 @@ def render_haproxy(cfg):
                         declared.append(cid)
             for cid in declared:
                 c = conds[cid]
+                for ln in _never_matches(c, mode):
+                    A("    " + ln)
                 if c.get("type") == "source_list":
                     nets, _bad = access.list_networks(cfg, [c.get("list")])
-                    for ln in _src_acl("acl_" + _sec(c["name"]), nets):
+                    for ln in _src_acl(acl_name(c), nets):
                         A("    " + ln)
                 else:
-                    expr = _line_safe(COND_MAP.get(c.get("type", "custom"), COND_MAP["custom"])(c))
-                    A("    acl acl_%s %s" % (_sec(c["name"]), expr))
+                    A("    acl %s %s" % (acl_name(c), _cond_expr(c)))
             for r in own:
                 ln = _rule_line(r, conds, backends)
                 if ln:
@@ -981,7 +1098,3 @@ def render_haproxy(cfg):
     for ln in _default_site_lines(st):
         A(ln)
     return "\n".join(L).rstrip() + "\n"
-
-
-# --------------------------------------------------------------------------
-# keepalived.conf renderer
