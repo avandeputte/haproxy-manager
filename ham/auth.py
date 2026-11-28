@@ -4,6 +4,7 @@ from datetime import datetime
 from datetime import timezone
 from flask import jsonify
 from flask import request
+from urllib.parse import urlsplit
 import base64
 import hashlib
 import hmac
@@ -24,9 +25,59 @@ from . import sync, twofactor, vrrp
 PBKDF2_ITERATIONS = 240000
 SESSION_COOKIE = "ham_session_" + hashlib.sha256(
     ("%s:%s" % (socket.gethostname(), PORT)).encode()).hexdigest()[:8]
-_login_fails = {}       # remote address -> [failure count, locked-until timestamp]
+# "ip:<address>" or "user:<name>" -> [failure count, locked-until timestamp].
+# Both are counted: the address, so one guesser cannot try forever, and the
+# name, so a guesser moving between addresses cannot either.
+_login_fails = {}
 LOGIN_MAX_FAILS = 5
 LOGIN_LOCK_SECONDS = 60
+WRITE_METHODS = ("POST", "PUT", "DELETE", "PATCH")
+
+
+def _loopback(addr):
+    addr = addr or ""
+    return addr.startswith("127.") or addr in ("::1", "::ffff:127.0.0.1")
+
+
+def client_addr():
+    """The address of whoever is asking, for the log and the sign-in throttle.
+
+    Published through its own HAProxy, the UI sees every request arrive from
+    127.0.0.1 -- the pool talks to this process over loopback -- and the
+    visitor's address is in X-Forwarded-For, which that listener sets. The
+    header is believed only on a loopback connection: anyone else could write
+    one, and would then choose the address they are throttled and logged as.
+    """
+    addr = request.remote_addr or "?"
+    if _loopback(addr):
+        first = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+        if first:
+            return first
+    return addr
+
+
+def https_request():
+    """Did the visitor's request arrive over TLS?
+
+    Behind the UI's own listener Flask sees plain HTTP from loopback and would
+    say no, leaving the session cookie without the Secure flag the browser is
+    then free to send in the clear. HAProxy marks what came in over TLS with
+    X-Forwarded-Proto, which -- like X-Forwarded-For -- counts only from
+    loopback.
+    """
+    if request.is_secure:
+        return True
+    return _loopback(request.remote_addr) and \
+        (request.headers.get("X-Forwarded-Proto") or "").strip().lower() == "https"
+
+
+def _set_session_cookie(resp, cfg, username, unlocked=False):
+    resp.set_cookie(
+        SESSION_COOKIE, make_session(cfg, username, unlocked=unlocked),
+        max_age=max(1, int(cfg["local"].get("session_hours") or 12)) * 3600,
+        httponly=True, samesite="Strict", secure=https_request(), path="/",
+    )
+    return resp
 
 
 def hash_password(password, salt=None, iterations=PBKDF2_ITERATIONS):
@@ -62,7 +113,13 @@ def bad_username(username):
 
 
 def set_admin(cfg, username, password):
-    rec = hash_password(password)
+    # The credential is replaced; everything else about the person -- email,
+    # appearance, language and the second factor -- is kept. A password change
+    # that silently dropped the second factor would then push that weaker
+    # record to every other node when asked to copy the login.
+    old = cfg["local"].get("admin") or {}
+    rec = {k: v for k, v in old.items() if k not in ("salt", "hash", "iterations", "updated")}
+    rec.update(hash_password(password))
     rec["username"] = (username or "admin").strip() or "admin"
     rec["updated"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     cfg["local"]["admin"] = rec
@@ -167,7 +224,10 @@ def session_unlocked(cfg=None):
         return False
 
 
-PUBLIC_PATHS = {"/api/login", "/api/whoami", "/api/setup"}   # /api/setup creates the first admin
+# /api/setup creates the first admin. /api/logout is open so that signing out
+# always deletes the cookie: an expired one would otherwise be refused at the
+# door and stay in the browser.
+PUBLIC_PATHS = {"/api/login", "/api/whoami", "/api/setup", "/api/logout"}
 
 # Shared configuration is edited on the node that holds the virtual IP and
 # pushed out from there. Everything a passive node needs to fix ITSELF -- its
@@ -183,6 +243,7 @@ LOCAL_WRITE_PREFIXES = (
     "/api/cloudflare/install", # this node's own cloudflared
     "/api/mcp",            # this node's MCP server and its token
     "/api/probes/run",     # probing from this node, which says itself why a passive one does not
+    "/api/acme/adcs/install",  # this node's own acme2certifier, retried where it failed
 )
 
 
@@ -231,8 +292,41 @@ def _audit(resp):
                     what = ""
             level = log.info if resp.status_code < 400 else log.warning
             level("%s %s %s%s -> %s (%s)", who, request.method, request.path,
-                  what, resp.status_code, request.remote_addr)
+                  what, resp.status_code, client_addr())
     return resp
+
+
+def _cross_site():
+    """Why a change asked for on a session cookie is refused as another site's,
+    else "".
+
+    The cookie is SameSite=Strict, which keeps other sites from sending it --
+    but a sibling under the same registered domain is the same site to a
+    browser, and a plain form there can post to this API with the cookie
+    attached. A browser names the page a request came from in Origin (or
+    Referer), so a page elsewhere is turned away. A request naming neither is
+    held to the one thing the UI sends on every call and a form cannot: a JSON
+    body. Peers and the MCP server use the API key, which a form cannot set
+    either, and are not asked.
+    """
+    hosts = {(request.host or "").lower()}
+    if _loopback(request.remote_addr):
+        # The UI's own listener records the host the browser asked for.
+        forwarded = (request.headers.get("X-Forwarded-Host") or "").split(",")[0].strip().lower()
+        if forwarded:
+            hosts.add(forwarded)
+    hosts.discard("")
+    for header in ("Origin", "Referer"):
+        value = (request.headers.get(header) or "").strip()
+        if not value:
+            continue
+        if urlsplit(value).netloc.lower() in hosts:
+            return ""
+        return ("refused: this request was sent from %s, not from this node's own page"
+                % (urlsplit(value).netloc or value[:80]))
+    if request.mimetype != "application/json":
+        return "refused: a change on a browser session must be sent as JSON"
+    return ""
 
 
 @app.before_request
@@ -266,14 +360,17 @@ def _auth():
 
     # A tool call from the MCP server, made in-process after it checked its
     # own token: the mark is in the WSGI environ, where no client can put it.
-    authorised = bool(request.environ.get("ham.mcp")) or bool(current_user(cfg))
-    if not authorised:
-        authorised = key_matches(cfg["local"].get("api_key"), request.headers.get("X-API-Key"))
-    if not authorised:
+    via_mcp = bool(request.environ.get("ham.mcp"))
+    via_key = not via_mcp and key_matches(cfg["local"].get("api_key"),
+                                          request.headers.get("X-API-Key"))
+    via_session = not (via_mcp or via_key) and bool(current_user(cfg))
+    if not (via_mcp or via_key or via_session):
         presented = request.headers.get("X-API-Key")
         # header_seen is always reported: a request that arrives with no key at
-        # all is the signature of something stripping it in transit.
-        body = {"ok": False, "hostname": socket.gethostname(), "version": VERSION,
+        # all is the signature of something stripping it in transit. The
+        # version is not: whoever can merely reach the port learns it after
+        # signing in, not before.
+        body = {"ok": False, "hostname": socket.gethostname(),
                 "header_seen": presented is not None,
                 "error": "not authorised: sign in, or present this node's API key as X-API-Key"}
         if presented is not None:          # a machine tried a key: help it compare
@@ -281,7 +378,13 @@ def _auth():
                          "expected_fp": key_fingerprint(cfg["local"].get("api_key"))})
         return jsonify(body), 401
 
-    if request.method in ("POST", "PUT", "DELETE", "PATCH") and \
+    if via_session and request.method in WRITE_METHODS:
+        why = _cross_site()
+        if why:
+            log.warning("%s %s from %s: %s", request.method, request.path, client_addr(), why)
+            return jsonify({"ok": False, "error": why}), 403
+
+    if request.method in WRITE_METHODS and \
             not request.path.startswith(LOCAL_WRITE_PREFIXES):
         ro, why = readonly_state(cfg)
         if ro:
@@ -344,14 +447,15 @@ def _prune_login_fails():
         _login_fails.clear()
 
 
+def _throttle_keys(ip, username):
+    keys = ["ip:" + ip]
+    if username:
+        keys.append("user:" + username.lower())
+    return keys
+
+
 def _login_ok(cfg, username, resp_body):
-    resp = jsonify(resp_body)
-    resp.set_cookie(
-        SESSION_COOKIE, make_session(cfg, username),
-        max_age=max(1, int(cfg["local"].get("session_hours") or 12)) * 3600,
-        httponly=True, samesite="Strict", secure=request.is_secure, path="/",
-    )
-    return resp
+    return _set_session_cookie(jsonify(resp_body), cfg, username)
 
 
 @app.post("/api/setup")
@@ -380,25 +484,28 @@ def api_setup():
 @app.post("/api/login")
 def api_login():
     cfg = load_config()
-    ip = request.remote_addr or "?"
-    fails, until = _login_fails.get(ip, [0, 0])
+    ip = client_addr()
+    body = request.get_json(force=True) or {}
+    username = (body.get("username") or "").strip()
+    keys = _throttle_keys(ip, username)
+    until = max(_login_fails.get(k, [0, 0])[1] for k in keys)
     if until > time.time():
         return jsonify({"ok": False, "error": "too many failed attempts -- try again in %d seconds"
                                               % int(until - time.time())}), 429
 
-    body = request.get_json(force=True) or {}
     admin = cfg["local"].get("admin") or {}
-    username = (body.get("username") or "").strip()
     ok = (hmac.compare_digest(username.encode(), admin.get("username", "").encode()) and
           verify_password(body.get("password") or "", admin))
 
     def failed(message, status=401):
-        nonlocal fails
-        fails += 1
-        if fails >= LOGIN_MAX_FAILS:
-            _login_fails[ip] = [0, time.time() + LOGIN_LOCK_SECONDS]   # locked; counter restarts
-        else:
-            _login_fails[ip] = [fails, 0]
+        fails = 0
+        for k in keys:
+            n = _login_fails.get(k, [0, 0])[0] + 1
+            if n >= LOGIN_MAX_FAILS:
+                _login_fails[k] = [0, time.time() + LOGIN_LOCK_SECONDS]   # locked; counter restarts
+            else:
+                _login_fails[k] = [n, 0]
+            fails = max(fails, n)
         _prune_login_fails()
         log.warning("failed sign-in for %r from %s (%d in a row)", username, ip, fails)
         time.sleep(0.5)  # blunt the rate of online guessing
@@ -442,7 +549,8 @@ def api_login():
         if not accepted:
             return failed("that code is not right, or was already used")
 
-    _login_fails.pop(ip, None)
+    for k in keys:
+        _login_fails.pop(k, None)
     log.info("signed in: %s from %s", username, ip)
     return _login_ok(cfg, username, {"ok": True, "username": username})
 
@@ -459,17 +567,16 @@ def api_unlock():
     if not user:
         return jsonify({"ok": False, "error": "sign in first"}), 401
     on = bool((request.get_json(silent=True) or {}).get("on"))
-    resp = jsonify({"ok": True, "unlocked": on})
-    resp.set_cookie(SESSION_COOKIE, make_session(cfg, user, unlocked=on),
-                    max_age=max(1, int(cfg["local"].get("session_hours") or 12)) * 3600,
-                    httponly=True, samesite="Strict", secure=request.is_secure, path="/")
-    return resp
+    return _set_session_cookie(jsonify({"ok": True, "unlocked": on}), cfg, user, unlocked=on)
 
 
 @app.post("/api/logout")
 def api_logout():
+    """Delete the cookie -- whether or not it still verified. Nothing else is
+    read or changed here, which is why no sign-in is needed to call it."""
     resp = jsonify({"ok": True})
-    resp.delete_cookie(SESSION_COOKIE, path="/")
+    resp.delete_cookie(SESSION_COOKIE, path="/", httponly=True, samesite="Strict",
+                       secure=https_request())
     return resp
 
 
@@ -495,6 +602,12 @@ def api_admin_receive():
     rec = (request.get_json(force=True) or {}).get("admin") or {}
     if not (rec.get("hash") and rec.get("salt") and rec.get("username")):
         return jsonify({"ok": False, "error": "that is not an administrator record"}), 400
+    # The same rule as at the keyboard: a name an older node still allowed
+    # could arrive here, and one with a "|" in it would sign in and never be
+    # read back from the cookie.
+    bad = bad_username(str(rec["username"]))
+    if bad:
+        return jsonify({"ok": False, "error": bad}), 400
     with _lock:
         cfg = load_config()
         old = cfg["local"].get("admin") or {}
@@ -535,7 +648,7 @@ def api_admin_receive():
         if _credential(old) != _credential(cfg["local"]["admin"]):
             cfg["local"]["session_secret"] = os.urandom(32).hex()
         save_config(cfg)
-    log.info("administrator record accepted from %s", request.remote_addr)
+    log.info("administrator record accepted from %s", client_addr())
     return jsonify({"ok": True, "hostname": socket.gethostname(),
                     "username": cfg["local"]["admin"]["username"]})
 

@@ -12,7 +12,7 @@ from .config import VALID_COLLECTIONS, load_config, merged, save_config
 from .util import _by_id, _sec, rule_cond_ids
 from . import validate
 from .validate import check_pool, check_setting_types
-from . import access, acme, apply, errorpages, haproxy, oauth, updates
+from . import access, acme, apply, errorpages, haproxy, mcp, oauth, updates
 
 # The collections whose objects the rendered file names by their name made a
 # token: two names that become the same token are one ACL declared twice --
@@ -257,13 +257,38 @@ def collection_item(sec, col, iid):
     abort(404)
 
 
+def _local_unredacted(body, stored):
+    """The incoming node settings with every [redacted] value put back from
+    what is stored, so what GET handed out can be sent back unchanged.
+
+    Peers are matched by id, not position: the list may have been reordered
+    or shortened between the read and the write, and the key of one node must
+    never end up on another's entry.
+    """
+    peers = (body.get("sync") or {}).get("peers") if isinstance(body.get("sync"), dict) else None
+    if isinstance(peers, list):
+        known = {p.get("id"): p for p in (stored.get("sync") or {}).get("peers") or []
+                 if isinstance(p, dict)}
+        for p in peers:
+            if isinstance(p, dict) and p.get("api_key") == mcp.REDACTED:
+                p["api_key"] = (known.get(p.get("id")) or {}).get("api_key", "")
+    return mcp.unredact(body, stored)
+
+
 @app.route("/api/local", methods=["GET", "PUT"])
 def local_settings():
+    # This node's own settings carry its credentials: the API key the other
+    # nodes present, the secret that signs every session cookie, the password
+    # digest and the second factor, the MCP token, the keys held for each
+    # peer. None of them has a reader here -- the UI edits these through their
+    # own routes and the peers only ever write -- so they go out as [redacted],
+    # the same mark the MCP server uses, and come back in unchanged.
     if request.method == "GET":
-        return jsonify(load_config()["local"])
+        return jsonify(mcp.redact(load_config()["local"]))
     body = request.get_json(force=True) or {}
     with _lock:
         cfg = load_config()
+        body = _local_unredacted(body, cfg["local"])
         for key in ("keepalived", "sync"):
             if isinstance(body.get(key), dict):
                 cfg["local"][key].update(body[key])
@@ -278,7 +303,7 @@ def local_settings():
             updates.set_beta(body["updates"]["beta"])
         except updates.Refused as e:
             return jsonify({"error": str(e)}), 409
-    return jsonify(load_config()["local"])
+    return jsonify(mcp.redact(load_config()["local"]))
 
 
 def _paragraphs(text):

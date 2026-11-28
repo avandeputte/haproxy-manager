@@ -7,13 +7,14 @@ from flask import request
 import json
 import re
 import socket
+import ssl
 import threading
 import time
 import uuid
 
 from .base import PEER_CONNECT_TIMEOUT, VERSION, _lock, _requests, app, log
 from .config import DEFAULT_CONFIG, load_config, save_config
-from . import wizard
+from . import mcp, wizard
 
 #
 # SMTP and Pushover are built in and need nothing beyond the standard library
@@ -54,14 +55,22 @@ def send_smtp(d, subject, body):
     host = d.get("host") or "localhost"
     port = int(d.get("port") or (465 if d.get("security") == "ssl" else 587))
     timeout = float(d.get("timeout") or 20)
+    # The mail server's certificate is checked against the system's trust
+    # store, as a browser would -- an unchecked TLS connection hands the
+    # login to whoever answers on the way. The same Verify TLS tick the
+    # webhook has turns it off, for a server with a certificate of its own.
+    ctx = ssl.create_default_context()
+    if not d.get("verify_tls", True):
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
     if d.get("security") == "ssl":
-        srv = smtplib.SMTP_SSL(host, port, timeout=timeout)
+        srv = smtplib.SMTP_SSL(host, port, timeout=timeout, context=ctx)
     else:
         srv = smtplib.SMTP(host, port, timeout=timeout)
     try:
         srv.ehlo()
         if d.get("security") == "starttls":
-            srv.starttls()
+            srv.starttls(context=ctx)
             srv.ehlo()
         if d.get("username"):
             srv.login(d["username"], d.get("password") or "")
@@ -278,6 +287,40 @@ def notify_transition(key, state, event, subject, body, severity="warning", cfg=
     return res
 
 
+def _header_lines(text):
+    """The `Name: value` pairs of a webhook's extra headers, as (name, value)."""
+    out = []
+    for line in (text or "").splitlines():
+        if ":" in line:
+            k, v = line.split(":", 1)
+            out.append((k.strip(), v.strip()))
+    return out
+
+
+def _redact_headers(text):
+    """The extra headers with every value replaced by the [redacted] mark the
+    MCP server uses. A webhook's headers are where its bearer token goes, and
+    the names alone say what is set."""
+    return "\n".join("%s: %s" % (k, mcp.REDACTED) for k, _v in _header_lines(text))
+
+
+def _restore_headers(sent, stored):
+    """What was sent, with every [redacted] value put back from what is
+    stored under that name -- so the redacted text GET hands out can be saved
+    back unchanged, and a header edited beside it keeps the new value. A
+    redacted value for a name that is not stored has nothing to come back to,
+    and that line is dropped."""
+    known = {k.lower(): v for k, v in _header_lines(stored)}
+    out = []
+    for k, v in _header_lines(sent):
+        if v == mcp.REDACTED:
+            if k.lower() not in known:
+                continue
+            v = known[k.lower()]
+        out.append("%s: %s" % (k, v))
+    return "\n".join(out)
+
+
 @app.get("/api/notify")
 def api_notify_get():
     cfg = load_config()
@@ -288,6 +331,8 @@ def api_notify_get():
             if secret in d:
                 d["has_" + secret] = bool((d.get(secret) or "").strip())
                 d.pop(secret)
+        if d.get("headers"):
+            d["headers"] = _redact_headers(d["headers"])
     if isinstance(n.get("mqtt"), dict):
         n["mqtt"]["has_password"] = bool((n["mqtt"].get("password") or "").strip())
         n["mqtt"].pop("password", None)
@@ -350,6 +395,8 @@ def api_notify_put():
                 if not isinstance(d, dict):
                     continue
                 cur = dict(existing.get(d.get("id")) or {})
+                if isinstance(d.get("headers"), str) and mcp.REDACTED in d["headers"]:
+                    d = dict(d, headers=_restore_headers(d["headers"], cur.get("headers")))
                 cur.update({k: v for k, v in d.items()
                             if not (k in ("password", "token", "user")
                                     and not str(v or "").strip())})
