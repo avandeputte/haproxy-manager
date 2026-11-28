@@ -54,14 +54,20 @@ ok(auth.bad_username("a\x00b"), "and a control character")
 ok(not auth.bad_username("alex@corp"), "an ordinary name is fine")
 
 # -- the config export carries no DNS or EAB secrets -------------------------
-acme = {"accounts": [{"id": "a1", "name": "le", "eab_hmac": "SUPER-SECRET-HMAC"}],
+acme = {"accounts": [{"id": "a1", "name": "le", "eab_hmac": "SUPER-SECRET-HMAC"},
+                     {"id": "a2", "name": "corp", "ca": "adcs", "adcs_user": "svc-acme",
+                      "adcs_password": "AD-SERVICE-PASSWORD"}],
         "challenges": [{"id": "c1", "name": "cf", "dns_credentials": "CF_Token=leaky"}],
         "certificates": []}
 clean = backup._acme_without_secrets(acme)
 ok(clean["challenges"][0]["dns_credentials"] == ""
    and clean["accounts"][0]["eab_hmac"] == "",
    "the export blanks DNS credentials and EAB keys")
-ok(acme["challenges"][0]["dns_credentials"] == "CF_Token=leaky",
+ok(clean["accounts"][1]["adcs_password"] == "" and clean["accounts"][1]["adcs_user"] == "svc-acme",
+   "and the AD CS service account's password, keeping its user name")
+ok("AD-SERVICE-PASSWORD" not in repr(clean), "the password is nowhere in the export")
+ok(acme["challenges"][0]["dns_credentials"] == "CF_Token=leaky"
+   and acme["accounts"][1]["adcs_password"] == "AD-SERVICE-PASSWORD",
    "without mutating the stored config")
 
 # -- a corrupt config file does not reopen setup -----------------------------

@@ -9,21 +9,43 @@ from flask import request
 from pathlib import Path
 import os
 import tempfile
+import threading
 import time
 import uuid
 
 from .base import ACME_HOME, ACME_SH, CERT_DIR, _lock, app, log
-from .config import load_config, merged, save_config
-from .util import _by_id, cert_path, parse_domains, run
+from .config import is_webui_cert, load_config, merged, save_config
+from .util import _by_id, _sec, cert_path, parse_domains, run
 
 import re
 
-# A provider credential variable is a plain shell identifier. Anything that
-# could redirect a root process -- the loader variables, PATH, the shell's
-# own hooks -- is refused even if it matches that shape.
+# A DNS credential line, NAME=value, goes whole into the environment of
+# acme.sh, which runs as root and takes its own settings from that same
+# environment: ACCOUNT_CONF_PATH=/some/file makes it source that file at the
+# next issue, HTTPS_INSECURE=1 switches off TLS verification, HTTP_HEADER
+# names a file it writes, and the loader variables, PATH and IFS redirect any
+# process. So a name is accepted only when the selected hook's script reads
+# it (see credential_names), and never when it is one of these -- acme.sh's
+# own variables by name and by prefix, the shell's, the loader's. Where
+# acme.sh is not installed yet there is no script to ask, and the refusals
+# here stand on their own.
 _SAFE_ENV = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-_DANGEROUS_ENV = {"PATH", "IFS", "ENV", "BASH_ENV", "SHELLOPTS", "BASHOPTS",
-                  "PS4", "PROMPT_COMMAND", "PYTHONPATH", "PERL5LIB"}
+_DANGEROUS_ENV = {"PATH", "IFS", "ENV", "BASH_ENV", "SHELLOPTS", "BASHOPTS", "PS4", "PROMPT_COMMAND",
+                  "PYTHONPATH", "PERL5LIB", "HOME", "SHELL", "USER_PATH", "USER_AGENT", "NO_TIMESTAMP",
+                  "NO_DETECT_SH", "NO_ARI", "AUTO_UPGRADE", "OPENSSL_BIN", "OPENSSL_CONF", "HTTP_HEADER",
+                  "FORCE", "FORCE_DNS_MANUAL", "STAGE", "DEBUG", "VER", "BRANCH", "PROFILE", "SHELLTYPE",
+                  "OUTPUT_INSECURE", "DETECTED_PROFILE", "RENEW_SKIP", "CSR_PATH", "JWK_HEADER"}
+_DANGEROUS_PREFIXES = ("_", "LD_", "DYLD_", "ACME_", "LE_", "Le_", "CA_", "ACCOUNT_", "DOMAIN_",
+                       "CERT_", "HTTPS_", "LOG_", "DEBUG", "SYSLOG", "SYS_", "DEFAULT_", "NOTIFY_",
+                       "MAX_", "APACHE_", "NGINX", "BACKUP_", "FOUND_", "JWK_", "SUDO_", "BASH_",
+                       "VTYPE_", "W_", "DOH_", "CODE_", "MODE_", "STATE_", "ECC_", "PROJECT", "BEGIN_",
+                       "END_", "B64CONF_", "HIDDEN_", "ID_TYPE", "LOCAL_", "CONTENT_TYPE", "DNS_ALIAS",
+                       "TLS_", "SOCAT_", "OPENSSL", "USE_")
+# What acme.sh keeps in its conf files between single quotes, and a version
+# before 3.1.7 does not escape: a quote ends the string and the rest runs as
+# root. A control character has no place in a token, a key ID or an address
+# either.
+_PLAIN_VALUE = re.compile(r"^[^\x00-\x1f\x7f']*$")
 from . import adcs, auth, notify, sync
 
 # A DNS alias target is a plain host name: it ends up on the command line of a
@@ -73,6 +95,101 @@ def check_email(acc):
     if mail and not (isinstance(mail, str) and _EMAIL.match(mail)):
         raise ValueError("%r is not an e-mail address this node can give acme.sh: letters, "
                          "digits and . _ %% + = - before the @, a domain after it" % (mail,))
+
+
+def dangerous_name(name):
+    """Is this a variable acme.sh, the shell or the loader would act on?"""
+    return name in _DANGEROUS_ENV or name.startswith(_DANGEROUS_PREFIXES)
+
+
+def credential_names(hook):
+    """The variable names a DNS hook takes, from its script in the installed
+    acme.sh; None when there is no script to read, so the caller falls back
+    to refusing by name alone."""
+    from . import dnsapi
+    return dnsapi.hook_variables(hook)
+
+
+def credential_env(ch):
+    """The DNS credentials of a DNS-01 challenge type as the environment for
+    acme.sh's hook. Raises ValueError naming the first line it must not be
+    given: a name that is not a variable name, one acme.sh or the shell
+    would act on, one the hook does not read, or a value acme.sh could not
+    keep in its conf. Lines that are blank or start with # are skipped."""
+    env = {}
+    if ch.get("method") != "dns01":
+        return env
+    text = ch.get("dns_credentials") or ""
+    if not isinstance(text, str):
+        raise ValueError("the DNS API credentials are lines of NAME=value, not a %s" % type(text).__name__)
+    hook = ch.get("dns_provider") or ""
+    known = credential_names(hook) if hook else None
+    for line in text.splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if "=" not in line:
+            raise ValueError("DNS credential line %r is not NAME=value" % line.strip()[:60])
+        name, value = line.split("=", 1)
+        name, value = name.strip(), value.strip()
+        if not _SAFE_ENV.match(name):
+            raise ValueError("%r is not a variable name: a DNS credential is NAME=value, the name "
+                             "letters, digits and _" % name[:60])
+        if dangerous_name(name):
+            raise ValueError("%s is a variable acme.sh or the shell acts on, not a credential of a "
+                             "DNS hook, so it cannot be set here" % name)
+        if known and name not in known:
+            raise ValueError("%s is not a variable the %s hook reads; it takes %s"
+                             % (name, hook, ", ".join(sorted(known)[:12])
+                                + (", ..." if len(known) > 12 else "")))
+        if not _PLAIN_VALUE.match(value):
+            raise ValueError("the value of %s holds a quote or a control character, which acme.sh "
+                             "cannot keep in its configuration" % name)
+        env[name] = value
+    return env
+
+
+def check_credentials(ch):
+    """Raise ValueError when a challenge type's DNS credentials hold a line acme.sh must not be given."""
+    credential_env(ch)
+
+
+def colliding_certificate(cfg, item):
+    """The other certificate whose PEM file this one would be written to, or None.
+
+    A certificate is stored as <name>.pem with the name reduced to letters,
+    digits, . _ and -, so "a b" and "a_b" are one file: the second issued
+    would silently replace the first, and be sent to the other nodes as it.
+    The node's own UI certificate is among the candidates, so a shared one
+    cannot take its file either.
+    """
+    mine = _sec(item.get("name"))
+    for other in merged(cfg)["acme"]["certificates"]:
+        if other.get("id") != item.get("id") and _sec(other.get("name")) == mine:
+            return other
+    return None
+
+
+def check_certificate_name(cfg, item):
+    """What a certificate's name is refused for when it is saved: nothing
+    there, the name every node gives its own UI's certificate, or a file it
+    would share with another certificate."""
+    name = item.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("the certificate needs a name")
+    if is_webui_cert(item):
+        raise ValueError("%s is the name of the certificate each node keeps for its own web UI; "
+                         "that one is managed under Settings > Web UI access" % name.strip())
+    other = colliding_certificate(cfg, item)
+    if other is not None:
+        raise ValueError("certificate %r would be stored in the same file as %r (%s.pem): two names "
+                         "that differ only in characters other than letters, digits, . _ and - are "
+                         "one file" % (name.strip(), other.get("name") or "", _sec(name)))
+
+
+def taken_names(certs):
+    """The names a new certificate must not take, for a wizard that picks
+    one: those in use, and those that would share a file with one in use."""
+    return {c.get("name") for c in certs} | {_sec(c.get("name")) for c in certs}
 
 
 def parse_challenge_alias(value):
@@ -127,6 +244,7 @@ def check_challenge(item, cfg=None):
     if isinstance(item.get("dns_provider"), str):
         item["dns_provider"] = item["dns_provider"].strip()
     check_dns_hook(item)
+    check_credentials(item)
     names = parse_challenge_alias(item.get("challenge_alias"))
     item["challenge_alias"] = " ".join(names)
     if not cfg or not item.get("id"):
@@ -139,7 +257,9 @@ def check_challenge(item, cfg=None):
 def check_certificate(cfg, item):
     """A certificate whose domain names no longer fit its challenge type's
     per-domain aliases is refused when saved, not at its next renewal, and
-    so is one with a name acme.sh must not be given."""
+    so is one with a name acme.sh must not be given, or a name whose file
+    another certificate already has."""
+    check_certificate_name(cfg, item)
     if is_custom(item):
         return
     check_domains(parse_domains(item))
@@ -195,6 +315,38 @@ NO_EAB = {"letsencrypt", "letsencrypt_test", "adcs"}
 KEYLEN = {"ec-256": "ec-256", "ec-384": "ec-384", "rsa-2048": "2048", "rsa-4096": "4096"}
 
 
+def write_private(path, data):
+    """Write a file that holds a private key: never readable by anyone else,
+    not even for a moment, and never half there.
+
+    A file created in place and chmod'ed afterwards is world-readable under
+    the usual umask until the chmod runs, and a reader that comes in between
+    -- HAProxy reloading, a sync -- sees it half written. So the data goes
+    into a temporary file beside it, created with mode 0600 and no other
+    holder of the name (mkstemp), and takes the name in one rename.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix="." + path.name + ".")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(data)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+# acme.sh reads account.conf at the start of every run, so it is rewritten
+# whole, in one rename, and by one thread at a time: a run that starts while
+# another thread is writing it sees either the old file or the new one.
+_conf_lock = threading.Lock()
+
+
 def _forget_ca_bundle():
     """Take a saved CA_BUNDLE out of acme.sh's account.conf.
 
@@ -204,13 +356,14 @@ def _forget_ca_bundle():
     bundle it needs instead.
     """
     conf = Path(ACME_HOME) / "account.conf"
-    try:
-        lines = conf.read_text().splitlines(keepends=True)
-    except OSError:
-        return
-    keep = [l for l in lines if not re.match(r"\s*(export\s+)?CA_BUNDLE=", l)]
-    if keep != lines:
-        conf.write_text("".join(keep))
+    with _conf_lock:
+        try:
+            lines = conf.read_text().splitlines(keepends=True)
+        except OSError:
+            return
+        keep = [l for l in lines if not re.match(r"\s*(export\s+)?CA_BUNDLE=", l)]
+        if keep != lines:
+            write_private(conf, "".join(keep))
 
 
 def acme_run(args, env_extra=None):
@@ -220,9 +373,10 @@ def acme_run(args, env_extra=None):
     env.update(env_extra or {})
     _forget_ca_bundle()
     # --log makes acme.sh keep its own log in ACME_HOME, which is what the log
-    # viewer reads back. Left at the default level: level 2 traces the DNS hook
-    # calls, and those carry API credentials.
-    return run([ACME_SH, "--home", str(ACME_HOME), "--log"] + args, env=env)
+    # viewer reads back. At level 1: acme.sh's default is level 2, which
+    # traces every call to the DNS hook's API, and those carry the provider
+    # credentials.
+    return run([ACME_SH, "--home", str(ACME_HOME), "--log", "--log-level", "1"] + args, env=env)
 
 
 # --------------------------------------------------------------------------
@@ -235,9 +389,23 @@ SYSTEM_BUNDLES = ("/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-b
 def check_account(acc):
     """What an ACME account refuses before it is stored. Raises ValueError with why."""
     ca = acc.get("ca") or "letsencrypt"
+    # Text fields, from a client that may send anything JSON allows: nothing
+    # is read as text, a number or a list is said no to rather than tripped
+    # over further down.
+    for k in ("email", "server", "ca_bundle", "eab_kid", "eab_hmac"):
+        if acc.get(k) is None:
+            acc[k] = ""
+        elif not isinstance(acc[k], str):
+            raise ValueError("%s must be text, not a %s" % (k, type(acc[k]).__name__))
     if isinstance(acc.get("email"), str):
         acc["email"] = acc["email"].strip()
     check_email(acc)
+    # acme.sh keeps these in its conf files as shell code (see _PLAIN_VALUE).
+    for k, what in (("eab_kid", "the EAB key ID"), ("eab_hmac", "the EAB HMAC key"),
+                    ("server", "the ACME directory address")):
+        if not _PLAIN_VALUE.match(acc.get(k) or ""):
+            raise ValueError("%s holds a quote or a control character, which acme.sh cannot "
+                             "keep in its configuration" % what)
     if ca in NO_EAB:
         # The editor hides the EAB rows for these, so what was typed for
         # another CA before switching must not stay behind, unseen: one of
@@ -342,13 +510,31 @@ def server_args(acc):
     return args
 
 
+# The accounts this process has registered, as (id, e-mail, server, EAB):
+# registering is a request to the CA, and one per account is enough until
+# something about it changes or the process restarts. acme.sh's --issue
+# registers on its own when the account key is new, so a wiped acme.sh home
+# still gets an account; what this call adds is the e-mail and the EAB.
+_registered = set()
+
+
+def _account_signature(acc):
+    return (acc.get("id"), acc.get("email") or "", acc.get("ca") or "", acc.get("server") or "",
+            acc.get("eab_kid") or "", acc.get("eab_hmac") or "")
+
+
 def ensure_account(acc):
+    if _account_signature(acc) in _registered:
+        return 0, ""
     args = ["--register-account", "-m", acc.get("email", "")] + server_args(acc)
     # An account stored before the EAB rows were hidden for these CAs may
     # still carry credentials meant for another one.
     if acc.get("eab_kid") and (acc.get("ca") or "letsencrypt") not in NO_EAB:
         args += ["--eab-kid", acc["eab_kid"], "--eab-hmac-key", acc.get("eab_hmac", "")]
-    return acme_run(args)
+    rc, out = acme_run(args)
+    if rc == 0:
+        _registered.add(_account_signature(acc))
+    return rc, out
 
 
 def record_issue(cert, res, started):
@@ -394,7 +580,33 @@ def is_custom(cert):
     return (cert or {}).get("source") == "custom"
 
 
+# One acme.sh run per certificate at a time. The renewal tick, Renew all,
+# the Issue button and the wizard all end up here, and two runs for the
+# same certificate would write the same acme.sh folder and the same PEM
+# over each other. A second caller is told so and does not wait: the run
+# it would start is the one already going.
+_issuing = {}
+_issuing_guard = threading.Lock()
+
+
+def _issue_lock(cert):
+    with _issuing_guard:
+        return _issuing.setdefault(cert.get("id") or cert.get("name") or "", threading.Lock())
+
+
 def acme_issue(cfg, cert, force=False):
+    lock = _issue_lock(cert)
+    if not lock.acquire(blocking=False):
+        return {"ok": False, "busy": True,
+                "error": "certificate %s is already being issued; wait for that run to finish"
+                         % cert.get("name")}
+    try:
+        return _acme_issue_recorded(cfg, cert, force)
+    finally:
+        lock.release()
+
+
+def _acme_issue_recorded(cfg, cert, force):
     started = time.time()
     res = _acme_issue(cfg, cert, force=force)
     try:
@@ -508,22 +720,14 @@ def _acme_run_issue(cfg, cert, acc, ch, doms, force, trace):
     if ch.get("method") == "dns01":
         args += ["--dns", ch.get("dns_provider", "")]
         args += challenge_alias_args(ch, doms)
-        for line in (ch.get("dns_credentials") or "").splitlines():
-            if "=" not in line:
-                continue
-            kk, vv = line.split("=", 1)
-            kk = kk.strip()
-            # acme.sh's DNS hooks read their credentials from named variables,
-            # so this whole line goes into the environment of a root process.
-            # Restrict the NAME: a provider variable is a plain identifier, and
-            # nothing here should be able to set PATH, IFS, or the dynamic
-            # loader's hijack variables in that process.
-            if not _SAFE_ENV.match(kk) or kk in _DANGEROUS_ENV \
-                    or kk.startswith(("LD_", "DYLD_")):
-                log.warning("ignoring a DNS credential line: %r is not a valid "
-                            "provider variable name", kk)
-                continue
-            env[kk] = vv.strip()
+        # The credentials go into the environment of a root process. Saving
+        # refuses a line that is not a hook's credential, but a synced,
+        # restored or older configuration has not been through that.
+        try:
+            env = credential_env(ch)
+        except ValueError as e:
+            return {"ok": False, "error": "challenge type %s: %s" % (ch.get("name") or "", e),
+                    "log": "\n".join(trace)}
     else:
         args += ["--standalone", "--httpport", str(cfg["acme"]["settings"].get("challenge_port", 9080))]
     if force:
@@ -532,6 +736,9 @@ def _acme_run_issue(cfg, cert, acc, ch, doms, force, trace):
     rc, out = acme_run(args, env)
     trace.append(out)
     if rc not in (0, 2):  # 2 = cert not yet due for renewal, treat as success
+        # The account is registered again before the next try: a failure may
+        # be acme.sh's home having been emptied under it, EAB and all.
+        _registered.discard(_account_signature(acc))
         return {"ok": False, "error": "issuance failed -- see log", "log": "\n".join(trace)}
 
     dep = deploy_cert(cfg, cert)
@@ -566,8 +773,7 @@ def deploy_cert(cfg, cert):
                 return {"ok": True, "changed": False, "log": out.strip()}
         except OSError:
             pass
-        p.write_text(pem)
-        os.chmod(p, 0o600)
+        write_private(p, pem)
     auto = after_certificate_deployed(cfg, cert)
     return {"ok": True, "changed": True, "log": (out + ("\n" + auto if auto else "")).strip()}
 
@@ -596,7 +802,8 @@ def api_acme_issue(cid):
         return jsonify({"ok": False, "error": "this certificate was uploaded, not issued: "
                                                "upload a new one to replace it"}), 400
     force = bool((request.get_json(silent=True) or {}).get("force"))
-    return jsonify(acme_issue(cfg, cert, force=force))
+    res = acme_issue(cfg, cert, force=force)
+    return jsonify(res), (409 if res.get("busy") else 200)
 
 
 @app.get("/api/acme/log/<cid>")
@@ -681,32 +888,48 @@ def renewal_due(cfg, cert, now=None):
     return True
 
 
-def _renew_loop():
+def _renew_tick():
+    """One pass of the renewal timer: a full round when renew_hours have
+    passed, otherwise only the certificates acme.sh's own schedule says are
+    due. Returns the certificates it tried."""
     global _last_renew
+    cfg = load_config()
+    st = cfg["acme"]["settings"]
+    if not (st.get("enabled") and st.get("auto_renew")):
+        return []
+    ok, why = renewal_runs_here(cfg)
+    if not ok:
+        with _lock:
+            cur = load_config()
+            cur["_meta"]["renewal"] = {
+                "checked": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "ran": False, "reason": why}
+            save_config(cur)
+        return []
+    interval = max(1, int(st.get("renew_hours") or 24)) * 3600
+    full = time.time() - _last_renew >= interval
+    if full:
+        _last_renew = time.time()
+    tried = []
+    for cert in merged(cfg)["acme"]["certificates"]:
+        if cert.get("auto_renew", True) and not is_custom(cert) \
+                and (full or renewal_due(cfg, cert)):
+            tried.append(cert)
+            # One certificate's trouble is its own: the round goes on to the
+            # others, which would otherwise wait behind it on every tick,
+            # since it comes first every time.
+            try:
+                acme_issue(cfg, cert)
+            except Exception:
+                log.exception("renewing certificate %s failed; the round goes on", cert.get("name"))
+    return tried
+
+
+def _renew_loop():
     while True:
         time.sleep(600)
         try:
-            cfg = load_config()
-            st = cfg["acme"]["settings"]
-            if not (st.get("enabled") and st.get("auto_renew")):
-                continue
-            ok, why = renewal_runs_here(cfg)
-            if not ok:
-                with _lock:
-                    cur = load_config()
-                    cur["_meta"]["renewal"] = {
-                        "checked": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                        "ran": False, "reason": why}
-                    save_config(cur)
-                continue
-            interval = max(1, int(st.get("renew_hours") or 24)) * 3600
-            full = time.time() - _last_renew >= interval
-            if full:
-                _last_renew = time.time()
-            for cert in merged(cfg)["acme"]["certificates"]:
-                if cert.get("auto_renew", True) and not is_custom(cert) \
-                        and (full or renewal_due(cfg, cert)):
-                    acme_issue(cfg, cert)
+            _renew_tick()
         except Exception:
             # The loop must survive anything, but not silently: a renewal
             # loop that dies quietly is discovered as an expired certificate.
@@ -735,9 +958,22 @@ def _openssl_out(args, data):
         os.unlink(path)
 
 
+def _stray_pem_marker(text, what):
+    """Raise ValueError when a BEGIN or END line stands outside any complete
+    block: a certificate missing its END line, or a mistyped header, would
+    otherwise be dropped from the chain without a word."""
+    left = PEM_BLOCK.sub("", text or "")
+    if "-----" in left:
+        raise ValueError("%s has a PEM marker outside a complete block: a block is missing its "
+                         "BEGIN or END line, or one of them is mistyped" % what)
+
+
 def check_upload(cert_text, key_text, chain_text):
     """The combined PEM HAProxy reads, and the names it covers; raises
     ValueError with what is wrong."""
+    for text, what in ((cert_text, "the certificate"), (key_text, "the private key"),
+                       (chain_text, "the chain")):
+        _stray_pem_marker(text, what)
     certs = [b for k, b in _pem_blocks(cert_text) if k == "CERTIFICATE"]
     chain = [b for k, b in _pem_blocks(chain_text) if k == "CERTIFICATE"]
     keys = [(k, b) for k, b in _pem_blocks(key_text) if k.endswith("PRIVATE KEY")]
@@ -751,6 +987,14 @@ def check_upload(cert_text, key_text, chain_text):
     rc, cert_pub = _openssl_out(["x509", "-noout", "-pubkey"], leaf)
     if rc != 0:
         raise ValueError("the certificate could not be read: %s" % cert_pub.strip()[-200:])
+    # Every block of the chain goes into the file HAProxy loads, and HAProxy
+    # refuses the whole file over one it cannot read -- at Apply, long after
+    # the upload said yes. So each is read here, and named by its place.
+    for i, block in enumerate(extra, 1):
+        rc, text = _openssl_out(["x509", "-noout"], block)
+        if rc != 0:
+            raise ValueError("certificate %d of the chain could not be read: %s"
+                             % (i, text.strip()[-200:] or "not a certificate"))
     rc, key_pub = _openssl_out(["pkey", "-pubout"], keys[0][1])
     if rc != 0:
         raise ValueError("the private key could not be read: %s" % key_pub.strip()[-200:])
@@ -787,20 +1031,16 @@ def api_certificate_upload():
             return jsonify({"ok": False, "error": "%s is issued by ACME; upload under a new name"
                                                    % cert.get("name")}), 400
         if cert is None:
-            if not name:
-                return jsonify({"ok": False, "error": "the certificate needs a name"}), 400
-            if any(c.get("name") == name for c in certs):
+            if any(c.get("name") == name for c in merged(cfg)["acme"]["certificates"]):
                 return jsonify({"ok": False, "error": "a certificate named %s already exists" % name}), 400
             cert = {"id": str(uuid.uuid4()), "name": name}
+            try:
+                check_certificate_name(cfg, cert)
+            except ValueError as e:
+                return jsonify({"ok": False, "error": str(e)}), 400
             certs.append(cert)
         cert.update({"source": "custom", "domains": " ".join(names), "auto_renew": False})
-        path = cert_path(cert)
-        CERT_DIR.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=str(CERT_DIR), prefix=".upload-")
-        with os.fdopen(fd, "w") as f:
-            f.write(pem)
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, path)
+        write_private(cert_path(cert), pem)
         save_config(cfg)
     log.info("certificate %s uploaded, covering %s", cert["name"], ", ".join(names) or "no names")
     sent = propagate_certificate(load_config(), cert)
@@ -820,17 +1060,15 @@ def api_certificate_download(cid):
     except OSError:
         return jsonify({"ok": False, "error": "there is no file for this certificate yet"}), 404
     part = request.args.get("part") or "chain"
+    # The file is named as it is on disk: a quote or a line break in the
+    # certificate's name has no place in a header.
     if part == "key":
         body = "\n".join(b for k, b in blocks if k.endswith("PRIVATE KEY")) + "\n"
-        filename = "%s.key" % cert["name"]
+        filename = "%s.key" % _sec(cert["name"])
         log.warning("the private key of %s was downloaded", cert["name"])
     else:
         body = "\n".join(b for k, b in blocks if k == "CERTIFICATE") + "\n"
-        filename = "%s.crt" % cert["name"]
+        filename = "%s.crt" % _sec(cert["name"])
     return Response(body, mimetype="application/x-pem-file",
                     headers={"Content-Disposition": 'attachment; filename="%s"' % filename,
                              "Cache-Control": "no-store"})
-
-
-# --------------------------------------------------------------------------
-# notifications

@@ -42,11 +42,12 @@ def api_export_keepalived():
 
 # The secrets a backup must never carry, per acme object type. A backup is
 # meant to be safe to copy around -- attached to a ticket, committed to a
-# repo -- so a DNS API token (which can rewrite a zone and mint certificates)
-# or an EAB key has no place in it, any more than the service password hashes
-# that are already stripped. Restoring onto the same node fills them back in
-# from what is stored; restoring elsewhere leaves them to be re-entered.
-ACME_SECRETS = {"challenges": ("dns_credentials",), "accounts": ("eab_hmac",)}
+# repo -- so a DNS API token (which can rewrite a zone and mint certificates),
+# an EAB key or the password of the service account that enrolls with AD CS
+# has no place in it, any more than the service password hashes that are
+# already stripped. Restoring onto the same node fills them back in from what
+# is stored; restoring elsewhere leaves them to be re-entered.
+ACME_SECRETS = {"challenges": ("dns_credentials",), "accounts": ("eab_hmac", "adcs_password")}
 
 
 def _acme_without_secrets(acme):
