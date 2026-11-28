@@ -11,6 +11,7 @@ a dependency would be larger than the code.
 """
 
 from flask import jsonify, request
+from urllib.parse import quote
 import base64
 import hashlib
 import hmac
@@ -86,12 +87,44 @@ def enabled(admin):
     return bool(admin.get("totp_secret")) and bool(admin.get("totp_enabled"))
 
 
-def otpauth_uri(cfg, secret):
+ISSUER = "haproxy-manager"
+
+
+def otpauth_uri(cfg, secret, host=None):
+    """The URI the authenticator app scans: issuer, account, secret.
+
+    The account is `user@host`, so a phone with several nodes enrolled can
+    tell them apart. Both halves are percent-encoded: a name with a space, a
+    "/" or a "?" in it would otherwise be read as part of the path or the
+    query, and the app would show a mangled label or refuse the code outright.
+    """
     user = (cfg["local"].get("admin") or {}).get("username") or "admin"
-    issuer = "haproxy-manager"
-    label = "%s:%s@%s" % (issuer, user, socket.gethostname())
-    return "otpauth://totp/%s?secret=%s&issuer=%s&digits=%d&period=%d" % (
-        label, secret, issuer, DIGITS, STEP)
+    if host is None:
+        host = socket.gethostname()
+    account = user + ("@" + host if host else "")
+    return "otpauth://totp/%s:%s?secret=%s&issuer=%s&digits=%d&period=%d" % (
+        quote(ISSUER, safe=""), quote(account, safe=""), quote(secret, safe=""),
+        quote(ISSUER, safe=""), DIGITS, STEP)
+
+
+def enrolment(cfg, secret):
+    """(uri, matrix) for the QR code, or (None, reason) when none fits.
+
+    The encoder stops at version 10, which holds any sane URI. A long user
+    name on a node with a long fully-qualified name can exceed it; rather than
+    refuse enrolment, the label is shortened in steps -- the host without its
+    domain, then no host at all -- until the code fits. The account name is
+    a label on the phone, not part of what is verified.
+    """
+    fqdn = socket.gethostname()
+    for host in (fqdn, fqdn.split(".")[0], ""):
+        uri = otpauth_uri(cfg, secret, host=host)
+        try:
+            return uri, qr.encode(uri)
+        except ValueError:
+            continue
+    return None, ("the account name is too long for a QR code; shorten the "
+                  "username, or enter the secret in the app by hand")
 
 
 # --------------------------------------------------------------------------
@@ -108,18 +141,33 @@ def api_2fa_setup():
     if not auth.current_user(cfg):
         return jsonify({"ok": False, "error": "sign in first"}), 401
     secret = new_secret()
-    uri = otpauth_uri(cfg, secret)
-    return jsonify({"ok": True, "secret": secret, "uri": uri,
-                    "matrix": qr.encode(uri)})
+    uri, matrix = enrolment(cfg, secret)
+    if uri is None:
+        return jsonify({"ok": False, "error": matrix}), 400
+    return jsonify({"ok": True, "secret": secret, "uri": uri, "matrix": matrix})
 
 
 @app.post("/api/2fa/enable")
 def api_2fa_enable():
-    """Turn it on, once the phone has proven it holds the secret."""
+    """Turn it on, once the phone has proven it holds the secret.
+
+    The password is asked for as well, as it is for turning it off: a session
+    left open on a shared screen must not be enough to enrol someone else's
+    phone. An enrolment already in force is not replaced here either -- the
+    phone that holds it is turned off first, with the password, so the swap
+    is a deliberate two-step rather than one request.
+    """
     cfg = load_config()
     if not auth.current_user(cfg):
         return jsonify({"ok": False, "error": "sign in first"}), 401
     body = request.get_json(force=True, silent=True) or {}
+    admin = cfg["local"].get("admin") or {}
+    if not auth.verify_password(body.get("password") or "", admin):
+        time.sleep(0.5)
+        return jsonify({"ok": False, "error": "the password is not correct"}), 401
+    if enabled(admin):
+        return jsonify({"ok": False, "error": "two-factor authentication is already on; "
+                                              "turn it off first to enrol another phone"}), 409
     secret = (body.get("secret") or "").strip()
     if not secret:
         return jsonify({"ok": False, "error": "run setup first"}), 400
@@ -131,6 +179,9 @@ def api_2fa_enable():
     with _lock:
         cfg = load_config()
         admin = cfg["local"].setdefault("admin", {})
+        if enabled(admin):               # two enrolments racing: the first one stands
+            return jsonify({"ok": False, "error": "two-factor authentication is already on; "
+                                                  "turn it off first to enrol another phone"}), 409
         admin["totp_secret"] = secret
         admin["totp_enabled"] = True
         admin["totp_recovery"] = hashes
