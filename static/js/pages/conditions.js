@@ -1,4 +1,4 @@
-import { api, btn, closeDlg, esc, lists, openDlg, selectOption, showText, trimHaproxy } from "../core.js";
+import { api, btn, closeDlg, esc, lists, openDlg, selectOption, trimHaproxy } from "../core.js";
 import { t } from "../i18n.js";
 import { refreshStatus, route } from "../shell.js";
 import { COND_LABEL } from "./rules.js";

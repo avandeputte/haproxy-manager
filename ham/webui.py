@@ -401,6 +401,12 @@ def api_services():
     certs = _by_id(cfg["acme"]["certificates"])
 
     monitors = _by_id(hp["healthchecks"])
+    # Whether port 80 sends visitors on to HTTPS: one listener's setting, shared
+    # by every HTTPS service, and the wizard's own checkbox. Reported as it is,
+    # so the Edit form shows the current state rather than its default and a
+    # later edit does not turn a redirect back on that was turned off.
+    plain80 = wizard._find(hp["frontends"], lambda f: 80 in wizard._bind_ports(f) and not f.get("ssl_enabled"))
+    http_redirect = bool(plain80 and plain80.get("http_to_https"))
 
     def pool_settings(pool):
         """Everything the wizard would need to re-create this mapping unchanged."""
@@ -539,6 +545,7 @@ def api_services():
                 "certificate_uncovered": uncovered,
                 "host": host, "path": path, "scheme": scheme,
                 "port": ports[0] if ports else None,
+                "http_redirect": http_redirect if scheme == "https" else False,
                 "targets": targets,
                 "pool": pool["name"] if pool else None,
                 "frontend": fe["name"], "frontend_id": fe["id"],

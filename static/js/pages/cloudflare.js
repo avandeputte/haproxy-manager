@@ -1,14 +1,17 @@
 /* Cloudflare: the tunnel services are published through, and cloudflared on this node. */
-import { $, api, btn, esc, fieldRow, readForm, showText } from "../core.js";
+import { $, api, btn, esc, fieldRow, pageGuard, readForm, showText } from "../core.js";
 import { t } from "../i18n.js";
 import { refreshStatus } from "../shell.js";
 import { state } from "../state.js";
 
 export async function renderCloudflare(){
-  const c=$("#content");c.innerHTML="";
+  const c=$("#content");
+  const fresh=pageGuard();
   let s;
   try{s=await api("cloudflare/settings");}
-  catch(e){c.innerHTML='<div class="card"><div class="bd">'+esc(e.message)+"</div></div>";return;}
+  catch(e){if(fresh())c.innerHTML='<div class="card"><div class="bd">'+esc(e.message)+"</div></div>";return;}
+  if(!fresh())return;   // navigated away while loading
+  c.innerHTML="";
 
   const card=document.createElement("div");card.className="card";
   card.innerHTML='<div class=hd><h2>Cloudflare</h2><div class=sp></div>'+

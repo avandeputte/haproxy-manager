@@ -1,0 +1,83 @@
+name: Tests
+
+# Every test suite, on every change. The Python suites need HAProxy, acme.sh
+# and openssl beside the right Python, which is exactly what the image
+# carries, so the image is built here (for one architecture, never pushed)
+# and the suites run inside it. The front-end suite runs the real modules
+# under a DOM in node, and fails rather than skips when that DOM is missing.
+#
+# tools/test-recipes.py is left out: it publishes every recipe against a
+# running node. tools/check-docs.py is left out too: it needs the
+# documentation repository checked out beside this one, and that repository's
+# own build runs it against a fresh clone of this one.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  python:
+    name: Python suites, inside the image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # The same layer cache the publishing build fills, so a change to the
+      # application alone does not rebuild HAProxy's layer.
+      - name: Build the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: ham-test:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Four at a time; each suite's output is kept to its own file and shown
+      # only when it fails, so a red run reads as the failing suite alone.
+      - name: Run the suites
+        run: |
+          set -u
+          mkdir -p /tmp/suites
+          ls tools/test-*.py | grep -v 'test-recipes.py' > /tmp/suites/list
+          run_one() {
+            n=$(basename "$1" .py)
+            if docker run --rm --network none -v "$PWD:/src:ro" -w /src \
+                 --entrypoint python3 ham-test:ci "$1" > "/tmp/suites/$n.log" 2>&1; then
+              echo "ok    $n"
+            else
+              echo "FAIL  $n"; echo "$n" >> /tmp/suites/failed
+            fi
+          }
+          export -f run_one
+          xargs -P 4 -I{} bash -c 'run_one {}' < /tmp/suites/list
+          if [ -s /tmp/suites/failed ]; then
+            for n in $(cat /tmp/suites/failed); do
+              echo; echo "===== $n ====="; grep -v '^20[0-9][0-9]-' "/tmp/suites/$n.log" | tail -60
+            done
+            exit 1
+          fi
+          echo; echo "every suite passed"
+
+  ui:
+    name: Front-end suite, under a DOM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # linkedom is the one dependency, and only of the tests: pinned, and
+      # never written into the repository.
+      - name: Install a DOM
+        run: npm install --no-save --no-package-lock linkedom@0.18.12
+
+      - name: Run the front-end checks
+        run: LINKEDOM="$PWD/node_modules/linkedom/esm/index.js" bash tools/uitests/run-all.sh

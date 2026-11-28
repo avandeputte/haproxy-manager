@@ -1,12 +1,15 @@
 /* Single sign-on: the OIDC provider services can send their visitors to. */
-import { $, api, btn, esc, fieldRow, readForm } from "../core.js";
+import { $, api, btn, esc, fieldRow, pageGuard, readForm } from "../core.js";
 import { t } from "../i18n.js";
 
 export async function renderSso(){
-  const c=$("#content");c.innerHTML="";
+  const c=$("#content");
+  const fresh=pageGuard();
   let s;
   try{s=await api("access/oauth");}
-  catch(e){c.innerHTML='<div class="card"><div class="bd">'+esc(e.message)+"</div></div>";return;}
+  catch(e){if(fresh())c.innerHTML='<div class="card"><div class="bd">'+esc(e.message)+"</div></div>";return;}
+  if(!fresh())return;   // navigated away while loading
+  c.innerHTML="";
 
   const card=document.createElement("div");card.className="card";
   card.innerHTML='<div class=hd><h2>'+t("Single sign-on (OIDC)")+'</h2><div class=sp></div>'+

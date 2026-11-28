@@ -64,7 +64,7 @@ export const E={
 
  "haproxy/backends":{title:"Backend Pools",one:"Backend Pool",add:"Add pool",
   intro:"Groups of Real Servers with a balancing algorithm, health checks and persistence.",
-  cols:[["name","Name"],["mode","Mode"],["balance","Balance",r=>r.balance||"roundrobin"],
+  cols:[["name","Name"],["mode","Mode"],["balance","Balance",r=>esc(r.balance||"roundrobin")],
         ["servers","Servers",r=>(r.servers||[]).map(id=>esc(nameOf("haproxy/servers",id))).join(", ")||"—"],
         ["hc","Check",r=>r.healthcheck_enabled?esc(nameOf("haproxy/healthchecks",r.healthcheck)):t("off")]],
   refs:["haproxy/servers","haproxy/healthchecks","access/groups","haproxy/addresslists","haproxy/errorpages","haproxy/rules","haproxy/conditions"],
@@ -214,7 +214,7 @@ export const E={
  "haproxy/healthchecks":{title:"Health Monitors",one:"Health Monitor",add:"Add monitor",
   intro:"How Backend Pools decide whether a Real Server is alive.",
   cols:[["name","Name"],["type","Type",r=>esc(t(HEALTH_LABEL[r.type]||r.type))],
-        ["interval","Interval",r=>r.interval||"2s"],
+        ["interval","Interval",r=>esc(r.interval||"2s")],
         ["det","Detail",r=>r.type==="http"?"<span class=mono>"+esc((r.http_method||"GET")+" "+(r.http_uri||"/")+(r.expect_status?" -> "+r.expect_status:""))+"</span>"
               :(r.type==="pgsql"||r.type==="mysql")?"<span class=mono>"+t("user {name}",{name:esc(r.db_user||"")})+"</span>":"—"]],
   fields:[
@@ -396,8 +396,6 @@ export async function renderEntity(key,into){
     }else{
       hd.appendChild(btn(t(def.add),"pri sm",()=>openEditor(key)));
     }
-  }
-  if(false){
   }
   card.appendChild(hd);
   const bd=document.createElement("div");

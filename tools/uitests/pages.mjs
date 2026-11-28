@@ -92,7 +92,7 @@ feed = { ok:true, failed:[], entries:[
   {ts:now,  source:"acme",level:"ERROR",text:"certificate wild: failed"} ] };
 reset(); await renderLogs();
 ok(html().includes("src-haproxy") && html().includes("src-acme"), "logs: sources are tagged");
-ok(html().includes("<tr class=ERROR>"), "logs: level drives the row class");
+ok(html().includes('<tr class="ERROR">'), "logs: level drives the row class");
 feed.entries = [{ts:now,source:"haproxy",level:"INFO",text:'<img src=x onerror="alert(1)">'}];
 reset(); await renderLogs();
 ok(html().includes("&lt;img") && !html().includes("<img"), "logs: text is escaped");

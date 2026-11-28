@@ -166,6 +166,80 @@ ok("releases/download/v2.0.0-beta.8/haproxy-manager_2.0.0.beta.8_all.deb" in sh 
    and "DPkg::Lock::Timeout" in sh and "release may not be cut yet" in sh,
    "a deb node fetches the release's package and installs it with apt, and says so when there is none")
 ok("dnf install" in updates._package_shell("2.0.0", "rpm"), "an rpm node with dnf")
+ok("mktemp -d" in sh and "chmod 700" in sh and "/tmp/haproxy-manager" not in sh,
+   "the package lands in a directory of its own that only root can read, not at a fixed name under /tmp")
+ok("releases/download/v2.0.0-beta.8/SHA256SUMS" in sh and "sha256sum -c" in sh,
+   "and is checked against the release's SHA256SUMS before it is installed")
+ok("predates the checksum file" in updates._package_shell("2.0.0", "deb"),
+   "a release from before the checksum file is installed with a warning when it has none")
+new = updates._package_shell(updates.CHECKSUMS_SINCE, "deb")
+ok("cannot be verified -- not installed" in new and "predates" not in new,
+   "one from the release that introduced it on is refused without it")
+
+# -- the shell itself, run against a release served from here ------------------------------
+import hashlib   # noqa: E402
+import http.server   # noqa: E402
+import subprocess   # noqa: E402
+import threading   # noqa: E402
+from functools import partial   # noqa: E402
+
+DATA = _pl.Path(os.environ["HAM_DATA_DIR"])
+release = DATA / "release"
+release.mkdir()
+NEW, OLD = "9.9.9", "2.0.0"           # after and before the checksum file
+for v in (NEW, OLD):
+    (release / updates.package_asset(v, "deb")).write_bytes(("not really a package %s\n" % v).encode())
+digest = hashlib.sha256((release / updates.package_asset(NEW, "deb")).read_bytes()).hexdigest()
+SUMS = release / updates.CHECKSUMS_FILE
+SUMS.write_text("%s  %s\n%s  %s\n" % ("0" * 64, updates.package_asset(NEW, "rpm"),
+                                      digest, updates.package_asset(NEW, "deb")))
+httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0),
+                                        partial(http.server.SimpleHTTPRequestHandler, directory=str(release)))
+threading.Thread(target=httpd.serve_forever, daemon=True).start()
+real_asset_url = updates.release_asset_url
+updates.release_asset_url = lambda version, name: "http://127.0.0.1:%d/%s" % (httpd.server_port, name)
+
+# apt-get is stood in for by a script that records what it was handed
+bindir = DATA / "bin"
+bindir.mkdir()
+record = DATA / "apt-get.record"
+(bindir / "apt-get").write_text('#!/bin/sh\nfor a in "$@"; do :; done\n'
+                                '{ echo "$a"; test -f "$a" && echo exists; stat -c %a "$(dirname "$a")"; } > "$RECORD"\n')
+(bindir / "apt-get").chmod(0o755)
+env = dict(os.environ, PATH="%s:%s" % (bindir, os.environ.get("PATH", "")), RECORD=str(record))
+
+
+def run_update(version):
+    if record.exists():
+        record.unlink()
+    before = updates.UPDATE_LOG.read_text() if updates.UPDATE_LOG.exists() else ""
+    rc = subprocess.run(["sh", "-c", updates._package_shell(version, "deb")], env=env, timeout=60).returncode
+    log = updates.UPDATE_LOG.read_text()[len(before):]
+    got = record.read_text().splitlines() if record.exists() else []
+    return rc, log, got
+
+
+rc, log, got = run_update(NEW)
+ok(rc == 0 and "checksum verified" in log, "a package that matches SHA256SUMS is installed: rc %s, %r" % (rc, log.strip()))
+ok(len(got) == 3 and got[1] == "exists" and got[2] == "700"
+   and _pl.Path(got[0]).name == updates.package_asset(NEW, "deb") and _pl.Path(got[0]).parent != _pl.Path("/tmp"),
+   "from a directory of its own, mode 700, under the name the release gave it: %s" % got)
+ok(got and not _pl.Path(got[0]).parent.exists(), "and that directory is gone afterwards")
+
+SUMS.write_text("%s  %s\n" % ("f" * 64, updates.package_asset(NEW, "deb")))
+rc, log, got = run_update(NEW)
+ok(rc != 0 and "does not match" in log and not got,
+   "a package that does not match is not handed to apt: rc %s, %r" % (rc, log.strip()))
+
+SUMS.unlink()
+rc, log, got = run_update(NEW)
+ok(rc != 0 and "cannot be verified" in log and not got,
+   "a release from the checksum file on that lacks it is refused: rc %s, %r" % (rc, log.strip()))
+rc, log, got = run_update(OLD)
+ok(rc == 0 and "predates the checksum file" in log and len(got) == 3,
+   "an older release without one is installed, and the log says it was not verified: %r" % log.strip())
+httpd.shutdown()
+updates.release_asset_url = real_asset_url
 client.put("/api/version/beta", headers=H, json={"beta": True})
 client.post("/api/version/check", headers=H)
 c = load_config()
@@ -181,6 +255,8 @@ _mark.unlink()
 sh = updates._update_shell("https://x/install.sh", "beta")
 ok("--update --yes --ref beta" in sh, "the updater is told the branch")
 ok("'" in updates._update_shell("https://x/install.sh", "a b"), "and a ref is quoted for the shell")
+ok("| bash" not in sh and "-o \"$d\"/install.sh" in sh and "bash \"$d\"/install.sh" in sh,
+   "the installer is downloaded to a file and run from it, not piped into bash")
 c = load_config()
 ok(updates._update_ref(None, c) == "main", "no branch asked and nothing on offer: main")
 ok(updates._update_ref("beta", c) == "beta", "the branch another node asked for is taken")

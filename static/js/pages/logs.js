@@ -27,8 +27,8 @@ export async function refreshLogs(view,note){
       "something to happen.")+'</div>';
   }else{
     view.innerHTML="<table><tbody>"+r.entries.map(e=>
-      "<tr class="+e.level+"><td class=t>"+logStamp(e.ts)+"</td>"+
-      "<td class='s src-"+e.source+"'>"+esc(e.source)+"</td>"+
+      '<tr class="'+esc(e.level)+'"><td class=t>'+logStamp(e.ts)+"</td>"+
+      '<td class="s src-'+esc(e.source)+'">'+esc(e.source)+"</td>"+
       "<td class=m>"+esc(e.text)+"</td></tr>").join("")+"</tbody></table>";
   }
   if(stick)view.scrollTop=view.scrollHeight;
@@ -40,7 +40,7 @@ export async function renderLogs(){
   const c=$("#content");c.innerHTML="";
   const card=document.createElement("div");card.className="card";
   card.innerHTML='<div class=hd><h2>'+t("Logs")+'</h2><div class=sp></div>'+
-    '<button class="btn ghost" id=logdl>'+t("Download")+'</button></div>';
+    '<button class="btn sm" id=logdl>'+t("Download")+'</button></div>';
 
   const bar=document.createElement("div");bar.className="logbar";
   bar.innerHTML=[["manager","Web UI"],["haproxy","HAProxy"],["acme","acme.sh"],

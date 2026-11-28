@@ -93,7 +93,7 @@ Multi-architecture images (**linux/amd64** and **linux/arm64**) are published to
 the GitHub Container Registry:
 
 ```bash
-docker pull ghcr.io/avandeputte/haproxy-manager:latest   # or :1.46 to pin
+docker pull ghcr.io/avandeputte/haproxy-manager:latest   # or :2.5.1 to pin
 docker compose up -d                                     # on every node
 ```
 

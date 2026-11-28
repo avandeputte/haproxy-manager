@@ -19,6 +19,13 @@ ARG ACME_VERSION=3.1.7
 # acme2certifier, for certificates from Active Directory Certificate Services
 # (ham/adcs.py pins the same release for nodes that install it on demand).
 ARG A2C_VERSION=0.47.1
+# What those two downloads must hash to. HAProxy comes from a signed apt
+# repository; these two are plain files from GitHub, so the build holds them
+# to the digest of the release it was pinned to -- a tarball that changed
+# under the same tag fails the build instead of going into the image. The
+# upstream check recomputes them when it moves a version.
+ARG ACME_SHA256=1b674f31aab8844e0ed770d4a5907a777d259f58b476c5f9334cc846832081e7
+ARG A2C_SHA256=a25fc6b2b4e6fa75a24cae5b8cfb0f2073166b12559eded28c68ec244d453328
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -85,6 +92,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         > /etc/dpkg/dpkg.cfg.d/zz-impacket \
     && curl -fsSL "https://github.com/grindsa/acme2certifier/releases/download/${A2C_VERSION}/acme2certifier_${A2C_VERSION}-1_all.deb" \
         -o /tmp/acme2certifier.deb \
+    && echo "${A2C_SHA256}  /tmp/acme2certifier.deb" | sha256sum -c - \
     && apt-get install -y --no-install-recommends /tmp/acme2certifier.deb python3-impacket \
     && rm -f /tmp/acme2certifier.deb \
     && rm -rf /var/lib/apt/lists/* \
@@ -102,6 +110,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # survive upgrades while the program files are refreshed on every start.
 RUN curl -fsSL "https://github.com/acmesh-official/acme.sh/archive/refs/tags/${ACME_VERSION}.tar.gz" \
         -o /tmp/acme.tar.gz \
+    && echo "${ACME_SHA256}  /tmp/acme.tar.gz" | sha256sum -c - \
     && mkdir -p /tmp/acme \
     && tar -xzf /tmp/acme.tar.gz -C /tmp/acme --strip-components=1 \
     && cd /tmp/acme \

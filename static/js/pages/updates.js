@@ -1,4 +1,4 @@
-import { $, api, btn, esc } from "../core.js";
+import { $, api, btn, esc, pageGuard } from "../core.js";
 
 import { t, tn } from "../i18n.js";
 import { fmtTime } from "../pages/certificates.js";
@@ -6,8 +6,11 @@ import { state } from "../state.js";
 
 /* ---- version and updates ---- */
 export async function renderUpdates(){
-  const c=$("#content");c.innerHTML="";
+  const c=$("#content");
+  const fresh=pageGuard();
   const v=await api("version");
+  if(!fresh())return;   // navigated away while loading
+  c.innerHTML="";
   const card=document.createElement("div");card.className="card";
   card.innerHTML='<div class=hd><h2>'+t("Version")+'</h2></div>';
   const bd=document.createElement("div");bd.className="bd";

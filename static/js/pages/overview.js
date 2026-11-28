@@ -25,8 +25,10 @@ export async function renderOverview(){
   grid.style.gridTemplateColumns="repeat("+grid.children.length+",1fr)";
   c.appendChild(grid);
 
-  c.appendChild(await clusterCard());
-  c.appendChild(await servicesCard());
+  /* two cards, each a round trip of its own: asked for together, shown in order */
+  const [cluster,services]=await Promise.all([clusterCard(),servicesCard()]);
+  c.appendChild(cluster);
+  c.appendChild(services);
 
   const cc=document.createElement("div");cc.className="card";
   cc.innerHTML='<div class=hd><h2>'+t("Certificates")+'</h2><div class=sp></div></div>';

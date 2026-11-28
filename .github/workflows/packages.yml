@@ -27,20 +27,28 @@ jobs:
       - name: Vendor acme.sh
         run: |
           set -eu
-          ACME=$(grep -oP 'ACME_VERSION=\K[0-9.]+' Dockerfile | head -1)
+          ACME=$(grep -oP '^ARG ACME_VERSION=\K[0-9.]+' Dockerfile | head -1)
+          SHA=$(grep -oP '^ARG ACME_SHA256=\K[0-9a-f]+' Dockerfile | head -1)
           curl -fsSL "https://github.com/acmesh-official/acme.sh/archive/refs/tags/${ACME}.tar.gz" -o /tmp/acme.tgz
+          # the same release, by digest, that goes into the image
+          echo "$SHA  /tmp/acme.tgz" | sha256sum -c -
           mkdir -p dist/acme.sh
           tar -xzf /tmp/acme.tgz -C dist/acme.sh --strip-components=1
           echo "vendored acme.sh $ACME"
 
+      # nfpm is pinned to a release: the packager decides what goes into the
+      # package and how its scripts run, so it changes when this file says so.
       - name: Build the packages
         run: |
           set -eu
           for fmt in deb rpm; do
             docker run --rm -v "$PWD":/w -w /w -e VERSION="${{ steps.version.outputs.value }}" \
-              goreleaser/nfpm:latest package -f packaging/nfpm.yaml -p "$fmt" -t dist/
+              goreleaser/nfpm:v2.49.0 package -f packaging/nfpm.yaml -p "$fmt" -t dist/
           done
-          ls -la dist/*.deb dist/*.rpm
+          # The digests the one-click update checks a downloaded package
+          # against, published beside the packages (ham/updates.py).
+          (cd dist && sha256sum ./*.deb ./*.rpm | sed 's|  \./|  |' > SHA256SUMS && cat SHA256SUMS)
+          ls -la dist/*.deb dist/*.rpm dist/SHA256SUMS
 
       # A package that does not contain exactly what the repository contains is
       # worse than a build failure: it installs, starts, and misbehaves quietly.
@@ -117,6 +125,7 @@ jobs:
           path: |
             dist/*.deb
             dist/*.rpm
+            dist/SHA256SUMS
           retention-days: 90
 
       # Only adds what is missing. Re-uploading assets that are already on the
@@ -136,7 +145,7 @@ jobs:
             exit 0
           fi
           have=$(gh release view "$TAG" --json assets --jq '.assets[].name' || true)
-          for f in dist/*.deb dist/*.rpm; do
+          for f in dist/*.deb dist/*.rpm dist/SHA256SUMS; do
             if printf '%s\n' "$have" | grep -qx "$(basename "$f")"; then
               echo "already on the release: $(basename "$f")"
             else

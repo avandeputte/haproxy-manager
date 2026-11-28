@@ -532,6 +532,8 @@ export async function servicesCard(){
         allow_src:s.allow_src,allow_lists:s.allow_lists,
         error_pages:s.error_pages,rules:s.rules,
         hsts:s.hsts,hsts_subdomains:s.hsts_subdomains,
+        /* as it stands, not the default: an edit must not turn it back on */
+        http_redirect:!!s.http_redirect,
         action:s.redirect?"redirect":"forward",
         redirect_to:(s.redirect||{}).to,redirect_code:(s.redirect||{}).code,
         redirect_keep_path:s.redirect?s.redirect.keep_path:true,
