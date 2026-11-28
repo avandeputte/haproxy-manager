@@ -46,16 +46,11 @@ def api_peers():
                          "is_own_key": bool(own) and auth.key_fingerprint(p.get("api_key")) == own}
                         for p in peers])
     body = request.get_json(force=True) or {}
-    url = (body.get("url") or "").strip().rstrip("/")
-    if not url:
-        return jsonify({"error": "the peer's URL is required, e.g. http://10.0.0.2:8080"}), 400
-    if "://" not in url:
-        url = "http://" + url
-    level, why = vrrp.check_node_url(url, vrrp.cluster_vips(cfg))   # resolves names: outside the lock
-    if level == "error":
+    url, why = _peer_url(body.get("url") or "", cfg)
+    if url is None:
         return jsonify({"error": why}), 400
     peer = {"id": str(uuid.uuid4()),
-            "name": (body.get("name") or "").strip() or (urlsplit(url).hostname or "peer"),
+            "name": (str(body.get("name") or "")).strip() or (urlsplit(url).hostname or "peer"),
             "url": url, "api_key": (body.get("api_key") or "").strip(),
             "verify_tls": bool(body.get("verify_tls")), "enabled": bool(body.get("enabled", True))}
     with _lock:
@@ -65,13 +60,44 @@ def api_peers():
     return jsonify({k: v for k, v in peer.items() if k != "api_key"})
 
 
+def _peer_url(value, cfg):
+    """A peer's URL as it is stored, or (None, why) when it cannot be one.
+
+    The same shape whether the entry is being made or changed: a bare
+    "10.0.0.2:8080" gets its scheme, so it does not sit in the list as an
+    entry every push to it calls unreachable for want of one.
+    """
+    if not isinstance(value, str):
+        return None, "the peer's URL must be text"
+    url = value.strip().rstrip("/")
+    if not url:
+        return None, "the peer's URL is required, e.g. http://10.0.0.2:8080"
+    if "://" not in url:
+        url = "http://" + url
+    level, why = vrrp.check_node_url(url, vrrp.cluster_vips(cfg))   # resolves names: outside the lock
+    if level == "error":
+        return None, why
+    return url, ""
+
+
 @app.route("/api/peers/<pid>", methods=["PUT", "DELETE"])
 def api_peer_item(pid):
+    body = request.get_json(force=True, silent=True) or {}
+    url = None
+    if request.method == "PUT":
+        if not isinstance(body, dict):
+            return jsonify({"error": "the request body must be an object"}), 400
+        if "url" in body:
+            url, why = _peer_url(body["url"], load_config())
+            if url is None:
+                return jsonify({"error": why}), 400
+        if "name" in body and not isinstance(body["name"], str):
+            return jsonify({"error": "the peer's name must be text"}), 400
     with _lock:
-        return _peer_item_locked(pid)
+        return _peer_item_locked(pid, body, url)
 
 
-def _peer_item_locked(pid):
+def _peer_item_locked(pid, body, url):
     cfg = load_config()
     peers = cfg["local"]["sync"].setdefault("peers", [])
     for i, p in enumerate(peers):
@@ -81,13 +107,15 @@ def _peer_item_locked(pid):
             peers.pop(i)
             save_config(cfg)
             return jsonify({"ok": True})
-        body = request.get_json(force=True) or {}
-        for key in ("name", "url", "verify_tls", "enabled"):
+        if "name" in body:
+            p["name"] = body["name"].strip() or p.get("name") or urlsplit(url or p.get("url") or "").hostname or "peer"
+        if url is not None:
+            p["url"] = url
+        for key in ("verify_tls", "enabled"):
             if key in body:
-                p[key] = body[key]
-        if (body.get("api_key") or "").strip():   # blank means "keep the stored key"
+                p[key] = bool(body[key])
+        if isinstance(body.get("api_key"), str) and body["api_key"].strip():   # blank means "keep the stored key"
             p["api_key"] = body["api_key"].strip()
-        p["url"] = (p.get("url") or "").rstrip("/")
         save_config(cfg)
         return jsonify({k: v for k, v in p.items() if k != "api_key"})
     abort(404)
