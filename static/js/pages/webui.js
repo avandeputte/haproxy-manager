@@ -1,4 +1,4 @@
-import { $, api, btn, esc, fieldRow, readForm } from "../core.js";
+import { $, api, btn, esc, fieldRow, pageGuard, readForm } from "../core.js";
 import { t, tn } from "../i18n.js";
 import { refreshStatus } from "../shell.js";
 import { CERT_MODE_LABEL } from "../pages/services.js";
@@ -31,8 +31,11 @@ export function blurb(cur){
 }
 
 export async function renderWebui(){
-  const c=$("#content");c.innerHTML="";
+  const c=$("#content");
+  const fresh=pageGuard();
   const cur=await api("webui");
+  if(!fresh())return;   // navigated away while loading
+  c.innerHTML="";
   const card=document.createElement("div");card.className="card";
   card.innerHTML='<div class=hd><h2>'+t("Web UI access")+'</h2></div>';
   const bd=document.createElement("div");bd.className="bd";
